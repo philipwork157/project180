@@ -1,0 +1,80 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "project180-app",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "project180-db",
+      // Replace with the id printed by: bunx wrangler d1 create project180-db
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../packages/db/drizzle"
+    }
+  ],
+  // Uploaded photos (exercise photos from the admin). Create with: bunx wrangler r2 bucket create project180-media
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "project180-media" }],
+  // Served on your own domain (project180.co.za must be a zone in this Cloudflare account).
+  "routes": [
+    {
+      "pattern": "project180.co.za",
+      "custom_domain": true
+    }
+  ],
+  "workers_dev": false,
+  "vars": {
+    // Your live URL. Local dev overrides it in .dev.vars.
+    "BETTER_AUTH_URL": "https://project180.co.za",
+    "APP_URL": "https://project180.co.za",
+    // Email (Amazon SES). Set the key pair as secrets:
+    //   bunx wrangler secret put AWS_ACCESS_KEY_ID  /  AWS_SECRET_ACCESS_KEY
+    "AWS_REGION": "af-south-1",
+    "EMAIL_FROM": "Project 180 <hello@project180.co.za>",
+    // Signed out after this many days without use (renewed while in use).
+    "SESSION_DAYS": "30"
+  },
+  "observability": {
+    "enabled": true
+  },
+  // Cloudflare dev environment: its own Worker and its own database, so testing
+  // never touches real data. Build with `vite build --mode dev` (.env.dev sets
+  // CLOUDFLARE_ENV=dev), then `wrangler deploy`. Bindings aren't inherited, so
+  // the database and vars are repeated here.
+  "env": {
+    "dev": {
+      "name": "project180-app-dev",
+      "routes": [
+        {
+          "pattern": "dev.project180.co.za",
+          "custom_domain": true
+        }
+      ],
+      "workers_dev": false,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "project180-db-dev",
+          // The dev database (bunx wrangler d1 create project180-db-dev)
+          "database_id": "26edfaf9-2445-449e-91af-0e8f860977f1",
+          "migrations_dir": "../../packages/db/drizzle"
+        }
+      ],
+      // Uploaded photos (exercise photos from the admin). Create with: bunx wrangler r2 bucket create project180-media-dev
+      "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "project180-media-dev" }],
+      "vars": {
+        "BETTER_AUTH_URL": "https://dev.project180.co.za",
+        "APP_URL": "https://dev.project180.co.za",
+        "AWS_REGION": "af-south-1",
+        "EMAIL_FROM": "Project 180 Dev <hello@project180.co.za>",
+        "SESSION_DAYS": "30",
+        // Every email from dev goes to the developer, never to real people.
+        "EMAIL_REDIRECT_TO": "philipwork157@gmail.com"
+      }
+    }
+  }
+}

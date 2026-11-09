@@ -1,0 +1,20 @@
+@import "tailwindcss";
+@import "@project180/ui/tokens.css";
+
+/* Tailwind scans these for class names. */
+@source "../../../packages/ui/src";
+
+@layer base {
+  body {
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+  }
+}
+
+/* Space for the iPhone home indicator under the tab bar and bottom actions. */
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+}
+@utility pt-safe {
+  padding-top: max(env(safe-area-inset-top), 1rem);
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@project180/client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@project180/shared": "workspace:*",
+    "@tanstack/react-query": "^5.107.1",
+    "better-auth": "^1.7.18"
+  },
+  "devDependencies": {
+    "@project180/config": "workspace:*",
+    "typescript": "^7.0.2"
+  }
+}

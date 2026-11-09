@@ -1,0 +1,41 @@
+import type { Db } from '@project180/db'
+import type { Me } from '@project180/shared'
+import type { Auth } from './auth'
+
+/** Worker bindings: see apps/web/wrangler.jsonc and .dev.vars. */
+export interface Bindings {
+  DB: D1Database
+  BETTER_AUTH_SECRET: string
+  BETTER_AUTH_URL: string
+  /** Extra origins allowed to sign in, comma-separated (local admin dev server). */
+  TRUSTED_ORIGINS?: string
+  /** The phone app's address, for links in emails. */
+  APP_URL?: string
+  /** Amazon SES. Without the key pair, emails are written to the log instead of sent. */
+  AWS_REGION?: string
+  AWS_ACCESS_KEY_ID?: string
+  AWS_SECRET_ACCESS_KEY?: string
+  /** Sender, e.g. "Project 180 <hello@project180.co.za>" (a verified SES identity). */
+  EMAIL_FROM?: string
+  /** Dev and test: every email goes here instead of to the real person. */
+  EMAIL_REDIRECT_TO?: string
+  /** YouTube Data API v3 key, for "how to" video search inside the app. Optional. */
+  YOUTUBE_API_KEY?: string
+  /** Uploaded photos (R2). Without it, uploading answers 503. */
+  MEDIA?: R2Bucket
+  /** Days without use before a sign-in expires (renewed while in use). App 30, admin 7. */
+  SESSION_DAYS?: string
+}
+
+export interface Variables {
+  auth: Auth
+  db: Db
+  user: Me
+  /** The current Better Auth session's id. */
+  sessionId: number
+}
+
+export interface AppEnv {
+  Bindings: Bindings
+  Variables: Variables
+}

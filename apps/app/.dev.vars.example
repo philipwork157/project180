@@ -1,0 +1,15 @@
+# Copy to .dev.vars for local dev. Generate a secret with: openssl rand -base64 32
+BETTER_AUTH_SECRET=replace-me-with-a-long-random-string
+BETTER_AUTH_URL=http://localhost:5173
+# The admin dev server signs in through this app locally
+TRUSTED_ORIGINS=http://localhost:5174
+# Links in emails point here
+APP_URL=http://localhost:5173
+# Email: without AWS keys, emails are only printed in the terminal.
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_REGION=af-south-1
+# EMAIL_FROM=Project 180 Dev <hello@project180.co.za>
+EMAIL_REDIRECT_TO=philipwork157@gmail.com
+# How-to video search inside the app (YouTube Data API v3). Without it, the app opens YouTube instead.
+# YOUTUBE_API_KEY=

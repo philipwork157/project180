@@ -1,0 +1,8 @@
+{
+  "extends": "@project180/config/tsconfig.base.json",
+  "compilerOptions": {
+    // URL and friends exist in every runtime we target (browser and Workers).
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "project180",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev --filter=@project180/app --filter=@project180/admin",
+    "dev:app": "turbo run dev --filter=@project180/app",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "e2e": "turbo run e2e --filter=@project180/app",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check": "biome check . && turbo run typecheck test",
+    "db:generate": "bun run --filter @project180/db generate",
+    "db:migrate": "bun run --filter @project180/app db:migrate:local",
+    "admin:create": "bun packages/api/scripts/create-admin.ts",
+    "admin:create:dev": "bun packages/api/scripts/create-admin.ts --dev",
+    "admin:create:live": "bun packages/api/scripts/create-admin.ts --live",
+    "db:seed": "bun packages/db/scripts/seed-library.ts",
+    "db:seed:remote": "bun packages/db/scripts/seed-library.ts --remote",
+    "deploy": "turbo run deploy --filter=@project180/app --filter=@project180/admin",
+    "deploy:dev": "turbo run deploy:dev --filter=@project180/app --filter=@project180/admin",
+    "db:migrate:dev": "bun run --filter @project180/app db:migrate:dev",
+    "db:seed:dev": "bun packages/db/scripts/seed-library.ts --env dev",
+    "prepare": "lefthook install || true"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
+    "lefthook": "^2.2.2",
+    "turbo": "^2.11.10",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+# Runs before every commit. Install hooks with: bun install (runs `lefthook install`).
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{js,ts,tsx,json,jsonc,css}"
+      run: bunx biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+    typecheck:
+      run: bun run typecheck

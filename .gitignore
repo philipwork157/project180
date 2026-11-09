@@ -1,0 +1,13 @@
+node_modules
+dist
+.turbo
+.wrangler
+.dev.vars
+*.local
+.DS_Store
+coverage
+test-results
+playwright-report
+routeTree.gen.ts
+packages/db/seed/library.sql
+.vitest

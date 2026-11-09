@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794162214268,
+      "tag": "0000_overrated_phantom_reporter",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794229200000,
+      "tag": "0001_coaches_copies_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794235800000,
+      "tag": "0002_profiles_sections_endurance",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794242000000,
+      "tag": "0003_first_password_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794250000000,
+      "tag": "0004_staff_only_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794256000000,
+      "tag": "0005_rep_schemes_keywords",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794262000000,
+      "tag": "0006_pelvic_floor_group",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794268000000,
+      "tag": "0007_video_searches",
+      "breakpoints": true
+    }
+  ]
+}

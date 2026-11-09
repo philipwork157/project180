@@ -1,0 +1,15 @@
+// Test-only Worker config for @cloudflare/vitest-plugin.
+{
+  "name": "project180-api-test",
+  "main": "./test/worker.ts",
+  "compatibility_date": "2025-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "project180-test", "database_id": "local-test" }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "project180-media-test" }],
+  "vars": {
+    "BETTER_AUTH_SECRET": "test-secret-at-least-32-characters-long",
+    "BETTER_AUTH_URL": "http://localhost"
+  }
+}

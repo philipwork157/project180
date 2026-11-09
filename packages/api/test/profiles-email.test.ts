@@ -1,0 +1,190 @@
+import { env } from 'cloudflare:test'
+import { describe, expect, it } from 'vitest'
+import { emailMode, sendEmail, sigV4Key } from '../src/email'
+import { ADMIN, call, createAdmin, signIn } from './helpers'
+
+type Json = Record<string, any>
+
+const SAM = { name: 'Sam Runner', email: 'sam@example.com', password: 'sam-password-1' }
+
+async function owner() {
+  await createAdmin()
+  return signIn(ADMIN.email, ADMIN.password)
+}
+
+describe('new client wizard', () => {
+  it('creates the account, profile, first weigh-in and welcome email in one go', async () => {
+    const cookie = await owner()
+    const res = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie,
+      body: {
+        ...SAM,
+        currentWeightKg: 82.5,
+        sendWelcome: true,
+        profile: {
+          phone: '082 555 0101',
+          birthDate: '1990-04-12',
+          heightCm: 181,
+          goalWeightKg: 76,
+          mainGoal: 'running',
+          focusAreas: ['running', 'mobility'],
+          places: ['outdoors', 'gym'],
+          experience: 'intermediate',
+          daysPerWeek: 4,
+          targetEvent: 'Half marathon',
+          targetEventDate: '2027-03-15',
+          notes: 'Old left knee niggle',
+        },
+      },
+    })
+    expect(res.status).toBe(201)
+    // No AWS keys in tests: the email is logged, not sent.
+    expect(res.data.email).toMatchObject({ status: 'logged', to: SAM.email })
+
+    const profile = await call<Json>(`/admin/users/${res.data.user.id}/profile`, { cookie })
+    expect(profile.data.profile).toMatchObject({
+      heightCm: 181,
+      mainGoal: 'running',
+      // The main goal isn't repeated as an extra focus area.
+      focusAreas: ['mobility'],
+      targetEvent: 'Half marathon',
+      latestWeightKg: 82.5,
+    })
+  })
+
+  it('lets clients see and update their own goals', async () => {
+    const cookie = await owner()
+    await call('/admin/users', { method: 'POST', cookie, body: SAM })
+    const sam = await signIn(SAM.email, SAM.password)
+    const put = await call<Json>('/me/profile', {
+      method: 'PUT',
+      cookie: sam,
+      body: { mainGoal: 'triathlon', daysPerWeek: 5, places: ['outdoors'] },
+    })
+    expect(put.status).toBe(200)
+    expect(put.data.profile).toMatchObject({ mainGoal: 'triathlon', daysPerWeek: 5 })
+  })
+
+  it("keeps a client's profile away from other coaches", async () => {
+    const cookie = await owner()
+    await call('/admin/users', {
+      method: 'POST',
+      cookie,
+      body: {
+        name: 'Coach Kim',
+        email: 'kim@example.com',
+        password: 'coach-password-1',
+        role: 'admin',
+      },
+    })
+    const created = await call<Json>('/admin/users', { method: 'POST', cookie, body: SAM })
+    const kim = await signIn('kim@example.com', 'coach-password-1')
+    expect(
+      (await call(`/admin/users/${created.data.user.id}/profile`, { cookie: kim })).status,
+    ).toBe(404)
+  })
+})
+
+describe('email', () => {
+  const message = { to: 'client@example.com', subject: 'Hi', html: '<p>Hi</p>', text: 'Hi' }
+
+  it('in dev, sends everything to the developer address instead, marked with who it was for', async () => {
+    const result = await sendEmail(
+      { ...env, EMAIL_REDIRECT_TO: 'philipwork157@gmail.com' },
+      message,
+    )
+    expect(result).toEqual({ status: 'logged', to: 'philipwork157@gmail.com' })
+  })
+
+  it('signs SES requests with AWS Signature V4 (AWS published example key)', async () => {
+    const key = await sigV4Key(
+      'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY',
+      '20120215',
+      'us-east-1',
+      'iam',
+    )
+    const hex = [...new Uint8Array(key)].map((b) => b.toString(16).padStart(2, '0')).join('')
+    expect(hex).toBe('f4780e2d9f65fa895f9c67b32ce1baf0b0d8a43505a000a1a9e090d414db404d')
+  })
+
+  it('on a local or dev site without a redirect, never emails real people, even with AWS keys', async () => {
+    const keys = {
+      AWS_ACCESS_KEY_ID: 'x',
+      AWS_SECRET_ACCESS_KEY: 'y',
+      EMAIL_FROM: 'Project 180 <a@b.co>',
+    }
+    const result = await sendEmail({ ...env, ...keys, EMAIL_REDIRECT_TO: undefined }, message)
+    expect(result).toEqual({ status: 'logged', to: 'client@example.com' })
+    expect(emailMode({ ...env, ...keys, EMAIL_REDIRECT_TO: undefined }).mode).toBe('blocked')
+    expect(emailMode({ ...env, ...keys, EMAIL_REDIRECT_TO: 'dev@example.com' })).toMatchObject({
+      mode: 'redirect',
+      redirectTo: 'dev@example.com',
+    })
+    expect(
+      emailMode({
+        ...env,
+        ...keys,
+        BETTER_AUTH_URL: 'https://project180.co.za',
+        EMAIL_REDIRECT_TO: undefined,
+      }).mode,
+    ).toBe('live')
+  })
+
+  it('without AWS keys, only logs (never throws)', async () => {
+    expect(await sendEmail(env, message)).toEqual({ status: 'logged', to: 'client@example.com' })
+  })
+})
+
+describe('workout parts and endurance targets', () => {
+  it('keeps warm-up / cool-down and distance, pace and zone through to the session', async () => {
+    const cookie = await owner()
+    const mk = async (name: string, body: Json) =>
+      (await call<Json>('/exercises', { method: 'POST', cookie, body: { name, ...body } })).data
+        .exercise
+    const jog = await mk('Easy jog', {
+      muscleGroup: 'cardio',
+      category: 'cardio',
+      trackingType: 'distance_time',
+    })
+    const stretch = await mk('Hamstring stretch', {
+      muscleGroup: 'legs',
+      category: 'mobility',
+      trackingType: 'time',
+    })
+    expect(jog.category).toBe('cardio')
+    const w = await call<Json>('/workouts', {
+      method: 'POST',
+      cookie,
+      body: {
+        name: '5 km easy',
+        exercises: [
+          {
+            exerciseId: jog.id,
+            targetSets: 1,
+            section: 'main',
+            targetDistanceM: 5000,
+            targetPaceSeconds: 360,
+            targetHrZone: 2,
+          },
+          { exerciseId: stretch.id, targetSets: 2, targetSeconds: 45, section: 'cool_down' },
+        ],
+      },
+    })
+    expect(w.status).toBe(201)
+    const s = await call<Json>('/sessions', {
+      method: 'POST',
+      cookie,
+      body: { clientUuid: crypto.randomUUID(), workoutId: w.data.workout.id },
+    })
+    expect(s.data.session.exercises).toEqual([
+      expect.objectContaining({
+        section: 'main',
+        targetDistanceM: 5000,
+        targetPaceSeconds: 360,
+        targetHrZone: 2,
+      }),
+      expect.objectContaining({ section: 'cool_down', targetSeconds: 45 }),
+    ])
+  })
+})

@@ -1,0 +1,235 @@
+/*
+ * Project 180 design tokens — mirrors the Project 180 design system.
+ * Import after `@import "tailwindcss"`. Utilities: bg-surface, text-ink,
+ * bg-brand, text-on-brand, bg-lime, rounded-lg, shadow-card, font-display …
+ */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Brand core: Charcoal #202321 · Lime #B6E63B · Warm off-white #F5F3ED · Muted grey #777C78.
+ * Lime is an accent (done, progress, the logo arc, the main action in dark mode), never a page background.
+ * Supporting colours are muted and only used where colour carries meaning:
+ * clay = effort & volume · steel = time & rest · sand = feeling, weigh-ins & body weight · mauve = second series & glutes.
+ */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f3ed;
+  --surface: #fcfbf8;
+  --surface-raised: #ece9e1;
+  --border: #e0ddd3;
+  --border-strong: #777c78;
+  --ink: #202321;
+  --ink-muted: #5b605c;
+
+  /* Light mode: charcoal leads, lime details. */
+  --brand: #202321;
+  --brand-pressed: #363a37;
+  --on-brand: #f5f3ed;
+  --brand-soft: #e8f3c8;
+  --brand-text: #4a6110;
+
+  --lime: #b6e63b;
+  --on-lime: #202321;
+  --lime-text: #4a6110;
+  --clay: #df7c5d;
+  --on-clay: #202321;
+  --clay-text: #a3432a;
+  --steel: #7aa2c2;
+  --on-steel: #202321;
+  --steel-text: #376287;
+  --sand: #dcb46a;
+  --on-sand: #202321;
+  --sand-text: #82601e;
+  --mauve: #cf93ab;
+  --on-mauve: #202321;
+  --mauve-text: #934766;
+
+  --danger: #b5322a;
+  --on-danger: #fcfbf8;
+  --success: #3d7a1a;
+  --scrim: rgba(32, 35, 33, 0.5);
+
+  --shadow-card-value: 0 1px 2px rgba(32, 35, 33, 0.05), 0 6px 20px rgba(32, 35, 33, 0.05);
+  --shadow-float-value: 0 16px 48px rgba(32, 35, 33, 0.16);
+  --shadow-brand-value: 0 6px 18px rgba(32, 35, 33, 0.18);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161817;
+  --surface: #202321;
+  --surface-raised: #2b2f2c;
+  --border: #333835;
+  --border-strong: #777c78;
+  --ink: #f5f3ed;
+  --ink-muted: #a6aba7;
+
+  /* Dark mode: lime leads on charcoal. */
+  --brand: #b6e63b;
+  --brand-pressed: #a2d22a;
+  --on-brand: #202321;
+  --brand-soft: #2f3a1d;
+  --brand-text: #c4ee5a;
+
+  --lime-text: #c4ee5a;
+  --clay-text: #f0a088;
+  --steel-text: #a3c4de;
+  --sand-text: #e9cb8f;
+  --mauve-text: #e3b0c4;
+
+  --danger: #f07a6e;
+  --on-danger: #202321;
+  --success: #9bd65c;
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  --shadow-card-value: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-float-value: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --shadow-brand-value: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-brand: var(--brand);
+  --color-brand-pressed: var(--brand-pressed);
+  --color-on-brand: var(--on-brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-text: var(--brand-text);
+  --color-lime: var(--lime);
+  --color-on-lime: var(--on-lime);
+  --color-lime-text: var(--lime-text);
+  --color-clay: var(--clay);
+  --color-on-clay: var(--on-clay);
+  --color-clay-text: var(--clay-text);
+  --color-steel: var(--steel);
+  --color-on-steel: var(--on-steel);
+  --color-steel-text: var(--steel-text);
+  --color-sand: var(--sand);
+  --color-on-sand: var(--on-sand);
+  --color-sand-text: var(--sand-text);
+  --color-mauve: var(--mauve);
+  --color-on-mauve: var(--on-mauve);
+  --color-mauve-text: var(--mauve-text);
+  --color-danger: var(--danger);
+  --color-on-danger: var(--on-danger);
+  --color-success: var(--success);
+  --color-scrim: var(--scrim);
+
+  --shadow-card: var(--shadow-card-value);
+  --shadow-float: var(--shadow-float-value);
+  --shadow-brand: var(--shadow-brand-value);
+}
+
+@theme {
+  --font-display: "Archivo", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+
+  --animate-pop: pop 420ms cubic-bezier(0.2, 1.6, 0.4, 1);
+  --animate-rise: rise 400ms ease-out both;
+
+  @keyframes pop {
+    0% { transform: scale(0.6); }
+    60% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* Follow the phone's setting unless the user picked a theme in Profile. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #161817;
+    --surface: #202321;
+    --surface-raised: #2b2f2c;
+    --border: #333835;
+    --border-strong: #777c78;
+    --ink: #f5f3ed;
+    --ink-muted: #a6aba7;
+
+    /* Dark mode: lime leads on charcoal. */
+    --brand: #b6e63b;
+    --brand-pressed: #a2d22a;
+    --on-brand: #202321;
+    --brand-soft: #2f3a1d;
+    --brand-text: #c4ee5a;
+
+    --lime-text: #c4ee5a;
+    --clay-text: #f0a088;
+    --steel-text: #a3c4de;
+    --sand-text: #e9cb8f;
+    --mauve-text: #e3b0c4;
+
+    --danger: #f07a6e;
+    --on-danger: #202321;
+    --success: #9bd65c;
+    --scrim: rgba(0, 0, 0, 0.62);
+
+    --shadow-card-value: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-float-value: 0 16px 48px rgba(0, 0, 0, 0.55);
+    --shadow-brand-value: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :focus-visible {
+    outline: 3px solid var(--brand);
+    outline-offset: 2px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Big numbers lean forward, like the 180 in the logo. */
+  .metric {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Theme switch: one cross-fade of the whole page (see packages/client/src/theme.ts). */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

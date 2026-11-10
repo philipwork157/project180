@@ -127,7 +127,8 @@ function ProgressPage() {
                         <span className="tabular block font-bold text-[15px] text-ink">
                           {formatNumber(r.volumeKg)} kg
                         </span>
-                        {formatDuration(r.durationSeconds ?? 0)} · {r.setCount} sets
+                        {formatDuration(r.durationSeconds ?? 0)} · {r.setCount}{' '}
+                        {r.setCount === 1 ? 'set' : 'sets'}
                       </span>
                       <ChevronRight className="size-5 shrink-0 text-ink-muted" aria-hidden />
                     </button>
@@ -155,10 +156,11 @@ function ProgressPage() {
 
 function WeeklyVolume({ weeks }: { weeks: MyStats['weeks'] }) {
   const max = Math.max(1, ...weeks.map((w) => w.volumeKg))
-  const label = (d: string) =>
-    new Intl.DateTimeFormat('en-ZA', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(
-      new Date(`${d}T00:00:00Z`),
-    )
+  // Day on top; the month underneath only where it changes, so every label is the same height.
+  const monthOf = (d: string) =>
+    new Intl.DateTimeFormat('en-ZA', { month: 'short', timeZone: 'UTC' })
+      .format(new Date(`${d}T00:00:00Z`))
+      .slice(0, 3)
   return (
     <section className="rounded-lg bg-surface p-4 shadow-card">
       <div className="flex items-baseline justify-between">
@@ -186,9 +188,17 @@ function WeeklyVolume({ weeks }: { weeks: MyStats['weeks'] }) {
                 title={`${formatNumber(w.volumeKg)} kg, ${w.workouts} workouts`}
               />
               <span
-                className={cn('font-bold text-[10px]', current ? 'text-ink' : 'text-ink-muted')}
+                className={cn(
+                  'flex flex-col items-center whitespace-nowrap font-bold text-[10px] leading-3',
+                  current ? 'text-ink' : 'text-ink-muted',
+                )}
               >
-                {label(w.weekStart)}
+                <span className="tabular">{Number(w.weekStart.slice(8))}</span>
+                <span>
+                  {i === 0 || monthOf(w.weekStart) !== monthOf(weeks[i - 1]?.weekStart ?? '')
+                    ? monthOf(w.weekStart)
+                    : '\u00a0'}
+                </span>
               </span>
             </div>
           )

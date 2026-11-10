@@ -103,7 +103,7 @@ export function SessionDetails({
                   <span className="min-w-0 flex-1 truncate font-bold text-[16px]">{g.name}</span>
                   {g.muscle && (
                     <Chip tone={MUSCLE_GROUP_TONE[g.muscle]} className="h-6 text-[12px]">
-                      {g.sets.length} sets
+                      {g.sets.length} {g.sets.length === 1 ? 'set' : 'sets'}
                     </Chip>
                   )}
                 </div>

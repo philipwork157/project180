@@ -575,7 +575,8 @@ function PastPrograms({
                             {s.workoutName ?? 'Workout'}
                           </span>
                           <span className="tabular text-ink-muted">
-                            {s.setCount} sets · {formatNumber(Math.round(s.volumeKg))} kg
+                            {s.setCount} {s.setCount === 1 ? 'set' : 'sets'} ·{' '}
+                            {formatNumber(Math.round(s.volumeKg))} kg
                             {s.feeling ? ` · felt ${s.feeling}/5` : ''}
                           </span>
                         </li>

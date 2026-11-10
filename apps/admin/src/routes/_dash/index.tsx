@@ -56,7 +56,7 @@ function Overview() {
       />
 
       {!o ? (
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="h-32 animate-pulse rounded-lg bg-surface shadow-card" />
           ))}
@@ -65,7 +65,10 @@ function Overview() {
         <div className="flex flex-col gap-5">
           {o.clients.total === 0 && <GettingStarted library={o.library} />}
 
-          <section aria-label="This week" className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          <section
+            aria-label="This week"
+            className="grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4"
+          >
             <StatCard
               tone="brand"
               label="On plan"
@@ -109,7 +112,7 @@ function Overview() {
             />
           </section>
 
-          <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             <WorkoutsChart
               daily={o.daily}
               volumeKg={o.week.volumeKg}
@@ -118,7 +121,7 @@ function Overview() {
             <Attention items={o.attention} />
           </div>
 
-          <div className="grid items-start gap-5 xl:grid-cols-2">
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
             <RecentWorkouts items={o.recent} />
             <WhoIsOnWhat />
           </div>

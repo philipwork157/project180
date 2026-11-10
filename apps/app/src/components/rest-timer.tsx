@@ -54,13 +54,13 @@ export function RestTimer({
       exit={{ y: 120, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 360, damping: 30 }}
       className={cn(
-        'fixed inset-x-3 bottom-6 z-30 flex items-center gap-4 rounded-xl p-3 pr-4 shadow-float md:inset-x-8 lg:inset-x-12',
+        'fixed inset-x-3 bottom-[max(1rem,env(safe-area-inset-bottom))] z-30 flex items-center gap-3 rounded-xl p-2.5 pr-3 shadow-float sm:gap-4 sm:p-3 sm:pr-4 md:inset-x-8 lg:inset-x-12',
         finished
           ? 'bg-lime text-on-lime'
           : 'bg-[#202321] text-[#f5f3ed] ring-1 ring-[#f5f3ed]/[0.06]',
       )}
     >
-      <span className="relative grid size-16 shrink-0 place-items-center">
+      <span className="relative grid size-14 shrink-0 place-items-center sm:size-16">
         <svg viewBox="0 0 64 64" className="-rotate-90 absolute inset-0" aria-hidden>
           <circle
             cx="32"
@@ -85,22 +85,30 @@ export function RestTimer({
             )}
           />
         </svg>
-        <span className="metric text-[16px]">{formatDuration(left)}</span>
+        <span className="metric text-[15px] sm:text-[16px]">{formatDuration(left)}</span>
       </span>
-      <span className="flex-1">
-        <span className="block font-extrabold text-[11px] uppercase tracking-[0.08em] opacity-70">
+      <span className="min-w-0 flex-1">
+        <span className="block font-extrabold text-[11px] uppercase tracking-[0.08em] opacity-70 max-sm:hidden">
           {finished ? 'Rest over' : 'Resting'}
         </span>
-        <span className="font-display font-extrabold text-[20px]">
-          {finished ? 'Next set, go!' : 'Breathe. Sip water.'}
+        {/* Phones: one short line, so the buttons keep their room. */}
+        <span className="block truncate font-display font-extrabold text-[18px] leading-6 sm:text-[20px]">
+          {finished ? (
+            'Next set, go!'
+          ) : (
+            <>
+              <span className="sm:hidden">Resting</span>
+              <span className="max-sm:hidden">Breathe. Sip water.</span>
+            </>
+          )}
         </span>
       </span>
       {!finished && (
-        <span className="flex gap-1">
+        <span className="flex shrink-0 items-center gap-0.5 sm:gap-1">
           <Button
             size="sm"
             variant="ghost"
-            className="text-current"
+            className="px-2.5 text-current sm:px-3"
             onClick={() => onAdjust(-15)}
             aria-label="15 seconds less"
           >
@@ -109,7 +117,7 @@ export function RestTimer({
           <Button
             size="sm"
             variant="ghost"
-            className="text-current"
+            className="px-2.5 text-current sm:px-3"
             onClick={() => onAdjust(15)}
             aria-label="15 seconds more"
           >

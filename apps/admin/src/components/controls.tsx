@@ -15,7 +15,11 @@ export function Segmented<T extends string>({
   label: string
 }) {
   return (
-    <fieldset aria-label={label} className="inline-flex gap-1 rounded-md bg-surface-raised p-1">
+    // Phones: scrolls sideways rather than running off the screen.
+    <fieldset
+      aria-label={label}
+      className="no-scrollbar inline-flex min-w-0 max-w-full gap-1 overflow-x-auto rounded-md bg-surface-raised p-1"
+    >
       {options.map((o) => (
         <button
           key={o.value}
@@ -23,7 +27,7 @@ export function Segmented<T extends string>({
           aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'flex h-9 items-center gap-2 rounded-sm px-4 font-bold text-[14px] transition',
+            'flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-sm px-3 font-bold text-[14px] transition sm:px-4',
             value === o.value ? 'bg-surface text-ink shadow-card' : 'text-ink-muted hover:text-ink',
           )}
         >

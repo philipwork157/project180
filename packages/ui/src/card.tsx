@@ -52,7 +52,8 @@ export function StatCard({
           !filled && 'text-ink-muted',
         )}
       >
-        <span aria-hidden className={cn('size-2 rounded-full', t.dot)} />
+        {/* Filled cards have no dot: it would be lime on lime and just leave a gap. */}
+        {!filled && <span aria-hidden className={cn('size-2 rounded-full', t.dot)} />}
         {label}
       </span>
       <span className="flex items-baseline gap-1">

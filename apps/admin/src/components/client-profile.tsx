@@ -246,7 +246,7 @@ export function GoalFields({
           />
         )}
       </Field>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
         <Field label="Training for an event?" hint="Optional, e.g. Two Oceans half marathon">
           {(id) => (
             <Input
@@ -340,14 +340,15 @@ export function ProfileSummary({ userId, name }: { userId: number; name: string 
               {p.focusAreas.map((g) => (
                 <Chip key={g}>{GOAL_LABELS[g]}</Chip>
               ))}
-              {p.experience && (
-                <span className="font-semibold text-[13px] text-ink-muted">
-                  {EXPERIENCE_LABELS[p.experience]}
-                </span>
-              )}
-              {p.daysPerWeek && (
-                <span className="font-semibold text-[13px] text-ink-muted">
-                  · {p.daysPerWeek} days a week
+              {(p.experience || p.daysPerWeek) && (
+                // One line of its own, so it never breaks oddly between the chips.
+                <span className="w-full font-semibold text-[13px] text-ink-muted">
+                  {[
+                    p.experience && EXPERIENCE_LABELS[p.experience],
+                    p.daysPerWeek && `${p.daysPerWeek} days a week`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </span>
               )}
             </div>
@@ -357,9 +358,11 @@ export function ProfileSummary({ userId, name }: { userId: number; name: string 
           variant="ghost"
           size="sm"
           icon={<Pencil className="size-4" aria-hidden />}
+          className="-my-1 shrink-0 max-sm:px-2"
           onClick={() => setEditing(true)}
         >
-          {empty ? 'Add' : 'Edit'}
+          {/* Phones: just the pencil, so the goals get the width. */}
+          <span className="max-sm:sr-only">{empty ? 'Add' : 'Edit'}</span>
         </Button>
       </div>
       {facts.length > 0 && (

@@ -467,7 +467,7 @@ describe('logging a workout', () => {
       body: { clientUuid: crypto.randomUUID(), workoutId: workout.id },
     })
     expect(b.data.session.previous[squat]).toEqual([
-      { setNumber: 1, weightKg: 50, reps: 6, durationSeconds: null },
+      { setNumber: 1, weightKg: 50, reps: 6, durationSeconds: null, distanceM: null },
     ])
   })
 

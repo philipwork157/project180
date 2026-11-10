@@ -169,7 +169,9 @@ function TodayCard({
   onStart: (day: PlanDay) => void
 }) {
   const workout = day?.workoutId ? plan.workouts[day.workoutId] : undefined
-  const shell = 'relative overflow-hidden rounded-xl p-6'
+  // clip-path: the animated arc must never leak past the rounded card (a Chrome/Safari quirk).
+  const shell =
+    'relative overflow-hidden rounded-xl p-6 [clip-path:inset(0_round_var(--radius-xl))]'
 
   if (!day) {
     const first = plan.days.find((d) => d.workoutId !== null)
@@ -246,7 +248,9 @@ function TodayCard({
         {workout.name}
       </h2>
       <p className="relative mt-3 flex items-center gap-3 font-semibold text-[15px] text-[#f5f3ed]/75">
-        <span>{workout.exerciseCount} exercises</span>
+        <span>
+          {workout.exerciseCount} {workout.exerciseCount === 1 ? 'exercise' : 'exercises'}
+        </span>
         {workout.estimatedMinutes && (
           <span className="inline-flex items-center gap-1">
             <Clock className="size-4" aria-hidden />~{workout.estimatedMinutes} min
@@ -281,7 +285,12 @@ function shortDate(date: string) {
 function NoPlan() {
   const { me } = Route.useRouteContext()
   return (
-    <section className={cn('relative overflow-hidden rounded-xl p-6 md:p-8', HERO)}>
+    <section
+      className={cn(
+        'relative overflow-hidden rounded-xl p-6 [clip-path:inset(0_round_var(--radius-xl))] md:p-8',
+        HERO,
+      )}
+    >
       <TurnArc className="-top-24 -right-24 pointer-events-none absolute size-72" />
       <p className="relative font-extrabold text-[11px] text-lime uppercase tracking-[0.2em]">
         Your 180 starts here

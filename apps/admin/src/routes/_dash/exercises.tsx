@@ -203,7 +203,11 @@ function ExercisesPage() {
           exercise{shown.length === 1 ? '' : 's'} · {withPhotos} with photos
         </p>
         {/* biome-ignore lint/a11y/useSemanticElements: a row of filter pills, not a form fieldset */}
-        <div role="group" className="flex items-center gap-1.5" aria-label="Filter by photo">
+        <div
+          role="group"
+          className="flex flex-wrap items-center gap-1.5"
+          aria-label="Filter by photo"
+        >
           <span className="mr-1 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
             Photos
           </span>
@@ -260,7 +264,7 @@ function ExercisesPage() {
                   editing?.id === ex.id && panelOpen && 'bg-brand-soft/50',
                 )}
               >
-                <div className="flex min-w-0 items-center gap-3">
+                <div className="col-span-2 flex min-w-0 items-center gap-3 md:col-span-1">
                   <ExerciseThumb imageKey={ex.imageKey} />
                   <div className="min-w-0">
                     {canEdit(ex) && view === 'active' ? (
@@ -281,7 +285,7 @@ function ExercisesPage() {
                     )}
                   </div>
                 </div>
-                <div className="order-3 col-span-2 flex gap-2 md:order-none md:col-span-1">
+                <div className="flex min-w-0 flex-wrap gap-2">
                   <Chip tone={MUSCLE_GROUP_TONE[ex.muscleGroup]}>
                     {MUSCLE_GROUP_LABELS[ex.muscleGroup]}
                   </Chip>
@@ -293,7 +297,7 @@ function ExercisesPage() {
                 <span className="hidden font-semibold text-[14px] text-ink-muted md:block">
                   {TRACKING_TYPE_LABELS[ex.trackingType]}
                 </span>
-                <div className="flex justify-end gap-1">
+                <div className="flex justify-end gap-1 max-md:-mr-2">
                   <VideoButton exerciseId={ex.id} name={ex.name} hasVideo={Boolean(ex.videoUrl)} />
                   {canEdit(ex) &&
                     (view === 'active' ? (
@@ -302,6 +306,7 @@ function ExercisesPage() {
                           label="Edit"
                           icon={<Pencil aria-hidden />}
                           size="sm"
+                          className="max-md:hidden"
                           onClick={() => openEdit(ex)}
                         />
                         <IconButton
@@ -628,7 +633,7 @@ function FilterChip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'inline-flex h-8 items-center gap-1.5 rounded-pill px-3 font-bold text-[13px] transition',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill px-3 font-bold text-[13px] transition',
         active ? 'bg-brand text-on-brand' : 'bg-surface text-ink-muted shadow-card hover:text-ink',
       )}
     >

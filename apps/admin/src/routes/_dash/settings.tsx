@@ -23,7 +23,7 @@ function Section({
   children: ReactNode
 }) {
   return (
-    <section className="grid gap-5 py-8 first:pt-0 last:pb-0 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:gap-12">
+    <section className="grid grid-cols-1 gap-5 py-8 first:pt-0 last:pb-0 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] lg:gap-12">
       <div className="flex flex-col gap-1">
         <h2 className="font-bold text-[17px]">{title}</h2>
         <p className="text-[14px] text-ink-muted">{description}</p>

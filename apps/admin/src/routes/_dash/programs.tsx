@@ -169,7 +169,9 @@ function ProgramCard({
         <Chip tone="brand">
           {p.durationWeeks} {p.durationWeeks === 1 ? 'week' : 'weeks'}
         </Chip>
-        <Chip tone="clay">{p.workoutDays} workouts</Chip>
+        <Chip tone="clay">
+          {p.workoutDays} {p.workoutDays === 1 ? 'workout' : 'workouts'}
+        </Chip>
       </div>
       <p className="mt-3 font-semibold text-[13px] text-ink-muted">
         {people.length ? `On it: ${people.map((e) => e.userName).join(', ')}` : 'Nobody on it yet'}

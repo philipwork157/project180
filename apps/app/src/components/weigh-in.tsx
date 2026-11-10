@@ -42,7 +42,7 @@ export function WeighIn({
   return (
     <div
       className={cn(
-        'relative flex items-center gap-3 overflow-hidden rounded-lg bg-surface p-4 text-ink shadow-card',
+        'relative flex flex-wrap items-center gap-3 overflow-hidden rounded-lg bg-surface p-4 text-ink shadow-card',
         className,
       )}
     >
@@ -60,7 +60,8 @@ export function WeighIn({
       </div>
       {!saved && (
         <form
-          className="flex items-center gap-2"
+          // Phones: its own row under the text, full width.
+          className="flex items-center gap-2 max-sm:w-full max-sm:pl-14"
           onSubmit={(e) => {
             e.preventDefault()
             if (valid) save.mutate(weight)
@@ -72,7 +73,7 @@ export function WeighIn({
             placeholder="kg"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="tabular h-11 w-20 rounded-sm bg-surface-raised px-3 text-center font-bold text-ink outline-none ring-1 ring-border ring-inset focus:ring-2 focus:ring-brand"
+            className="tabular h-11 w-20 rounded-sm max-sm:flex-1 bg-surface-raised px-3 text-center font-bold text-ink outline-none ring-1 ring-border ring-inset focus:ring-2 focus:ring-brand"
           />
           <Button
             type="submit"

@@ -36,6 +36,9 @@ Design and build every screen phone-first, then check it at desktop width. Befor
 
 ## Spacing and layout (both apps)
 
+- Every responsive grid starts with `grid-cols-1` (or another explicit count), e.g. `grid grid-cols-1 xl:grid-cols-[…]`. A bare `grid` lets long text widen the column past the phone screen.
+- Rows of tabs or chips that can't wrap neatly scroll sideways on phones (`no-scrollbar overflow-x-auto`, chips `shrink-0 whitespace-nowrap`). Check every admin page at 375px wide before calling it done.
+
 One spacing scale, so screens never look cramped or doubled up:
 
 - **Page:** the layouts already pad `<main>` (`px-4 md:px-8 lg:px-12`, `py-6 lg:py-10`). Pages never add their own outer padding.

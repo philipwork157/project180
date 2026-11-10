@@ -18,3 +18,11 @@
 @utility pt-safe {
   padding-top: max(env(safe-area-inset-top), 1rem);
 }
+
+/* Sideways-scrolling rows on phones (tabs, chips) without a visible scrollbar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

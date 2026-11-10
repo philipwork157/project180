@@ -236,7 +236,8 @@ function Builder({
           // biome-ignore lint/a11y/noAutofocus: a new program starts by naming it
           autoFocus={!id}
           disabled={!canEdit}
-          className="min-w-0 flex-1 bg-transparent font-display font-extrabold text-[30px] leading-[38px] tracking-tight outline-none placeholder:text-ink-muted/60"
+          // Phones: the name takes the first line next to Back; the buttons wrap below it.
+          className="min-w-0 flex-1 bg-transparent font-display font-extrabold text-[24px] leading-8 tracking-tight outline-none placeholder:text-ink-muted/60 max-sm:basis-[calc(100%-3.5rem)] sm:text-[30px] sm:leading-[38px]"
         />
         <span aria-live="polite" className="font-semibold text-[13px] text-ink-muted">
           {dirty ? 'Unsaved changes' : null}
@@ -309,43 +310,46 @@ function Builder({
         </p>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <section aria-label="Schedule" className="flex min-w-0 flex-col gap-3">
           {canEdit && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-surface p-3 shadow-card">
+            <div className="flex flex-col gap-2 rounded-lg bg-surface p-3 shadow-card sm:flex-row sm:flex-wrap sm:items-center">
               <span className="flex items-center gap-2 px-1 font-bold text-[13px] text-ink-muted">
                 <Paintbrush className="size-4" aria-hidden />
                 Quick fill:
               </span>
-              {(workouts.data ?? []).map((w) => (
+              {/* Phones: one row that scrolls sideways instead of a wall of chips. */}
+              <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 sm:contents">
+                {(workouts.data ?? []).map((w) => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    aria-pressed={brush === w.id}
+                    onClick={() => setBrush(brush === w.id ? null : w.id)}
+                    className={cn(
+                      'h-8 shrink-0 whitespace-nowrap rounded-pill px-3 font-bold text-[13px] transition',
+                      brush === w.id
+                        ? 'bg-brand text-on-brand'
+                        : 'bg-brand-soft text-brand-text hover:ring-2 hover:ring-brand',
+                    )}
+                  >
+                    {w.name}
+                  </button>
+                ))}
                 <button
-                  key={w.id}
                   type="button"
-                  aria-pressed={brush === w.id}
-                  onClick={() => setBrush(brush === w.id ? null : w.id)}
+                  aria-pressed={brush === 'rest'}
+                  onClick={() => setBrush(brush === 'rest' ? null : 'rest')}
                   className={cn(
-                    'h-8 rounded-pill px-3 font-bold text-[13px] transition',
-                    brush === w.id
-                      ? 'bg-brand text-on-brand'
-                      : 'bg-brand-soft text-brand-text hover:ring-2 hover:ring-brand',
+                    'h-8 shrink-0 whitespace-nowrap rounded-pill px-3 font-bold text-[13px] transition',
+                    brush === 'rest'
+                      ? 'bg-ink text-bg'
+                      : 'bg-surface-raised text-ink-muted hover:text-ink',
                   )}
                 >
-                  {w.name}
+                  Rest
                 </button>
-              ))}
-              <button
-                type="button"
-                aria-pressed={brush === 'rest'}
-                onClick={() => setBrush(brush === 'rest' ? null : 'rest')}
-                className={cn(
-                  'h-8 rounded-pill px-3 font-bold text-[13px] transition',
-                  brush === 'rest'
-                    ? 'bg-ink text-bg'
-                    : 'bg-surface-raised text-ink-muted hover:text-ink',
-                )}
-              >
-                Rest
-              </button>
+              </div>
               {workouts.data?.length === 0 && (
                 <Link
                   to="/workouts/$workoutId"
@@ -355,7 +359,7 @@ function Builder({
                   Build a workout first →
                 </Link>
               )}
-              <span className="ml-auto px-1 text-[12px] text-ink-muted">
+              <span className="px-1 text-[12px] text-ink-muted sm:ml-auto">
                 {brush
                   ? 'Click days to fill them. Click the chip again to stop. Wrong day? Undo puts it back.'
                   : 'Pick a workout, then click days.'}
@@ -367,7 +371,7 @@ function Builder({
             <table className="w-full min-w-[760px] border-separate border-spacing-1.5">
               <thead>
                 <tr>
-                  <th className="w-20" />
+                  <th className="sticky left-0 z-10 w-16 bg-surface sm:w-20" />
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => (
                     <th
                       key={day}
@@ -382,7 +386,11 @@ function Builder({
               <tbody>
                 {Array.from({ length: draft.durationWeeks }, (_, i) => i + 1).map((week) => (
                   <tr key={week}>
-                    <th scope="row" className="text-left font-bold text-[13px]">
+                    <th
+                      scope="row"
+                      // Stays in view while the days scroll sideways on a phone.
+                      className="sticky left-0 z-10 bg-surface pr-1 text-left font-bold text-[13px]"
+                    >
                       Week {week}
                     </th>
                     {[1, 2, 3, 4, 5, 6, 7].map((day) => {

@@ -552,7 +552,7 @@ function Builder({
         </p>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         {/* A container: exercise rows lay out by the space they actually get, not the window. */}
         <section
           aria-label="Exercises in this workout"

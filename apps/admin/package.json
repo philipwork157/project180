@@ -13,6 +13,8 @@
     "deploy:dev": "vite build --mode dev && wrangler deploy"
   },
   "dependencies": {
+    "@fontsource/archivo": "^5.2.0",
+    "@fontsource/plus-jakarta-sans": "^5.2.0",
     "@project180/client": "workspace:*",
     "@project180/shared": "workspace:*",
     "@project180/ui": "workspace:*",

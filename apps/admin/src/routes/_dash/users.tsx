@@ -1,9 +1,27 @@
-import { ApiError, api, coachesQuery, personActivityQuery, usersQuery } from '@project180/client'
-import { ACTIVE_NOW_MS, isOwner, isStaff, ROLE_LABELS, type UserSummary } from '@project180/shared'
+import {
+  ApiError,
+  adminOverviewQuery,
+  api,
+  coachesQuery,
+  personActivityQuery,
+  usersQuery,
+} from '@project180/client'
+import {
+  ACTIVE_NOW_MS,
+  type DeletePersonResult,
+  generateTempPassword,
+  isOwner,
+  isStaff,
+  ROLE_LABELS,
+  TEMP_PASSWORD_DAYS,
+  type UserSummary,
+} from '@project180/shared'
 import {
   Button,
+  buttonClasses,
   Card,
   Chip,
+  ConfirmDialog,
   cn,
   Drawer,
   EmptyState,
@@ -14,8 +32,16 @@ import {
   toast,
 } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, redirect } from '@tanstack/react-router'
-import { KeyRound, Plus, UserRoundCog, UsersRound } from 'lucide-react'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import {
+  ChartLine,
+  KeyRound,
+  Plus,
+  RefreshCw,
+  Trash2,
+  UserRoundCog,
+  UsersRound,
+} from 'lucide-react'
 import { useId, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { ProfileSummary } from '../../components/client-profile'
@@ -172,6 +198,14 @@ function UsersPage() {
                 </p>
               </div>
               {owner && u.role === 'member' && <CoachPicker user={u} />}
+              <Link
+                to="/users/$userId"
+                params={{ userId: String(u.id) }}
+                className={buttonClasses('secondary', 'md')}
+              >
+                <ChartLine className="size-4" aria-hidden />
+                Progress
+              </Link>
               {/* Your own password is changed in Settings; owners change their own. */}
               {u.id !== me.id && u.role !== 'owner' && (
                 <IconButton
@@ -180,6 +214,9 @@ function UsersPage() {
                   size="lg"
                   onClick={() => setPanel({ kind: 'password', user: u })}
                 />
+              )}
+              {owner && u.id !== me.id && u.role !== 'owner' && (
+                <DeletePersonButton user={u} clients={clientCount(u.id)} />
               )}
             </div>
             {u.role === 'member' && <ProfileSummary userId={u.id} name={u.name} />}
@@ -238,6 +275,61 @@ function UsersPage() {
 }
 
 /** Owners: hand a client to another coach. */
+/** Owners only: delete someone and everything they logged (a coach's clients come to you). */
+function DeletePersonButton({ user, clients }: { user: UserSummary; clients: number }) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const first = user.name.split(' ')[0] ?? user.name
+  const coach = isStaff(user.role)
+  const remove = useMutation({
+    mutationFn: () => api<DeletePersonResult>(`/admin/users/${user.id}`, { method: 'DELETE' }),
+    onSuccess: ({ removed, handedOver }) => {
+      setOpen(false)
+      queryClient.setQueryData(usersQuery.queryKey, (list) => list?.filter((u) => u.id !== user.id))
+      // Their clients and library moved to you: refresh those in the background.
+      void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
+      void queryClient.invalidateQueries({ queryKey: ['workouts'] })
+      void queryClient.invalidateQueries({ queryKey: ['programs'] })
+      void queryClient.invalidateQueries({ queryKey: adminOverviewQuery.queryKey })
+      const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+      toast({
+        title: `${user.name} deleted`,
+        description: coach
+          ? `${plural(handedOver.clients, 'client')}, ${plural(handedOver.workouts, 'workout')} and ${plural(handedOver.programs, 'program')} are yours now.`
+          : `${plural(removed.workouts, 'workout')} and ${plural(removed.checkins, 'weigh-in')} removed.`,
+      })
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t delete',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  return (
+    <>
+      <IconButton
+        label={`Delete ${user.name}`}
+        icon={<Trash2 aria-hidden />}
+        size="lg"
+        onClick={() => setOpen(true)}
+      />
+      <ConfirmDialog
+        open={open}
+        title={`Delete ${user.name} for good?`}
+        confirmLabel="Delete for good"
+        loading={remove.isPending}
+        onConfirm={() => remove.mutate()}
+        onClose={() => setOpen(false)}
+      >
+        {coach
+          ? `${first}’s account goes. Their exercises, workouts and programs move to you${clients > 0 ? `, and so ${clients === 1 ? 'does their client' : `do their ${clients} clients`}` : ''}. Nothing anyone uses is lost.`
+          : `${first}’s account and everything they logged go: workouts, sets, weigh-ins, their program and how they used the app. This can’t be undone.`}
+      </ConfirmDialog>
+    </>
+  )
+}
+
 function CoachPicker({ user }: { user: UserSummary }) {
   const queryClient = useQueryClient()
   const coaches = useQuery(coachesQuery)
@@ -245,7 +337,7 @@ function CoachPicker({ user }: { user: UserSummary }) {
     mutationFn: (coachId: number) =>
       api(`/admin/users/${user.id}/coach`, { method: 'PATCH', body: { coachId } }),
     onSuccess: async (_, coachId) => {
-      await queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
+      void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
       const name = coaches.data?.find((c) => c.id === coachId)?.name
       toast({ title: 'Coach changed', description: `${user.name} is now coached by ${name}.` })
     },
@@ -293,7 +385,8 @@ function PasswordForm({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  const [password, setPassword] = useState('')
+  // A strong one ready to send; the coach can still type their own.
+  const [password, setPassword] = useState(() => (temporary ? generateTempPassword() : ''))
   const [notify, setNotify] = useState(temporary)
   const [error, setError] = useState<string>()
   const reset = useMutation({
@@ -312,7 +405,7 @@ function PasswordForm({
         setError(undefined)
         try {
           const res = await reset.mutateAsync()
-          await queryClient.invalidateQueries({ queryKey: personActivityQuery(userId).queryKey })
+          void queryClient.invalidateQueries({ queryKey: personActivityQuery(userId).queryKey })
           const sent = res?.email
           toast({
             title: temporary ? 'Temporary password set' : 'Password changed',
@@ -334,18 +427,42 @@ function PasswordForm({
     >
       <Field
         label={temporary ? 'Temporary password' : 'New password'}
-        hint="At least 8 characters"
+        hint={
+          temporary
+            ? `Works for ${TEMP_PASSWORD_DAYS} days. They choose their own when they sign in.`
+            : 'At least 8 characters'
+        }
         error={error}
       >
-        {(id) => (
-          <Input
-            id={id}
-            type="text"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoFocus
-          />
-        )}
+        {(id) =>
+          temporary ? (
+            <div className="flex gap-2">
+              <Input
+                id={id}
+                type="text"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="font-mono"
+              />
+              <Button
+                variant="secondary"
+                className="shrink-0"
+                icon={<RefreshCw className="size-4" aria-hidden />}
+                onClick={() => setPassword(generateTempPassword())}
+              >
+                New
+              </Button>
+            </div>
+          ) : (
+            <Input
+              id={id}
+              type="text"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+            />
+          )
+        }
       </Field>
       {temporary && (
         <label className="flex cursor-pointer items-center gap-3 font-semibold text-[14px]">

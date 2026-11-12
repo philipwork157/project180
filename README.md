@@ -57,7 +57,7 @@ This follows how coaching platforms such as Everfit and Trainerize split admins 
 
 ## Signing in, staying signed in and activity
 
-**Temporary passwords.** The password you type when adding someone (or when you reset one with the key button) is temporary. The first time they sign in, the app asks them to choose their own (typed twice, not the temporary one), and nothing else works until they do; other devices still on the temporary password are signed out. A reset also signs them out everywhere straight away. Passwords made with `admin:create` are not temporary.
+**Temporary passwords.** The password you type when adding someone (or when you reset one with the key button) is temporary. The first time they sign in, the app asks them to choose their own (typed twice, not the temporary one), and nothing else works until they do; other devices still on the temporary password are signed out. A reset also signs them out everywhere straight away. Passwords made with `admin:create` are not temporary. A temporary password stops working after 7 days (the client is told to ask their coach for a new one), and the dashboard shows who has an expired one.
 
 **How long people stay signed in.** Sign-ins are sliding: the app keeps you signed in for **30 days** after you last used it, the admin for **7 days** (`SESSION_DAYS` in each app's `wrangler.jsonc`). Using it renews the clock, so someone who opens the app weekly never has to sign in again. The app and admin cookies are separate: signing out of one doesn't sign you out of the other.
 
@@ -145,10 +145,10 @@ cd ../..
 **Deploy** (every time):
 
 ```bash
-bun run deploy:dev        # builds both apps with --mode dev and deploys both Workers
+bun run deploy:dev        # applies new migrations to the dev database, then builds and deploys both Workers
 ```
 
-**First use:** `bun run admin:create:dev` to create the admins, then `bun run db:seed:dev` to add the starter library. Sign in at https://admin-dev.project180.co.za and add everyone else under Users. After schema changes, run `bun run db:migrate:dev` before deploying.
+**First use:** `bun run admin:create:dev` to create the admins, then `bun run db:seed:dev` to add the starter library. Sign in at https://admin-dev.project180.co.za and add everyone else under Users. New migrations are applied by `deploy:dev` before the Workers ship.
 
 How it works: `vite build --mode dev` loads `apps/*/.env.dev`, whose `CLOUDFLARE_ENV=dev` makes the Cloudflare Vite plugin build the `env.dev` section of `wrangler.jsonc` (its Worker name, database and vars). `wrangler deploy` then ships exactly that build, so it needs no `--env`. The commands that talk to Cloudflare directly (`d1 create`, `migrations apply`, `secret put`) do take `--env dev`.
 
@@ -165,7 +165,9 @@ bunx wrangler secret put BETTER_AUTH_SECRET                    # a long random s
 cd ../admin && bunx wrangler secret put BETTER_AUTH_SECRET     # the same string
 ```
 
-The live addresses (project180.co.za and admin.project180.co.za) are already set in `wrangler.jsonc` and `.env.production`. Finally: `bun run build && bun run deploy` from the root.
+The live addresses (project180.co.za and admin.project180.co.za) are already set in `wrangler.jsonc` and `.env.production`. Finally: `bun run build && bun run deploy` from the root (it applies new migrations to the live database first).
+
+Every push runs `bun run check` on GitHub (`.github/workflows/check.yml`).
 
 The Workers Paid plan ($5/month) is recommended: password hashing can exceed the free plan's CPU limit per request.
 

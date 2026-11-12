@@ -8,15 +8,18 @@ import type {
   MyStats,
   PersonActivity,
   PersonPrograms,
+  PersonStats,
+  ProgramCopySummary,
   ProgramDetail,
   ProgramSummary,
   SessionDetail,
+  SwapOptions,
   UserSummary,
   VideoSearch,
   WorkoutDetail,
   WorkoutSummary,
 } from '@project180/shared'
-import { queryOptions } from '@tanstack/react-query'
+import { type QueryClient, queryOptions } from '@tanstack/react-query'
 import { ApiError, api } from './api'
 
 /** The signed-in user, or null when signed out. */
@@ -41,6 +44,21 @@ export const exercisesQuery = (archived = false) =>
       (await api<{ exercises: Exercise[] }>(`/exercises${archived ? '?archived=1' : ''}`))
         .exercises,
   })
+
+/**
+ * Puts an exercise the server just sent back into the cached lists, so screens show it straight
+ * away (replaced where it is; a new one is added to the active list). Refresh in the background too.
+ */
+export function putExercise(queryClient: QueryClient, exercise: Exercise, isNew = false) {
+  const swap = (list: Exercise[] | undefined) =>
+    list?.map((e) => (e.id === exercise.id ? exercise : e))
+  queryClient.setQueryData(exercisesQuery(false).queryKey, (list) =>
+    isNew && list
+      ? [...list, exercise].sort((a, b) => a.name.localeCompare(b.name))
+      : swap(list),
+  )
+  queryClient.setQueryData(exercisesQuery(true).queryKey, swap)
+}
 
 /** The workout library; with `clientId`, plus that client's personal copies. */
 export const workoutsQuery = (archived = false, clientId?: number | null) =>
@@ -75,6 +93,14 @@ export const programQuery = (id: number) =>
     queryFn: async () => (await api<{ program: ProgramDetail }>(`/programs/${id}`)).program,
   })
 
+/** People on their own copy of a library program, and whether each copy is behind it. */
+export const programCopiesQuery = (programId: number) =>
+  queryOptions({
+    queryKey: ['programs', programId, 'copies'],
+    queryFn: async () =>
+      (await api<{ copies: ProgramCopySummary[] }>(`/programs/${programId}/copies`)).copies,
+  })
+
 export const enrollmentsQuery = (programId?: number) =>
   queryOptions({
     queryKey: ['enrollments', { programId }],
@@ -84,6 +110,14 @@ export const enrollmentsQuery = (programId?: number) =>
           `/enrollments${programId ? `?programId=${programId}` : ''}`,
         )
       ).enrollments,
+  })
+
+/** A person's progress over the last `weeks` weeks (coach view). */
+export const personStatsQuery = (userId: number, weeks: number) =>
+  queryOptions({
+    queryKey: ['admin', 'users', userId, 'stats', weeks],
+    queryFn: async () =>
+      (await api<{ stats: PersonStats }>(`/admin/users/${userId}/stats?weeks=${weeks}`)).stats,
   })
 
 export const personProgressQuery = (userId: number) =>
@@ -153,6 +187,22 @@ export const sessionQuery = (id: number) =>
     queryKey: ['sessions', id],
     queryFn: async () => (await api<{ session: SessionDetail }>(`/sessions/${id}`)).session,
     staleTime: Number.POSITIVE_INFINITY,
+  })
+
+/** For swapping an exercise mid-workout: loaded when a workout opens, so it works with poor signal. */
+export const swapOptionsQuery = queryOptions({
+  queryKey: ['swap-options'],
+  queryFn: () => api<SwapOptions>('/sessions/swap-options'),
+  staleTime: 10 * 60_000,
+})
+
+/** A coach's suggested swaps for one exercise (admin). */
+export const exerciseAlternativesQuery = (exerciseId: number) =>
+  queryOptions({
+    queryKey: ['exercises', exerciseId, 'alternatives'],
+    queryFn: async () =>
+      (await api<{ alternativeIds: number[] }>(`/exercises/${exerciseId}/alternatives`))
+        .alternativeIds,
   })
 
 /** The admin home page's numbers. */

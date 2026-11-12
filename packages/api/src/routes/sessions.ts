@@ -1,6 +1,7 @@
 import {
   type Db,
   enrollments,
+  exerciseAlternatives,
   exercises,
   programDays,
   sessionExercises,
@@ -13,19 +14,37 @@ import {
   finishSessionInput,
   type LoggedSet,
   type Me,
+  mergeTargets,
   type PreviousSet,
   type SessionDetail,
+  type SwapOptions,
   setLogInput,
+  splitTargets,
   startSessionInput,
+  swapExerciseInput,
   type WorkoutExerciseItem,
   type WorkoutGroup,
 } from '@project180/shared'
-import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  max,
+  ne,
+  sql,
+} from 'drizzle-orm'
+import { alias } from 'drizzle-orm/sqlite-core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
-import { notFound, parseBody, parseId } from '../errors'
+import { conflict, notFound, parseBody, parseId } from '../errors'
 import { iso, visibleTo } from '../library'
 import { requireUser } from '../middleware'
 import { completedBy, sessionSummaries } from '../sessions'
@@ -34,6 +53,11 @@ import { loadWorkoutExercises, loadWorkoutGroups } from './workouts'
 type SessionRow = typeof workoutSessions.$inferSelect
 
 /** Your own sessions only. Anyone else's answers 404. */
+/** A finished (or abandoned) workout can't be changed: its sets, time and records are final. */
+function assertInProgress(session: SessionRow) {
+  if (session.status !== 'in_progress') conflict('This workout is already finished')
+}
+
 async function findOwn(db: Db, user: Me, id: number): Promise<SessionRow> {
   const [row] = await db
     .select()
@@ -154,6 +178,7 @@ async function savedTargets(
   db: Db,
   sessionId: number,
 ): Promise<{ items: WorkoutExerciseItem[]; groups: WorkoutGroup[] } | null> {
+  const original = alias(exercises, 'original')
   const rows = await db
     .select({
       exerciseId: sessionExercises.exerciseId,
@@ -180,15 +205,31 @@ async function savedTargets(
       groupRounds: sessionExercises.groupRounds,
       groupWorkSeconds: sessionExercises.groupWorkSeconds,
       groupRestSeconds: sessionExercises.groupRestSeconds,
+      originalId: sessionExercises.originalExerciseId,
+      originalName: original.name,
     })
     .from(sessionExercises)
     .innerJoin(exercises, eq(exercises.id, sessionExercises.exerciseId))
+    .leftJoin(original, eq(original.id, sessionExercises.originalExerciseId))
     .where(eq(sessionExercises.sessionId, sessionId))
     .orderBy(asc(sessionExercises.position))
   if (rows.length === 0) return null
   const groups = new Map<number, WorkoutGroup>()
   const items = rows.map(
-    ({ groupKind, groupRounds, groupWorkSeconds, groupRestSeconds, ...item }) => {
+    ({
+      groupKind,
+      groupRounds,
+      groupWorkSeconds,
+      groupRestSeconds,
+      originalId,
+      originalName,
+      ...rest
+    }) => {
+      const item: WorkoutExerciseItem = {
+        ...rest,
+        swappedFrom:
+          originalId !== null ? { exerciseId: originalId, exerciseName: originalName ?? '' } : null,
+      }
       if (item.supersetGroup !== null && !groups.has(item.supersetGroup)) {
         groups.set(item.supersetGroup, {
           groupNumber: item.supersetGroup,
@@ -263,6 +304,152 @@ async function sessionDetail(db: Db, user: Me, row: SessionRow): Promise<Session
   }
 }
 
+/** Everything the app's swap sheet needs: every exercise in use, the coach's picks and your past swaps. */
+async function swapOptions(db: Db, user: Me): Promise<SwapOptions> {
+  const alt = alias(exercises, 'alt')
+  const [list, picks, past] = await Promise.all([
+    db
+      .select({
+        id: exercises.id,
+        name: exercises.name,
+        muscleGroup: exercises.muscleGroup,
+        equipment: exercises.equipment,
+        trackingType: exercises.trackingType,
+        keywords: exercises.keywords,
+        imageKey: exercises.imageKey,
+      })
+      .from(exercises)
+      .where(isNull(exercises.archivedAt))
+      .orderBy(asc(exercises.name)),
+    db
+      .select({
+        exerciseId: exerciseAlternatives.exerciseId,
+        alternativeId: exerciseAlternatives.alternativeId,
+      })
+      .from(exerciseAlternatives)
+      .innerJoin(alt, eq(alt.id, exerciseAlternatives.alternativeId))
+      .where(isNull(alt.archivedAt))
+      .orderBy(asc(exerciseAlternatives.exerciseId), asc(exerciseAlternatives.position)),
+    db
+      .select({
+        originalId: sessionExercises.originalExerciseId,
+        exerciseId: sessionExercises.exerciseId,
+        last: max(sessionExercises.swappedAt),
+      })
+      .from(sessionExercises)
+      .innerJoin(workoutSessions, eq(workoutSessions.id, sessionExercises.sessionId))
+      .where(
+        and(eq(workoutSessions.userId, user.id), isNotNull(sessionExercises.originalExerciseId)),
+      )
+      .groupBy(sessionExercises.originalExerciseId, sessionExercises.exerciseId)
+      .orderBy(desc(max(sessionExercises.swappedAt)))
+      .limit(500),
+  ])
+  const coach: SwapOptions['coach'] = {}
+  for (const p of picks) coach[p.exerciseId] = [...(coach[p.exerciseId] ?? []), p.alternativeId]
+  const mine: SwapOptions['mine'] = {}
+  for (const p of past)
+    if (p.originalId !== null) mine[p.originalId] = [...(mine[p.originalId] ?? []), p.exerciseId]
+  return { exercises: list, coach, mine }
+}
+
+const targetsOf = (r: typeof sessionExercises.$inferSelect) => ({
+  targetSets: r.targetSets,
+  targetRepsMin: r.targetRepsMin,
+  targetRepsMax: r.targetRepsMax,
+  targetRepsPerSet: r.targetRepsPerSet,
+})
+
+/**
+ * Swap one exercise in a workout that's in progress. Sets already logged stay with the exercise
+ * they were done on; the sets still to do move to the replacement. Swapping back undoes it.
+ */
+async function swapExercise(
+  db: Db,
+  session: SessionRow,
+  input: { exerciseId: number; replacementId: number },
+) {
+  assertInProgress(session)
+  const rows = await db
+    .select()
+    .from(sessionExercises)
+    .where(eq(sessionExercises.sessionId, session.id))
+    .orderBy(asc(sessionExercises.position))
+  const slot = rows.find((r) => r.exerciseId === input.exerciseId)
+  if (!slot) notFound('That exercise isn’t in this workout')
+  if (input.replacementId === slot.exerciseId) return
+  const [[replacement], [logged]] = await Promise.all([
+    db
+      .select({ id: exercises.id, equipment: exercises.equipment })
+      .from(exercises)
+      .where(and(eq(exercises.id, input.replacementId), isNull(exercises.archivedAt))),
+    db
+      .select({ n: count() })
+      .from(setLogs)
+      .where(and(eq(setLogs.sessionId, session.id), eq(setLogs.exerciseId, slot.exerciseId))),
+  ])
+  if (!replacement) notFound('Exercise not found')
+  const done = logged?.n ?? 0
+  const backToOriginal = slot.originalExerciseId === replacement.id
+  // Reps only stays reps only when the replacement is a bodyweight move too.
+  const bodyweight = slot.bodyweight && replacement.equipment === 'bodyweight'
+  const twin = rows.find((r) => r.exerciseId === replacement.id)
+
+  if (twin) {
+    // The only way back to an exercise already in the workout: undoing a mid-exercise swap.
+    if (!backToOriginal || done > 0) conflict('That exercise is already in this workout')
+    const merged = mergeTargets(targetsOf(twin), targetsOf(slot))
+    await db.batch([
+      db.update(sessionExercises).set(merged).where(eq(sessionExercises.id, twin.id)),
+      db.delete(sessionExercises).where(eq(sessionExercises.id, slot.id)),
+    ])
+    return
+  }
+
+  if (done === 0) {
+    // Nothing logged yet: the replacement simply takes its place.
+    await db
+      .update(sessionExercises)
+      .set(
+        backToOriginal
+          ? { exerciseId: replacement.id, originalExerciseId: null, swappedAt: null }
+          : {
+              exerciseId: replacement.id,
+              originalExerciseId: slot.originalExerciseId ?? slot.exerciseId,
+              swappedAt: new Date(),
+              bodyweight,
+            },
+      )
+      .where(eq(sessionExercises.id, slot.id))
+    return
+  }
+
+  // Some sets done: they stay where they are, and the rest go to the replacement right after it.
+  const { done: kept, rest } = splitTargets(targetsOf(slot), done)
+  const { id: _id, ...copy } = slot
+  await db.batch([
+    db.update(sessionExercises).set(kept).where(eq(sessionExercises.id, slot.id)),
+    db
+      .update(sessionExercises)
+      .set({ position: sql`${sessionExercises.position} + 1` })
+      .where(
+        and(
+          eq(sessionExercises.sessionId, session.id),
+          gt(sessionExercises.position, slot.position),
+        ),
+      ),
+    db.insert(sessionExercises).values({
+      ...copy,
+      ...rest,
+      exerciseId: replacement.id,
+      position: slot.position + 1,
+      bodyweight,
+      originalExerciseId: slot.exerciseId,
+      swappedAt: new Date(),
+    }),
+  ])
+}
+
 export const sessionRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get('/', async (c) => {
@@ -327,6 +514,8 @@ export const sessionRoutes = new Hono<AppEnv>()
       .limit(1)
     return c.json({ session: row ?? null })
   })
+  /** For the swap sheet: loaded when a workout opens so it works with poor signal. */
+  .get('/swap-options', async (c) => c.json(await swapOptions(c.var.db, c.var.user)))
   .get('/:id', async (c) => {
     const row = await findOwn(c.var.db, c.var.user, parseId(c.req.param('id')))
     return c.json({ session: await sessionDetail(c.var.db, c.var.user, row) })
@@ -335,6 +524,7 @@ export const sessionRoutes = new Hono<AppEnv>()
   .put('/:id/sets', async (c) => {
     const { db, user } = c.var
     const session = await findOwn(db, user, parseId(c.req.param('id')))
+    assertInProgress(session)
     const input = await parseBody(c.req.raw, setLogInput)
     const [clash] = await db
       .select({ sessionId: setLogs.sessionId })
@@ -366,6 +556,7 @@ export const sessionRoutes = new Hono<AppEnv>()
   })
   .delete('/:id/sets/:clientUuid', async (c) => {
     const session = await findOwn(c.var.db, c.var.user, parseId(c.req.param('id')))
+    assertInProgress(session)
     await c.var.db
       .delete(setLogs)
       .where(
@@ -377,8 +568,7 @@ export const sessionRoutes = new Hono<AppEnv>()
   .post('/:id/restart', async (c) => {
     const { db, user } = c.var
     const session = await findOwn(db, user, parseId(c.req.param('id')))
-    if (session.status !== 'in_progress')
-      throw new HTTPException(409, { message: 'This workout is already finished' })
+    assertInProgress(session)
     await db.delete(setLogs).where(eq(setLogs.sessionId, session.id))
     const [row] = await db
       .update(workoutSessions)
@@ -387,6 +577,14 @@ export const sessionRoutes = new Hono<AppEnv>()
       .returning()
     if (!row) throw new Error('Update returned no row')
     return c.json({ session: await sessionDetail(db, user, row) })
+  })
+  /** Swap an exercise (machine taken, no equipment). Answers the updated session. */
+  .post('/:id/swap', async (c) => {
+    const { db, user } = c.var
+    const session = await findOwn(db, user, parseId(c.req.param('id')))
+    const input = await parseBody(c.req.raw, swapExerciseInput)
+    await swapExercise(db, session, input)
+    return c.json({ session: await sessionDetail(db, user, session) })
   })
   .post('/:id/finish', async (c) => {
     const { db, user } = c.var
@@ -397,7 +595,8 @@ export const sessionRoutes = new Hono<AppEnv>()
       0,
       Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000),
     )
-    await db
+    // Only an unfinished workout can be finished (checked in the update, so two at once can't).
+    const [updated] = await db
       .update(workoutSessions)
       .set({
         status: input.status,
@@ -407,7 +606,18 @@ export const sessionRoutes = new Hono<AppEnv>()
         energy: input.energy ?? null,
         notes: input.notes ?? null,
       })
-      .where(eq(workoutSessions.id, session.id))
+      .where(and(eq(workoutSessions.id, session.id), eq(workoutSessions.status, 'in_progress')))
+      .returning({ id: workoutSessions.id })
+    if (!updated) {
+      // A retried "finish" (the answer got lost on bad signal) gets the same answer again;
+      // anything else on a finished workout is refused, and nothing about it changes.
+      const [now] = await db
+        .select({ status: workoutSessions.status })
+        .from(workoutSessions)
+        .where(eq(workoutSessions.id, session.id))
+      if (!(now?.status === 'completed' && input.status === 'completed'))
+        conflict('This workout is already finished')
+    }
 
     // New personal records: heavier than any earlier completed session.
     const records: FinishResult['records'] = []

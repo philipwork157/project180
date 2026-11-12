@@ -61,7 +61,7 @@ export function PersonActivityPanel({
     mutationFn: (sessionId: number) =>
       api(`/admin/users/${userId}/sessions/${sessionId}`, { method: 'DELETE' }),
     onSuccess: async () => {
-      await refresh()
+      void refresh()
       setConfirm(null)
       toast({
         title: 'Signed out',
@@ -74,7 +74,7 @@ export function PersonActivityPanel({
     mutationFn: () =>
       api<{ signedOut: number }>(`/admin/users/${userId}/sign-out-everywhere`, { method: 'POST' }),
     onSuccess: async ({ signedOut }) => {
-      await refresh()
+      void refresh()
       setConfirm(null)
       toast({
         title: 'Signed out everywhere',

@@ -1,3 +1,4 @@
+import { env, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { ADMIN, call, createAdmin, MEMBER, setupHousehold, signIn, signInAsIs } from './helpers'
 
@@ -117,6 +118,77 @@ describe('temporary passwords', () => {
   })
 })
 
+describe('temporary passwords expire', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  /** Pretends the client's password was set this many days ago. */
+  const ageTempPassword = (days: number) =>
+    env.DB.prepare(
+      `UPDATE accounts SET updated_at = ? WHERE provider_id = 'credential'
+       AND user_id = (SELECT id FROM users WHERE email = ?)`,
+    )
+      .bind(Date.now() - days * DAY, MEMBER.email)
+      .run()
+
+  it('still works within a week', async () => {
+    await adminAndNewClient()
+    await ageTempPassword(6)
+    expect(await signInStatus(MEMBER.email, MEMBER.password)).toBe(200)
+  })
+
+  it('refuses an old temporary password and leaves no session behind', async () => {
+    await adminAndNewClient()
+    const earlier = await signInAsIs(MEMBER.email, MEMBER.password)
+    await ageTempPassword(8)
+    const res = await call<{ code: string; message: string }>('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: MEMBER.email, password: MEMBER.password },
+    })
+    expect(res.status).toBe(403)
+    expect(res.data.code).toBe('TEMP_PASSWORD_EXPIRED')
+    expect(res.data.message).toMatch(/Ask your coach/)
+    expect(res.headers.get('set-cookie') ?? '').not.toMatch(/session_token=[^;]/)
+    // Any device still on the old temporary password is signed out too.
+    expect((await call('/me', { cookie: earlier })).status).toBe(401)
+    const left = await env.DB.prepare(
+      'SELECT count(*) AS n FROM sessions WHERE user_id = (SELECT id FROM users WHERE email = ?)',
+    )
+      .bind(MEMBER.email)
+      .first<{ n: number }>()
+    expect(left?.n).toBe(0)
+  })
+
+  it('a wrong password on an expired account is still just wrong', async () => {
+    await adminAndNewClient()
+    await ageTempPassword(30)
+    expect(await signInStatus(MEMBER.email, 'not-the-password')).toBe(401)
+  })
+
+  it('a new temporary password from the coach starts a fresh week', async () => {
+    const { admin, clientId } = await adminAndNewClient()
+    await ageTempPassword(8)
+    expect(await signInStatus(MEMBER.email, MEMBER.password)).toBe(403)
+    const reset = await call(`/admin/users/${clientId}/password`, {
+      method: 'POST',
+      cookie: admin,
+      body: { password: 'Cedar-Otter-Kayak-Lark-482' },
+    })
+    expect(reset.status).toBe(204)
+    expect(await signInStatus(MEMBER.email, 'Cedar-Otter-Kayak-Lark-482')).toBe(200)
+  })
+
+  it('a password they chose themselves never expires', async () => {
+    await adminAndNewClient()
+    const cookie = await signInAsIs(MEMBER.email, MEMBER.password)
+    await call('/me/first-password', {
+      method: 'POST',
+      cookie,
+      body: { password: 'my-own-password' },
+    })
+    await ageTempPassword(400)
+    expect(await signInStatus(MEMBER.email, 'my-own-password')).toBe(200)
+  })
+})
+
 describe('sign-in limit', () => {
   it('pauses an email after 5 wrong passwords, even with the right one', async () => {
     await createAdmin()
@@ -229,5 +301,42 @@ describe('signing people out', () => {
     expect(res.data.signedOut).toBe(1)
     expect((await call('/me', { cookie: here })).status).toBe(200)
     expect((await call('/me', { cookie: there })).status).toBe(401)
+  })
+})
+
+describe('cross-site requests and security headers', () => {
+  const post = (path: string, origin: string, cookie: string, contentType = 'text/plain') =>
+    SELF.fetch(`http://localhost/api${path}`, {
+      method: 'POST',
+      headers: { origin, cookie, 'content-type': contentType },
+      body: JSON.stringify({ seconds: 60 }),
+    })
+
+  it('refuses a form-style POST from another site, even with a signed-in cookie', async () => {
+    const { member } = await setupHousehold()
+    const evil = await post('/me/heartbeat', 'https://evil.example', member)
+    expect(evil.status).toBe(403)
+    await evil.text()
+    const form = await post(
+      '/me/heartbeat',
+      'https://evil.example',
+      member,
+      'application/x-www-form-urlencoded',
+    )
+    expect(form.status).toBe(403)
+    await form.text()
+    // The same request from our own site works.
+    const ours = await post('/me/heartbeat', 'http://localhost', member)
+    expect(ours.status).toBe(204)
+    await ours.text()
+  })
+
+  it('sends security headers on API answers', async () => {
+    const res = await call('/health')
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(res.headers.get('strict-transport-security')).toBe('max-age=31536000')
+    expect(res.headers.get('content-security-policy')).toContain("default-src 'none'")
+    // Photos are shown by the other app too, so they must not be locked to one origin.
+    expect(res.headers.get('cross-origin-resource-policy')).toBeNull()
   })
 })

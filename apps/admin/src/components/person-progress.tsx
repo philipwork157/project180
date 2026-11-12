@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
+import { SwapsLine } from './swaps-line'
 
 const DAY_STYLE: Record<PlanDay['state'], { cell: string; icon: typeof Check; label: string }> = {
   done: { cell: 'bg-lime text-on-lime', icon: Check, label: 'Done' },
@@ -248,6 +249,31 @@ function CurrentProgram({
         />
       </dl>
 
+      {p.recent.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+            Latest workouts
+          </p>
+          <ul className="flex flex-col divide-y divide-border rounded-md bg-surface-raised">
+            {p.recent.map((s) => (
+              <li key={s.id} className="flex flex-col gap-1 px-4 py-3">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
+                    {s.workoutName ?? 'Workout'}
+                  </span>
+                  <span className="tabular font-semibold text-[13px] text-ink-muted">
+                    {relativeDay(s.startedAt)} · {s.setCount} {s.setCount === 1 ? 'set' : 'sets'}
+                    {s.volumeKg ? ` · ${formatNumber(Math.round(s.volumeKg))} kg` : ''}
+                    {s.feeling ? ` · felt ${s.feeling}/5` : ''}
+                  </span>
+                </div>
+                <SwapsLine swaps={s.swaps} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex flex-wrap justify-end gap-2 border-border border-t pt-4">
         <Button
           variant="ghost"
@@ -417,7 +443,7 @@ function ArchiveProgramDialog({
   const archive = useMutation({
     mutationFn: () => api(`/admin/users/${userId}/program/archive`, { method: 'POST' }),
     onSuccess: async () => {
-      await invalidatePerson(queryClient, userId)
+      void invalidatePerson(queryClient, userId)
       toast({
         title: 'Program archived',
         description: `${programName} and its history are under Past programs.`,
@@ -477,7 +503,7 @@ function PastPrograms({
     mutationFn: (enrollmentId: number) =>
       api(`/admin/users/${userId}/enrollments/${enrollmentId}/restore`, { method: 'POST' }),
     onSuccess: async (_, enrollmentId) => {
-      await invalidatePerson(queryClient, userId)
+      void invalidatePerson(queryClient, userId)
       const item = past.find((x) => x.enrollmentId === enrollmentId)
       toast({
         title: 'Program re-enabled',
@@ -579,6 +605,7 @@ function PastPrograms({
                             {formatNumber(Math.round(s.volumeKg))} kg
                             {s.feeling ? ` · felt ${s.feeling}/5` : ''}
                           </span>
+                          <SwapsLine swaps={s.swaps} className="basis-full pl-[76px]" />
                         </li>
                       ))}
                       {x.workouts > x.recent.length && (
@@ -627,7 +654,7 @@ function DeletePastDialog({
     mutationFn: (enrollmentId: number) =>
       api(`/admin/users/${userId}/enrollments/${enrollmentId}`, { method: 'DELETE' }),
     onSuccess: async () => {
-      await invalidatePerson(queryClient, userId)
+      void invalidatePerson(queryClient, userId)
       toast({
         title: 'Deleted for good',
         description: `${item?.programName} and its history are gone.`,

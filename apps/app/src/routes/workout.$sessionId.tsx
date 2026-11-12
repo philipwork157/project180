@@ -1,4 +1,11 @@
-import { ApiError, api, meQuery, planQuery, sessionQuery } from '@project180/client'
+import {
+  ApiError,
+  api,
+  meQuery,
+  planQuery,
+  sessionQuery,
+  swapOptionsQuery,
+} from '@project180/client'
 import {
   type FinishResult,
   formatDuration,
@@ -12,10 +19,19 @@ import {
   type WorkoutExerciseItem,
   type WorkoutGroup,
 } from '@project180/shared'
-import { Button, Chip, ConfirmDialog, cn, MUSCLE_GROUP_TONE, Textarea } from '@project180/ui'
+import {
+  Button,
+  Chip,
+  ConfirmDialog,
+  cn,
+  IconButton,
+  MUSCLE_GROUP_TONE,
+  Textarea,
+} from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, Navigate, redirect, useNavigate } from '@tanstack/react-router'
 import {
+  ArrowLeftRight,
   ArrowUp,
   Check,
   ChevronDown,
@@ -35,7 +51,7 @@ import { FeelingPicker } from '../components/feeling'
 import { IntervalTimer } from '../components/interval-timer'
 import { RestTimer } from '../components/rest-timer'
 import { Sheet } from '../components/sheet'
-import { WeighIn } from '../components/weigh-in'
+import { SwapSheet } from '../components/swap-sheet'
 import { useHeartbeat } from '../lib/use-heartbeat'
 
 export const Route = createFileRoute('/workout/$sessionId')({
@@ -141,7 +157,6 @@ function WorkoutPage() {
 function ActiveWorkout({ session }: { session: SessionDetail }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const plan = useQuery(planQuery)
   const exercises = uniqueExercises(session.exercises)
   const [board, setBoard] = useState<Board>(() => loadBoard(session))
   const [rest, setRest] = useState<{ endsAt: number; total: number } | null>(null)
@@ -193,8 +208,10 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
     [],
   )
 
-  const warmUps = useRef(
-    new Set(session.exercises.filter((e) => e.section === 'warm_up').map((e) => e.exerciseId)),
+  // Follows the session: a swap can bring in a new warm-up exercise.
+  const warmUps = useRef(new Set<number>())
+  warmUps.current = new Set(
+    session.exercises.filter((e) => e.section === 'warm_up').map((e) => e.exerciseId),
   )
   const sendSet = useCallback(
     async (exerciseId: number, set: SetState) => {
@@ -216,8 +233,10 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
           },
         })
         patchSet(exerciseId, set.clientUuid, { sync: 'idle' })
-      } catch {
-        patchSet(exerciseId, set.clientUuid, { sync: 'failed' })
+      } catch (err) {
+        // 409: the workout was finished elsewhere, so retrying can never succeed. Stop.
+        const final = err instanceof ApiError && err.status === 409
+        patchSet(exerciseId, set.clientUuid, { sync: final ? 'idle' : 'failed' })
       }
     },
     [patchSet, session.id],
@@ -277,9 +296,11 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
     if (group.kind === 'interval') return
     const roundDone = exercises
       .filter((e) => e.supersetGroup === group.groupNumber && e.exerciseId !== ex.exerciseId)
-      .every(
-        (e) => boardRef.current[e.exerciseId]?.find((s) => s.setNumber === set.setNumber)?.done,
-      )
+      .every((e) => {
+        // An exercise with no set this round (swapped out partway) doesn't hold it up.
+        const other = boardRef.current[e.exerciseId]?.find((s) => s.setNumber === set.setNumber)
+        return !other || other.done
+      })
     if (roundDone) startRest(group.restSeconds ?? 0)
   }
 
@@ -339,12 +360,44 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
     await Promise.all(saves)
   }
 
+  // Swapping an exercise (machine taken, no equipment). The options load now, so the sheet
+  // opens instantly even with poor signal.
+  useEffect(() => {
+    void queryClient.prefetchQuery(swapOptionsQuery)
+  }, [queryClient])
+  const [swapping, setSwapping] = useState<WorkoutExerciseItem | null>(null)
+  const swap = useMutation({
+    mutationFn: async ({ from, to }: { from: number; to: number }) => {
+      // The server keeps logged sets with the exercise they were done on: send them first.
+      await flushSets()
+      return api<{ session: SessionDetail }>(`/sessions/${session.id}/swap`, {
+        method: 'POST',
+        body: { exerciseId: from, replacementId: to },
+      })
+    },
+    onSuccess: ({ session: fresh }, { from, to }) => {
+      // Both exercises get fresh rows (targets, last time); every other card keeps what's typed.
+      const rebuilt = buildBoard(fresh)
+      setBoard((b) => {
+        const next: Board = {}
+        for (const ex of uniqueExercises(fresh.exercises)) {
+          const id = ex.exerciseId
+          next[id] = (id === from || id === to ? rebuilt[id] : b[id]) ?? rebuilt[id] ?? []
+        }
+        return next
+      })
+      queryClient.setQueryData(sessionQuery(session.id).queryKey, fresh)
+      // "You used before" changes: refresh it in the background.
+      void queryClient.invalidateQueries({ queryKey: swapOptionsQuery.queryKey })
+      navigator.vibrate?.(20)
+      setSwapping(null)
+    },
+  })
+  const loggedOn = (exerciseId: number) => (board[exerciseId] ?? []).filter((s) => s.done).length
+
   const allSets = Object.values(board).flat()
   const doneCount = allSets.filter((s) => s.done).length
   const unsynced = allSets.filter((s) => s.done && s.sync !== 'idle').length
-  const planDay = plan.data?.plan?.days.find(
-    (d) => d.programDayId === session.programDayId && d.programDayId !== null,
-  )
 
   function done() {
     try {
@@ -462,6 +515,10 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
               onEdit={(set, patch) => patchSet(ex.exerciseId, set.clientUuid, patch)}
               onCommit={(set) => set.done && void pushSet(ex.exerciseId, set)}
               onAddSet={() => addSet(ex)}
+              onSwap={() => {
+                swap.reset()
+                setSwapping(ex)
+              }}
             />
           )
           if (block.type === 'single')
@@ -593,6 +650,22 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
           })()}
       </AnimatePresence>
 
+      <SwapSheet
+        exercise={swapping}
+        inWorkout={exercises.map((e) => e.exerciseId)}
+        logged={swapping ? loggedOn(swapping.exerciseId) : 0}
+        pendingId={swap.isPending ? (swap.variables?.to ?? null) : null}
+        error={
+          swap.isError
+            ? swap.error instanceof ApiError
+              ? swap.error.message
+              : 'No connection. Try again when you have signal.'
+            : null
+        }
+        onSwap={(to) => swapping && swap.mutate({ from: swapping.exerciseId, to })}
+        onClose={() => !swap.isPending && setSwapping(null)}
+      />
+
       <FinishSheet
         open={finishing}
         onClose={() => setFinishing(false)}
@@ -612,9 +685,7 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
       />
 
       {result && (
-        <Celebration title={session.workoutName ?? 'Workout'} result={result} onDone={done}>
-          {planDay?.checkinRequired && <WeighIn date={planDay.date} className="text-left" />}
-        </Celebration>
+        <Celebration title={session.workoutName ?? 'Workout'} result={result} onDone={done} />
       )}
     </div>
   )
@@ -667,6 +738,7 @@ function ExerciseCard({
   onEdit,
   onCommit,
   onAddSet,
+  onSwap,
 }: {
   index: number
   /** Inside a superset/circuit block: flatter card, no rest line. */
@@ -678,6 +750,8 @@ function ExerciseCard({
   onEdit: (set: SetState, patch: Partial<SetState>) => void
   onCommit: (set: SetState) => void
   onAddSet: () => void
+  /** Machine taken, no equipment: pick another exercise. */
+  onSwap: () => void
 }) {
   const [showNote, setShowNote] = useState(false)
   const distance = ex.trackingType === 'distance_time'
@@ -730,8 +804,9 @@ function ExerciseCard({
   const rowColumns = {
     gridTemplateColumns: [
       '28px',
-      hasPrevious ? 'minmax(4.5rem,1fr)' : 'minmax(0,1fr)',
-      ...fields.map(() => 'minmax(0,8rem)'),
+      // No last time: skip the column and let the inputs take the whole row.
+      ...(hasPrevious ? ['minmax(4.5rem,1fr)'] : []),
+      ...fields.map(() => (hasPrevious ? 'minmax(0,8rem)' : 'minmax(0,1fr)')),
       '48px',
     ].join(' '),
   }
@@ -759,6 +834,12 @@ function ExerciseCard({
         {howTo.thumbnail}
         <div className="min-w-0 flex-1">
           <h2 className="font-bold text-[18px] leading-6">{ex.exerciseName}</h2>
+          {ex.swappedFrom && (
+            <p className="mt-0.5 flex items-center gap-1.5 font-semibold text-[13px] text-ink-muted">
+              <ArrowLeftRight className="size-3.5 shrink-0" aria-hidden />
+              <span className="min-w-0 truncate">Swapped from {ex.swappedFrom.exerciseName}</span>
+            </p>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <Chip tone={MUSCLE_GROUP_TONE[ex.muscleGroup]} className="h-6 text-[12px]">
               {MUSCLE_GROUP_LABELS[ex.muscleGroup]}
@@ -779,6 +860,15 @@ function ExerciseCard({
             </p>
           )}
         </div>
+        {!complete && (
+          <IconButton
+            label="Swap exercise"
+            icon={<ArrowLeftRight aria-hidden />}
+            size="lg"
+            className="-mt-1 -mr-1 bg-transparent"
+            onClick={onSwap}
+          />
+        )}
         {ex.notes && (
           <button
             type="button"
@@ -808,7 +898,7 @@ function ExerciseCard({
         )}
       >
         <span>Set</span>
-        <span className="text-center">{hasPrevious ? 'Last time' : ''}</span>
+        {hasPrevious && <span className="text-center">Last time</span>}
         {fields.map((f) => (
           <span key={f} className="text-center">
             {f}
@@ -857,9 +947,9 @@ function ExerciseCard({
                 >
                   {prevText}
                 </button>
-              ) : (
+              ) : hasPrevious ? (
                 <span />
-              )}
+              ) : null}
               {distance ? (
                 <NumberCell
                   label={`Set ${s.setNumber} distance in km`}

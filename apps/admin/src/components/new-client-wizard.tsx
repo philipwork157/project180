@@ -3,9 +3,11 @@ import {
   type CreateUserInput,
   createUserInput,
   GOAL_LABELS,
+  generateTempPassword,
   isOwner,
   type Me,
   type Role,
+  TEMP_PASSWORD_DAYS,
 } from '@project180/shared'
 import {
   Button,
@@ -33,28 +35,6 @@ import {
 } from './client-profile'
 
 const STEPS = ['Who', 'Body', 'Goals', 'Program'] as const
-const WORDS = [
-  'lift',
-  'pace',
-  'core',
-  'stride',
-  'squat',
-  'tempo',
-  'peak',
-  'sprint',
-  'flex',
-  'climb',
-  'rally',
-  'surge',
-]
-
-/** Easy to read out or type on a phone, e.g. "Tempo-Climb-47". */
-function generatePassword() {
-  const pick = () => WORDS[Math.floor(Math.random() * WORDS.length)] ?? 'lift'
-  const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1)
-  return `${cap(pick())}-${cap(pick())}-${String(Math.floor(10 + Math.random() * 90))}`
-}
-
 /** wa.me wants international numbers; South African 0XX numbers become 27XX. */
 function whatsappNumber(phone: string) {
   const digits = phone.replace(/\D/g, '')
@@ -102,7 +82,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState(generatePassword)
+  const [password, setPassword] = useState(() => generateTempPassword())
   const [role, setRole] = useState<Role>('member')
   const [coachId, setCoachId] = useState<number>(me.id)
   const [profile, setProfile] = useState<ProfileDraft>(EMPTY_PROFILE)
@@ -156,8 +136,8 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
         program: programId ? { programId, startDate } : null,
         sendWelcome,
       })
-      await queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
-      await queryClient.invalidateQueries({ queryKey: ['enrollments'] })
+      void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
+      void queryClient.invalidateQueries({ queryKey: ['enrollments'] })
       toast({
         title: isClient ? 'Client added' : 'Coach added',
         description: `${name} can sign in now.`,
@@ -285,7 +265,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                   </div>
                   <Field
                     label="Temporary password"
-                    hint="At least 8 characters. They choose their own the first time they sign in."
+                    hint={`Works for ${TEMP_PASSWORD_DAYS} days. They choose their own the first time they sign in.`}
                     error={error}
                   >
                     {(id) => (
@@ -300,7 +280,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                           variant="secondary"
                           className="shrink-0"
                           icon={<RefreshCw className="size-4" aria-hidden />}
-                          onClick={() => setPassword(generatePassword())}
+                          onClick={() => setPassword(generateTempPassword())}
                         >
                           New
                         </Button>

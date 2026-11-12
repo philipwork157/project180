@@ -1,4 +1,11 @@
-import { ApiError, api, enrollmentsQuery, programQuery, workoutsQuery } from '@project180/client'
+import {
+  ApiError,
+  api,
+  enrollmentsQuery,
+  programCopiesQuery,
+  programQuery,
+  workoutsQuery,
+} from '@project180/client'
 import type { ProgramDetail, ProgramInput } from '@project180/shared'
 import { isOwner } from '@project180/shared'
 import {
@@ -19,6 +26,7 @@ import {
   ArrowLeft,
   CopyCheck,
   Paintbrush,
+  RefreshCw,
   Scale,
   Trash2,
   UserPlus,
@@ -32,6 +40,7 @@ import { Stepper } from '../../components/controls'
 import { DeleteForGood } from '../../components/delete-for-good'
 import { HistoryControls, useDraftBackup, useDraftHistory } from '../../components/draft-history'
 import { useUnsavedChangesGuard } from '../../components/unsaved-changes'
+import { UpdateClientsDrawer } from '../../components/update-clients'
 
 export const Route = createFileRoute('/_dash/programs_/$programId')({
   component: ProgramEditorPage,
@@ -149,7 +158,12 @@ function Builder({
   const [brush, setBrush] = useState<number | 'rest' | null>(null)
   const [error, setError] = useState<string>()
   const [assignOpen, setAssignOpen] = useState(false)
+  const [updateOpen, setUpdateOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // A library program: the people on their own copy of it, and how many copies are behind.
+  const libraryId = id !== null && client === null ? id : null
+  const copies = useQuery({ ...programCopiesQuery(libraryId ?? 0), enabled: libraryId !== null })
+  const behind = (copies.data ?? []).filter((c) => c.behind).length
   const dirty = JSON.stringify(toInput(draft)) !== saved
   const names = new Map((workouts.data ?? []).map((w) => [w.id, w.name]))
 
@@ -204,7 +218,13 @@ function Builder({
       setSaved(JSON.stringify(input))
       setSavedDraft(draft)
       toast({ title: 'Changes saved', description: input.name })
-      await queryClient.invalidateQueries({ queryKey: ['programs'] })
+      // People on this program keep their own copy: offer to bring the changes to them.
+      if (libraryId !== null)
+        void queryClient
+          .fetchQuery({ ...programCopiesQuery(libraryId), staleTime: 0 })
+          .then((list) => list.some((c) => c.behind) && setUpdateOpen(true))
+          .catch(() => {})
+      void queryClient.invalidateQueries({ queryKey: ['programs'] })
       if (!id)
         await navigate({
           to: '/programs/$programId',
@@ -255,7 +275,7 @@ function Builder({
                   title: 'Archived',
                   description: `${draft.name} is hidden. Restore it from Archived.`,
                 })
-                await queryClient.invalidateQueries({ queryKey: ['programs'] })
+                void queryClient.invalidateQueries({ queryKey: ['programs'] })
                 await navigate({ to: '/programs' })
               }}
             />
@@ -267,6 +287,23 @@ function Builder({
               onClick={() => setDeleting(true)}
             />
           </>
+        )}
+        {libraryId !== null && (copies.data?.length ?? 0) > 0 && (
+          <Button
+            variant="secondary"
+            icon={<RefreshCw className="size-4" aria-hidden />}
+            onClick={() => setUpdateOpen(true)}
+            aria-label={behind > 0 ? `Update clients, ${behind} behind` : undefined}
+            disabled={dirty}
+            title={dirty ? 'Save your changes first' : undefined}
+          >
+            Update clients
+            {behind > 0 && (
+              <span className="tabular grid h-5 min-w-5 place-items-center rounded-pill bg-clay px-1.5 font-extrabold text-[11px] text-on-clay">
+                {behind}
+              </span>
+            )}
+          </Button>
         )}
         {id && (
           <Button
@@ -525,6 +562,13 @@ function Builder({
         </div>
       </div>
       {id && <AssignDrawer programId={id} open={assignOpen} onClose={() => setAssignOpen(false)} />}
+      {libraryId !== null && (
+        <UpdateClientsDrawer
+          programId={libraryId}
+          open={updateOpen}
+          onClose={() => setUpdateOpen(false)}
+        />
+      )}
       <DeleteForGood
         kind="program"
         item={deleting && id ? { id, name: draft.name || 'this program' } : null}

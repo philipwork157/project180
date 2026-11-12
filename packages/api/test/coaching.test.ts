@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { ADMIN, call, createAdmin, MEMBER, signIn } from './helpers'
 
@@ -130,6 +131,58 @@ describe('coaches and clients', () => {
 })
 
 describe('personal program copies', () => {
+  it('copies a program of several workouts, each once, with its rows and groups', async () => {
+    const { coach, byEmail } = await team()
+    const { exerciseId, workout } = await workoutAndProgram(coach)
+    const second = await call<Json>('/workouts', {
+      method: 'POST',
+      cookie: coach,
+      body: {
+        name: 'Upper',
+        exercises: [
+          { exerciseId, targetSets: 3, restSeconds: 60, supersetGroup: 1 },
+          { exerciseId, targetSets: 2, restSeconds: 60, supersetGroup: 1 },
+        ],
+        groups: [{ groupNumber: 1, kind: 'superset', rounds: 3 }],
+      },
+    })
+    expect(second.status).toBe(201)
+    // 4 weeks x 2 days, two workouts used many times: still one copy of each.
+    const days = [1, 2, 3, 4].flatMap((weekNumber) => [
+      { weekNumber, dayNumber: 1, workoutId: workout.id },
+      { weekNumber, dayNumber: 3, workoutId: second.data.workout.id },
+    ])
+    const p = await call<Json>('/programs', {
+      method: 'POST',
+      cookie: coach,
+      body: { name: 'Block', durationWeeks: 4, days },
+    })
+    const sam = await byEmail(CLIENT.email)
+    const assign = await call('/enrollments', {
+      method: 'POST',
+      cookie: coach,
+      body: { userId: sam.id, programId: p.data.program.id, startDate: '2026-11-09' },
+    })
+    expect(assign.status).toBe(201)
+    const view = await call<Json>(`/admin/users/${sam.id}/progress`, { cookie: coach })
+    const copy = await call<Json>(`/programs/${view.data.progress.plan.enrollment.programId}`, {
+      cookie: coach,
+    })
+    expect(copy.data.program.days).toHaveLength(8)
+    const copyIds = [...new Set(copy.data.program.days.map((d: Json) => d.workoutId))]
+    expect(copyIds).toHaveLength(2)
+    expect(copyIds).not.toContain(workout.id)
+    expect(copyIds).not.toContain(second.data.workout.id)
+    const upper = await call<Json>(`/workouts/${copy.data.program.days[1].workoutId}`, {
+      cookie: coach,
+    })
+    expect(upper.data.workout).toMatchObject({ name: 'Upper', clientId: sam.id })
+    expect(upper.data.workout.exercises).toHaveLength(2)
+    expect(upper.data.workout.groups).toEqual([
+      expect.objectContaining({ groupNumber: 1, kind: 'superset', rounds: 3 }),
+    ])
+  })
+
   it('assigning gives the client their own copy; the library stays clean and untouched', async () => {
     const { coach, byEmail } = await team()
     const { program, workout, exerciseId } = await workoutAndProgram(coach)
@@ -228,6 +281,151 @@ describe('personal program copies', () => {
   })
 })
 
+const later = (ms = 5) => new Promise((r) => setTimeout(r, ms))
+
+/** Sam on the coach's program, with their copy's ids and first workout day. */
+async function samOnProgram() {
+  const t = await team()
+  const lib = await workoutAndProgram(t.coach)
+  const sam = await t.byEmail(CLIENT.email)
+  await call('/enrollments', {
+    method: 'POST',
+    cookie: t.coach,
+    body: { userId: sam.id, programId: lib.program.id, startDate: '2026-11-09' },
+  })
+  const enrollment = (await call<Json>(`/admin/users/${sam.id}/progress`, { cookie: t.coach })).data
+    .progress.plan.enrollment
+  const copy = (await call<Json>(`/programs/${enrollment.programId}`, { cookie: t.coach })).data
+    .program
+  const day = copy.days.find((d: Json) => d.workoutId !== null)
+  return { ...t, ...lib, sam, enrollment, copy, day }
+}
+
+const copiesOf = async (cookie: string, programId: number) =>
+  (await call<Json>(`/programs/${programId}/copies`, { cookie })).data.copies as Json[]
+
+describe('updating clients on a program', () => {
+  it('brings library changes into their copy and keeps their start date and progress', async () => {
+    const { coach, program, workout, exerciseId, enrollment, copy, day, sam } = await samOnProgram()
+    expect(await copiesOf(coach, program.id)).toMatchObject([
+      { enrollmentId: enrollment.id, behind: false, changedForThem: false },
+    ])
+    await later()
+    // The library workout gets 5 sets and the program a second day.
+    await call(`/workouts/${workout.id}`, {
+      method: 'PUT',
+      cookie: coach,
+      body: {
+        name: 'Legs v2',
+        exercises: [
+          { exerciseId, targetSets: 5, targetRepsMin: 5, targetRepsMax: 5, restSeconds: 120 },
+        ],
+      },
+    })
+    await call(`/programs/${program.id}`, {
+      method: 'PUT',
+      cookie: coach,
+      body: {
+        name: 'Base v2',
+        durationWeeks: 2,
+        days: [
+          { weekNumber: 1, dayNumber: 1, workoutId: workout.id },
+          { weekNumber: 2, dayNumber: 3, workoutId: workout.id },
+        ],
+      },
+    })
+    expect((await copiesOf(coach, program.id))[0]).toMatchObject({ behind: true })
+
+    const sync = await call<Json>(`/programs/${program.id}/sync`, {
+      method: 'POST',
+      cookie: coach,
+      body: { enrollmentIds: [enrollment.id] },
+    })
+    expect(sync.status).toBe(200)
+    expect(sync.data.copies[0]).toMatchObject({ behind: false, changedForThem: false })
+
+    const after = (await call<Json>(`/programs/${copy.id}`, { cookie: coach })).data.program
+    expect(after).toMatchObject({ id: copy.id, name: 'Base v2', durationWeeks: 2 })
+    const slots = after.days.filter((d: Json) => d.workoutId !== null)
+    expect(slots.map((d: Json) => [d.weekNumber, d.dayNumber])).toEqual([
+      [1, 1],
+      [2, 3],
+    ])
+    // Same day row and same workout copy, so logged sessions still line up.
+    expect(slots[0].id).toBe(day.id)
+    expect(slots.every((d: Json) => d.workoutId === day.workoutId)).toBe(true)
+    const theirWorkout = (await call<Json>(`/workouts/${day.workoutId}`, { cookie: coach })).data
+      .workout
+    expect(theirWorkout).toMatchObject({ name: 'Legs v2' })
+    expect(theirWorkout.exercises[0].targetSets).toBe(5)
+
+    const progress = await call<Json>(`/admin/users/${sam.id}/progress`, { cookie: coach })
+    expect(progress.data.progress.plan.enrollment).toMatchObject({
+      id: enrollment.id,
+      startDate: '2026-11-09',
+    })
+  })
+
+  it('flags copies that were changed just for them', async () => {
+    const { coach, program, exerciseId, day } = await samOnProgram()
+    await later(1100)
+    await call(`/workouts/${day.workoutId}`, {
+      method: 'PUT',
+      cookie: coach,
+      body: {
+        name: 'Legs (easier)',
+        exercises: [
+          { exerciseId, targetSets: 2, targetRepsMin: 8, targetRepsMax: 10, restSeconds: 60 },
+        ],
+      },
+    })
+    expect((await copiesOf(coach, program.id))[0]).toMatchObject({ changedForThem: true })
+  })
+
+  it('re-assigning the same program can update instead of starting over', async () => {
+    const { coach, program, sam, enrollment } = await samOnProgram()
+    const res = await call<Json>('/enrollments', {
+      method: 'POST',
+      cookie: coach,
+      body: { userId: sam.id, programId: program.id, startDate: '2026-12-01', mode: 'update' },
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.enrollment).toMatchObject({ id: enrollment.id, startDate: '2026-11-09' })
+    // Not on that program: nothing to update.
+    const other = await workoutAndProgram(coach)
+    const wrong = await call('/enrollments', {
+      method: 'POST',
+      cookie: coach,
+      body: {
+        userId: sam.id,
+        programId: other.program.id,
+        startDate: '2026-12-01',
+        mode: 'update',
+      },
+    })
+    expect(wrong.status).toBe(409)
+  })
+
+  it("a coach can't see or update anyone else's clients on a program", async () => {
+    const { owner, coach, byEmail } = await team()
+    const { program } = await workoutAndProgram(owner)
+    const wife = await byEmail(MEMBER.email)
+    const enrol = await call<Json>('/enrollments', {
+      method: 'POST',
+      cookie: owner,
+      body: { userId: wife.id, programId: program.id, startDate: '2026-11-09' },
+    })
+    expect(await copiesOf(owner, program.id)).toHaveLength(1)
+    expect((await call(`/programs/${program.id}/copies`, { cookie: coach })).status).toBe(404)
+    const sync = await call(`/programs/${program.id}/sync`, {
+      method: 'POST',
+      cookie: coach,
+      body: { enrollmentIds: [enrol.data.enrollment.id] },
+    })
+    expect(sync.status).toBe(404)
+  })
+})
+
 describe('what was prescribed, and groups', () => {
   it('a session keeps the targets it started with, even after the workout changes', async () => {
     await createAdmin()
@@ -292,5 +490,114 @@ describe('what was prescribed, and groups', () => {
       { groupNumber: 1, kind: 'interval', rounds: 8, workSeconds: 20, restSeconds: 10 },
     ])
     expect(s.data.session.exercises.map((e: Json) => e.supersetGroup)).toEqual([1, 1, null])
+  })
+})
+
+describe('deleting a person', () => {
+  it('only an owner can, and never themselves or another owner', async () => {
+    const { owner, coach, byEmail } = await team()
+    const sam = await byEmail(CLIENT.email)
+    const me = await byEmail(ADMIN.email)
+    expect((await call(`/admin/users/${sam.id}`, { method: 'DELETE', cookie: coach })).status).toBe(
+      403,
+    )
+    const client = await signIn(MEMBER.email, MEMBER.password)
+    expect(
+      (await call(`/admin/users/${sam.id}`, { method: 'DELETE', cookie: client })).status,
+    ).toBe(403)
+    expect((await call(`/admin/users/${me.id}`, { method: 'DELETE', cookie: owner })).status).toBe(
+      403,
+    )
+    expect((await call('/admin/users/999999', { method: 'DELETE', cookie: owner })).status).toBe(
+      404,
+    )
+    expect(await byEmail(CLIENT.email)).toBeTruthy()
+  })
+
+  it('removes a client and everything they logged', async () => {
+    const { owner, coach, byEmail } = await team()
+    const { program, exerciseId } = await workoutAndProgram(coach)
+    const sam = await byEmail(CLIENT.email)
+    await call('/enrollments', {
+      method: 'POST',
+      cookie: coach,
+      body: { userId: sam.id, programId: program.id, startDate: '2026-11-09' },
+    })
+    const client = await signIn(CLIENT.email, CLIENT.password)
+    const plan = await call<Json>('/me/plan', { cookie: client })
+    const day = plan.data.plan.days.find((d: Json) => d.workoutId !== null)
+    const started = await call<Json>('/sessions', {
+      method: 'POST',
+      cookie: client,
+      body: {
+        clientUuid: crypto.randomUUID(),
+        workoutId: day.workoutId,
+        enrollmentId: plan.data.plan.enrollment.id,
+        programDayId: day.programDayId,
+      },
+    })
+    const sessionId = started.data.session.id
+    await call(`/sessions/${sessionId}/sets`, {
+      method: 'PUT',
+      cookie: client,
+      body: { clientUuid: crypto.randomUUID(), exerciseId, setNumber: 1, weightKg: 40, reps: 8 },
+    })
+    await call(`/sessions/${sessionId}/finish`, { method: 'POST', cookie: client, body: {} })
+    await call('/me/checkins', {
+      method: 'PUT',
+      cookie: client,
+      body: { clientUuid: crypto.randomUUID(), date: '2026-11-10', weightKg: 80 },
+    })
+
+    const res = await call<Json>(`/admin/users/${sam.id}`, { method: 'DELETE', cookie: owner })
+    expect(res.status).toBe(200)
+    expect(res.data.removed).toEqual({ workouts: 1, checkins: 1 })
+    expect(await byEmail(CLIENT.email)).toBeUndefined()
+    // Signed out everywhere, and the account can't sign in again.
+    expect((await call('/me', { cookie: client })).status).toBe(401)
+    const again = await call('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: CLIENT.email, password: CLIENT.password },
+    })
+    expect(again.status).toBe(401)
+    // The coach's library program is untouched; only the client's copy went.
+    expect((await call(`/programs/${program.id}`, { cookie: coach })).status).toBe(200)
+    for (const table of [
+      'workouts',
+      'programs',
+      'workout_sessions',
+      'body_checkins',
+      'enrollments',
+    ]) {
+      const column = table === 'workouts' || table === 'programs' ? 'client_id' : 'user_id'
+      const left = await env.DB.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${column} = ?`)
+        .bind(sam.id)
+        .first<{ n: number }>()
+      expect(left?.n, table).toBe(0)
+    }
+  })
+
+  it('removing a coach hands their clients and library to the owner', async () => {
+    const { owner, byEmail } = await team()
+    const kim = await byEmail(COACH.email)
+    const coach = await signIn(COACH.email, COACH.password)
+    const { program, workout } = await workoutAndProgram(coach)
+    const sam = await byEmail(CLIENT.email)
+    await call('/enrollments', {
+      method: 'POST',
+      cookie: coach,
+      body: { userId: sam.id, programId: program.id, startDate: '2026-11-09' },
+    })
+
+    const res = await call<Json>(`/admin/users/${kim.id}`, { method: 'DELETE', cookie: owner })
+    expect(res.status).toBe(200)
+    expect(res.data.handedOver).toEqual({ clients: 1, exercises: 1, workouts: 1, programs: 1 })
+    const me = await byEmail(ADMIN.email)
+    expect((await byEmail(CLIENT.email)).coachId).toBe(me.id)
+    expect((await call(`/workouts/${workout.id}`, { cookie: owner })).status).toBe(200)
+    expect((await call(`/programs/${program.id}`, { cookie: owner })).status).toBe(200)
+    // The client keeps their program and history.
+    const progress = await call<Json>(`/admin/users/${sam.id}/progress`, { cookie: owner })
+    expect(progress.data.progress.plan.enrollment.sourceProgramId).toBe(program.id)
   })
 })

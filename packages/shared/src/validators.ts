@@ -13,6 +13,7 @@ import {
   WEIGHT_UNITS,
   WORKOUT_SECTIONS,
 } from './enums'
+import { MAX_ALTERNATIVES } from './swaps'
 
 const name = z.string().trim().min(1, 'Required').max(80)
 const password = z.string().min(8, 'At least 8 characters').max(128)
@@ -213,8 +214,18 @@ export const assignInput = z.object({
   userId: id,
   programId: id,
   startDate: isoDay,
+  /**
+   * Already on this program? `update` brings their copy up to date and keeps their start date
+   * and progress; `restart` gives them a fresh copy from `startDate`.
+   */
+  mode: z.enum(['restart', 'update']).default('restart'),
 })
-export type AssignInput = z.infer<typeof assignInput>
+export type AssignInput = z.input<typeof assignInput>
+
+/** Bring these people's copies of a library program up to date with it. */
+export const syncCopiesInput = z.object({
+  enrollmentIds: z.array(id).min(1).max(200),
+})
 
 export const startSessionInput = z.object({
   clientUuid: z.uuid(),
@@ -246,3 +257,20 @@ export const finishSessionInput = z.object({
   notes: z.string().trim().max(2000).nullish(),
 })
 export type FinishSessionInput = z.input<typeof finishSessionInput>
+
+/** Swap an exercise in a workout that's in progress. */
+export const swapExerciseInput = z.object({
+  /** The exercise as it is in the session now. */
+  exerciseId: z.number().int().positive(),
+  replacementId: z.number().int().positive(),
+})
+export type SwapExerciseInput = z.input<typeof swapExerciseInput>
+
+/** A coach's suggested swaps for one exercise, in order. */
+export const exerciseAlternativesInput = z.object({
+  alternativeIds: z
+    .array(z.number().int().positive())
+    .max(MAX_ALTERNATIVES, `At most ${MAX_ALTERNATIVES} alternatives`)
+    .refine((ids) => new Set(ids).size === ids.length, 'Each exercise only once'),
+})
+export type ExerciseAlternativesInput = z.input<typeof exerciseAlternativesInput>

@@ -1,0 +1,1 @@
+ALTER TABLE `programs` ADD `synced_at` integer;

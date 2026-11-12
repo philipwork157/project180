@@ -5,6 +5,7 @@ import { createFileRoute, Link, Outlet, redirect, useLocation } from '@tanstack/
 import { CalendarDays, ChevronUp, Flame, TrendingUp, UserRound } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Elapsed } from '../components/elapsed'
+import { useWeighInStatus } from '../components/weigh-in-card'
 import { useHeartbeat } from '../lib/use-heartbeat'
 
 /** Signed-in phone layout: the screen, then a bottom tab bar. */
@@ -31,6 +32,9 @@ function AppLayout() {
   const active = useQuery(planQuery).data?.activeSession ?? null
   // Today has its own big banner; everywhere else gets the mini bar.
   const showMini = active !== null && pathname !== '/'
+  // A weigh-in waiting: a dot on Today from every other tab.
+  const weighIn = useWeighInStatus().status
+  const weighInDue = weighIn !== null && !weighIn.done
   return (
     <div className="flex min-h-dvh w-full flex-col bg-bg">
       {/* New tab shows at once with a short slide in; no waiting for the old one to leave. */}
@@ -99,6 +103,9 @@ function AppLayout() {
                     <Icon className="size-6" strokeWidth={2.2} aria-hidden />
                     {to === '/' && active && (
                       <span className="absolute top-1 right-3 size-2.5 rounded-full bg-clay ring-2 ring-surface" />
+                    )}
+                    {to === '/' && !active && weighInDue && (
+                      <span className="absolute top-0.5 right-2.5 size-2.5 rounded-full bg-sand ring-2 ring-surface" />
                     )}
                   </span>
                   {label}

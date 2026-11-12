@@ -3,37 +3,31 @@ import {
   bodyCheckins,
   type Db,
   enrollments,
-  exercises,
-  programs,
   sessions,
-  setLogs,
   users,
   workoutExercises,
   workoutSessions,
   workouts,
 } from '@project180/db'
 import {
-  addDays,
-  average,
   buildProgramCalendar,
   choosePasswordInput,
   clientProfileInput,
   heartbeatInput,
   type MyPlan,
-  type MyStats,
   todayIn,
   updateProfileInput,
-  weekdayIndex,
 } from '@project180/shared'
-import { and, asc, count, desc, eq, gt, gte, inArray, ne, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
+import { inChunks } from '../batch'
 import type { AppEnv } from '../env'
 import { parseBody } from '../errors'
 import { requireUser } from '../middleware'
 import { loadProfile, saveProfile } from '../profiles'
-import { completedBy, sessionSummaries } from '../sessions'
+import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
 import { enrollmentQuery } from './enrollments'
 import { loadProgramDays } from './programs'
@@ -50,73 +44,134 @@ export async function buildPlan(
   db: Db,
   person: { id: number; timezone: string },
 ): Promise<MyPlan | null> {
-  const [enrollment] = await enrollmentQuery(db)
-    .where(and(eq(enrollments.userId, person.id), eq(enrollments.status, 'active')))
-    .limit(1)
-  if (!enrollment) return null
+  return (await buildPlans(db, [person])).get(person.id) ?? null
+}
+
+/**
+ * Several people's plans at once (the dashboard overview). A fixed number of queries whatever
+ * the head count, so the overview stays inside D1's per-request query limit as clients grow.
+ */
+export async function buildPlans(
+  db: Db,
+  people: { id: number; timezone: string }[],
+): Promise<Map<number, MyPlan | null>> {
+  const result = new Map<number, MyPlan | null>(people.map((p) => [p.id, null]))
+  if (people.length === 0) return result
+
+  const enrollmentRows = await inChunks(
+    people.map((p) => p.id),
+    (ids) =>
+      enrollmentQuery(db)
+        .where(and(inArray(enrollments.userId, ids), eq(enrollments.status, 'active')))
+        .orderBy(desc(enrollments.id)),
+  )
+  // One active enrollment per person (the newest, should there ever be two).
+  const enrollmentOf = new Map<number, (typeof enrollmentRows)[number]>()
+  for (const e of enrollmentRows) if (!enrollmentOf.has(e.userId)) enrollmentOf.set(e.userId, e)
+  const active = [...enrollmentOf.values()]
+  if (active.length === 0) return result
 
   // Independent reads: run them together (each D1 call is a round trip).
-  const [[program], dayMap, done] = await Promise.all([
-    db.select().from(programs).where(eq(programs.id, enrollment.programId)),
-    loadProgramDays(db, [enrollment.programId]),
-    db
-      .select({ id: workoutSessions.id, programDayId: workoutSessions.programDayId })
-      .from(workoutSessions)
-      .where(and(completedBy(person.id), eq(workoutSessions.enrollmentId, enrollment.id)))
-      .orderBy(asc(workoutSessions.startedAt)),
-  ])
-  const days = dayMap.get(enrollment.programId) ?? []
-  // Latest finished session per program day, so the calendar can open it.
-  const sessionByDay = new Map<number, number>()
-  for (const d of done) if (d.programDayId !== null) sessionByDay.set(d.programDayId, d.id)
-  const today = todayIn(person.timezone)
-  const calendar = buildProgramCalendar({
-    startDate: enrollment.startDate,
-    durationWeeks: program?.durationWeeks ?? enrollment.durationWeeks,
-    days,
-    completedProgramDayIds: done.map((d) => d.programDayId).filter((v): v is number => v !== null),
-    today,
-  })
-
-  const workoutIds = [
-    ...new Set(days.map((d) => d.workoutId).filter((v): v is number => v !== null)),
-  ]
-  // Names and exercise counts only (counted in SQL, not by loading every exercise).
-  const [workoutRows, counts] = workoutIds.length
-    ? await Promise.all([
+  const [dayMaps, done] = await Promise.all([
+    inChunks([...new Set(active.map((e) => e.programId))], async (ids) => [
+      await loadProgramDays(db, ids),
+    ]),
+    inChunks(
+      active.map((e) => e.id),
+      (ids) =>
         db
           .select({
-            id: workouts.id,
-            name: workouts.name,
-            estimatedMinutes: workouts.estimatedMinutes,
+            id: workoutSessions.id,
+            userId: workoutSessions.userId,
+            enrollmentId: workoutSessions.enrollmentId,
+            programDayId: workoutSessions.programDayId,
           })
-          .from(workouts)
-          .where(inArray(workouts.id, workoutIds)),
-        db
-          .select({ workoutId: workoutExercises.workoutId, n: count() })
-          .from(workoutExercises)
-          .where(inArray(workoutExercises.workoutId, workoutIds))
-          .groupBy(workoutExercises.workoutId),
-      ])
-    : [[], []]
-  const countOf = new Map(counts.map((r) => [r.workoutId, r.n]))
-  const lookup: MyPlan['workouts'] = {}
-  for (const w of workoutRows) lookup[w.id] = { ...w, exerciseCount: countOf.get(w.id) ?? 0 }
-
-  const plan: MyPlan = {
-    enrollment,
-    today,
-    workouts: lookup,
-    days: calendar.map((d) => ({
-      ...d,
-      workoutName: d.workoutId ? (lookup[d.workoutId]?.name ?? null) : null,
-      sessionId:
-        d.state === 'done' && d.programDayId !== null
-          ? (sessionByDay.get(d.programDayId) ?? null)
-          : null,
-    })),
+          .from(workoutSessions)
+          .where(
+            and(
+              inArray(workoutSessions.enrollmentId, ids),
+              eq(workoutSessions.status, 'completed'),
+            ),
+          )
+          .orderBy(asc(workoutSessions.startedAt)),
+    ),
+  ])
+  const daysOf = new Map(dayMaps.flatMap((m) => [...m]))
+  const doneOf = new Map<number, typeof done>()
+  for (const d of done) {
+    if (d.enrollmentId === null) continue
+    const list = doneOf.get(d.enrollmentId) ?? []
+    list.push(d)
+    doneOf.set(d.enrollmentId, list)
   }
-  return plan
+
+  const workoutIds = [
+    ...new Set(
+      [...daysOf.values()].flat().flatMap((d) => (d.workoutId === null ? [] : [d.workoutId])),
+    ),
+  ]
+  // Names and exercise counts only (counted in SQL, not by loading every exercise).
+  const [workoutRows, counts] = await Promise.all([
+    inChunks(workoutIds, (ids) =>
+      db
+        .select({
+          id: workouts.id,
+          name: workouts.name,
+          estimatedMinutes: workouts.estimatedMinutes,
+        })
+        .from(workouts)
+        .where(inArray(workouts.id, ids)),
+    ),
+    inChunks(workoutIds, (ids) =>
+      db
+        .select({ workoutId: workoutExercises.workoutId, n: count() })
+        .from(workoutExercises)
+        .where(inArray(workoutExercises.workoutId, ids))
+        .groupBy(workoutExercises.workoutId),
+    ),
+  ])
+  const countOf = new Map(counts.map((r) => [r.workoutId, r.n]))
+  const workoutOf = new Map(workoutRows.map((w) => [w.id, w]))
+
+  for (const person of people) {
+    const enrollment = enrollmentOf.get(person.id)
+    if (!enrollment) continue
+    const days = daysOf.get(enrollment.programId) ?? []
+    // Only sessions they logged themselves count (the enrollment is theirs, but be strict).
+    const finished = (doneOf.get(enrollment.id) ?? []).filter((d) => d.userId === person.id)
+    // Latest finished session per program day, so the calendar can open it.
+    const sessionByDay = new Map<number, number>()
+    for (const d of finished) if (d.programDayId !== null) sessionByDay.set(d.programDayId, d.id)
+    const today = todayIn(person.timezone)
+    const calendar = buildProgramCalendar({
+      startDate: enrollment.startDate,
+      durationWeeks: enrollment.durationWeeks,
+      days,
+      completedProgramDayIds: finished
+        .map((d) => d.programDayId)
+        .filter((v): v is number => v !== null),
+      today,
+    })
+    const lookup: MyPlan['workouts'] = {}
+    for (const d of days) {
+      const w = d.workoutId === null ? undefined : workoutOf.get(d.workoutId)
+      if (w) lookup[w.id] = { ...w, exerciseCount: countOf.get(w.id) ?? 0 }
+    }
+    result.set(person.id, {
+      enrollment,
+      today,
+      workouts: lookup,
+      days: calendar.map((d) => ({
+        ...d,
+        workoutName: d.workoutId ? (lookup[d.workoutId]?.name ?? null) : null,
+        sessionId:
+          d.state === 'done' && d.programDayId !== null
+            ? (sessionByDay.get(d.programDayId) ?? null)
+            : null,
+      })),
+    })
+  }
+  return result
 }
 
 export const meRoutes = new Hono<AppEnv>()
@@ -199,79 +254,7 @@ export const meRoutes = new Hono<AppEnv>()
   .get('/stats', async (c) => {
     const { db, user } = c.var
     const weeksBack = Math.min(Math.max(Number(c.req.query('weeks') ?? 8) || 8, 1), 52)
-    const today = todayIn(user.timezone)
-    const thisWeek = addDays(today, -weekdayIndex(today))
-    const firstWeek = addDays(thisWeek, -7 * (weeksBack - 1))
-    const since = new Date(`${firstWeek}T00:00:00Z`)
-    since.setUTCDate(since.getUTCDate() - 1) // time-zone margin; filtered by local day below
-
-    // Independent reads, run together. Records are worked out in SQL (one row per exercise)
-    // instead of downloading every set ever logged.
-    const [windowRows, bestRows, checkins, recent] = await Promise.all([
-      sessionSummaries(db, and(completedBy(user.id), gte(workoutSessions.startedAt, since)), 1000),
-      db
-        .select({
-          exerciseId: setLogs.exerciseId,
-          exerciseName: exercises.name,
-          bestWeightKg: sql<number>`max(${setLogs.weightKg})`,
-          // Epley, the same as estimatedOneRepMax in shared (1 rep counts as itself).
-          bestOneRepMax: sql<
-            number | null
-          >`max(case when ${setLogs.reps} = 1 then ${setLogs.weightKg} when ${setLogs.reps} > 1 then ${setLogs.weightKg} * (1 + ${setLogs.reps} / 30.0) end)`,
-        })
-        .from(setLogs)
-        .innerJoin(workoutSessions, eq(workoutSessions.id, setLogs.sessionId))
-        .innerJoin(exercises, eq(exercises.id, setLogs.exerciseId))
-        .where(and(completedBy(user.id), eq(setLogs.isWarmup, false), gt(setLogs.weightKg, 0)))
-        .groupBy(setLogs.exerciseId)
-        .orderBy(desc(sql`max(${setLogs.weightKg})`))
-        .limit(12),
-      db
-        .select({ date: bodyCheckins.date, weightKg: bodyCheckins.weightKg })
-        .from(bodyCheckins)
-        .where(eq(bodyCheckins.userId, user.id))
-        .orderBy(asc(bodyCheckins.date)),
-      sessionSummaries(db, completedBy(user.id), 10),
-    ])
-    const windowSessions = windowRows
-      .map((s) => ({ ...s, day: todayIn(user.timezone, new Date(s.startedAt)) }))
-      .filter((s) => s.day >= firstWeek)
-
-    const weeks: MyStats['weeks'] = []
-    for (let i = 0; i < weeksBack; i++) {
-      const weekStart = addDays(firstWeek, i * 7)
-      const inWeek = windowSessions.filter(
-        (s) => s.day >= weekStart && s.day < addDays(weekStart, 7),
-      )
-      weeks.push({
-        weekStart,
-        workouts: inWeek.length,
-        volumeKg: Math.round(inWeek.reduce((a, s) => a + s.volumeKg, 0)),
-        minutes: Math.round(inWeek.reduce((a, s) => a + (s.durationSeconds ?? 0), 0) / 60),
-      })
-    }
-    const records: MyStats['records'] = bestRows.map((r) => ({
-      exerciseId: r.exerciseId,
-      exerciseName: r.exerciseName,
-      bestWeightKg: Number(r.bestWeightKg),
-      bestOneRepMax:
-        r.bestOneRepMax === null ? null : Math.round(Number(r.bestOneRepMax) * 10) / 10,
-    }))
-
-    const avgMinutes = average(windowSessions.map((s) => (s.durationSeconds ?? 0) / 60))
-    const stats: MyStats = {
-      workouts: windowSessions.length,
-      volumeKg: Math.round(windowSessions.reduce((a, s) => a + s.volumeKg, 0)),
-      avgMinutes: avgMinutes === null ? null : Math.round(avgMinutes),
-      avgFeeling: average(windowSessions.map((s) => s.feeling)),
-      weeks,
-      records,
-      recent,
-      bodyWeight: checkins.filter(
-        (r): r is { date: string; weightKg: number } => r.weightKg !== null,
-      ),
-    }
-    return c.json({ stats })
+    return c.json({ stats: await buildStats(db, user, weeksBack) })
   })
   /** Log body weight for a day. Logging the same day again replaces it. */
   .put('/checkins', async (c) => {

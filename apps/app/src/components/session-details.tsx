@@ -8,7 +8,7 @@ import {
 } from '@project180/shared'
 import { Chip, MUSCLE_GROUP_TONE } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
-import { Trophy } from 'lucide-react'
+import { ArrowLeftRight, Trophy } from 'lucide-react'
 import { FeelingBadge } from './feeling'
 
 function setSummary(set: LoggedSet) {
@@ -48,6 +48,7 @@ export function SessionDetails({
         working.find((x) => x.exerciseId === id)?.exerciseName ??
         'Exercise',
       muscle: s.exercises.find((e) => e.exerciseId === id)?.muscleGroup,
+      swappedFrom: s.exercises.find((e) => e.exerciseId === id)?.swappedFrom?.exerciseName,
       sets: working.filter((x) => x.exerciseId === id).sort((a, b) => a.setNumber - b.setNumber),
     }))
     .filter((g) => g.sets.length > 0)
@@ -100,7 +101,15 @@ export function SessionDetails({
             return (
               <li key={g.id} className="rounded-lg bg-surface-raised p-4">
                 <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate font-bold text-[16px]">{g.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-bold text-[16px]">{g.name}</span>
+                    {g.swappedFrom && (
+                      <span className="mt-0.5 flex items-center gap-1.5 font-semibold text-[13px] text-ink-muted">
+                        <ArrowLeftRight className="size-3.5 shrink-0" aria-hidden />
+                        <span className="truncate">Swapped from {g.swappedFrom}</span>
+                      </span>
+                    )}
+                  </span>
                   {g.muscle && (
                     <Chip tone={MUSCLE_GROUP_TONE[g.muscle]} className="h-6 text-[12px]">
                       {g.sets.length} {g.sets.length === 1 ? 'set' : 'sets'}

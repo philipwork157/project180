@@ -47,13 +47,8 @@ export default defineConfig(({ command }) => ({
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'google-fonts', expiration: { maxEntries: 20 } },
-          },
-        ],
+        // Fonts: precache the Latin files only; the extra-character sets load if a name needs them.
+        globIgnores: ['**/*-latin-ext-*.woff2', '**/*-vietnamese-*.woff2'],
       },
     }),
   ],

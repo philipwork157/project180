@@ -112,7 +112,11 @@ export const workoutExercises = sqliteTable(
     supersetGroup: integer('superset_group'),
     notes: text('notes'),
   },
-  (t) => [index('workout_exercises_workout_idx').on(t.workoutId, t.position)],
+  (t) => [
+    index('workout_exercises_workout_idx').on(t.workoutId, t.position),
+    // "Where is this exercise used?" before archiving or deleting it.
+    index('workout_exercises_exercise_idx').on(t.exerciseId),
+  ],
 )
 
 /** A multi-week plan, such as "4-Week Strength". */
@@ -127,6 +131,8 @@ export const programs = sqliteTable(
     clientId: clientId(),
     // The library program this copy was made from.
     sourceProgramId: integer('source_program_id'),
+    // On a copy: when it was last made or brought up to date from the library program.
+    syncedAt: timestamp('synced_at'),
     archivedAt: timestamp('archived_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -134,6 +140,8 @@ export const programs = sqliteTable(
   (t) => [
     index('programs_created_by_idx').on(t.createdBy),
     index('programs_client_idx').on(t.clientId),
+    // Clients' copies of a library program (updating them, "behind" badges).
+    index('programs_source_idx').on(t.sourceProgramId),
   ],
 )
 
@@ -153,7 +161,11 @@ export const programDays = sqliteTable(
     checkinRequired: integer('checkin_required', { mode: 'boolean' }).notNull().default(false),
     notes: text('notes'),
   },
-  (t) => [uniqueIndex('program_days_slot_uq').on(t.programId, t.weekNumber, t.dayNumber)],
+  (t) => [
+    uniqueIndex('program_days_slot_uq').on(t.programId, t.weekNumber, t.dayNumber),
+    // Which programs schedule a workout (library lists, purge checks).
+    index('program_days_workout_idx').on(t.workoutId),
+  ],
 )
 
 /** Cached YouTube search results per exercise (the API allows ~100 searches a day). */
@@ -167,3 +179,25 @@ export const videoSearches = sqliteTable('video_searches', {
     .$type<Array<{ videoId: string; title: string; channel: string; thumbnail: string }>>(),
   fetchedAt: timestamp('fetched_at').notNull(),
 })
+
+/**
+ * What a coach suggests when a client can't do an exercise (machine taken, no equipment).
+ * Shown first in the app's swap sheet; clients can still search for anything else.
+ */
+export const exerciseAlternatives = sqliteTable(
+  'exercise_alternatives',
+  {
+    exerciseId: integer('exercise_id')
+      .notNull()
+      .references(() => exercises.id, { onDelete: 'cascade' }),
+    alternativeId: integer('alternative_id')
+      .notNull()
+      .references(() => exercises.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    createdBy: createdBy(),
+  },
+  (t) => [
+    uniqueIndex('exercise_alternatives_pair_uq').on(t.exerciseId, t.alternativeId),
+    index('exercise_alternatives_exercise_idx').on(t.exerciseId, t.position),
+  ],
+)

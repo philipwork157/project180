@@ -1,4 +1,10 @@
-import { ApiError, api, exercisesQuery, exerciseVideosQuery } from '@project180/client'
+import {
+  ApiError,
+  api,
+  exercisesQuery,
+  exerciseVideosQuery,
+  putExercise,
+} from '@project180/client'
 import {
   type Exercise,
   exerciseVideoSearchUrl,
@@ -26,9 +32,13 @@ export function ExerciseVideo({ exercise }: { exercise: Exercise }) {
 
   const save = useMutation({
     mutationFn: (videoUrl: string | null) =>
-      api(`/exercises/${exercise.id}`, { method: 'PATCH', body: { videoUrl } }),
-    onSuccess: async (_, videoUrl) => {
-      await queryClient.invalidateQueries({ queryKey: ['exercises'] })
+      api<{ exercise: Exercise }>(`/exercises/${exercise.id}`, {
+        method: 'PATCH',
+        body: { videoUrl },
+      }),
+    onSuccess: ({ exercise: saved }, videoUrl) => {
+      putExercise(queryClient, saved)
+      void queryClient.invalidateQueries({ queryKey: ['exercises'] })
       setChoosing(false)
       setPreview(null)
       setLink('')

@@ -40,17 +40,14 @@ export default defineConfig({
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // Fonts: precache the Latin files only; the extra-character sets load if a name needs them.
+        globIgnores: ['**/*-latin-ext-*.woff2', '**/*-vietnamese-*.woff2'],
         runtimeCaching: [
           {
             // Exercise photos: not precached (about 10 MB), kept once seen so they work offline.
             urlPattern: ({ url }) => url.pathname.startsWith('/exercise-images/'),
             handler: 'CacheFirst',
             options: { cacheName: 'exercise-images', expiration: { maxEntries: 600 } },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'google-fonts', expiration: { maxEntries: 20 } },
           },
         ],
       },

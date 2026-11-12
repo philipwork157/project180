@@ -87,7 +87,7 @@ function NameForm({ me }: { me: Me }) {
         body: { name: name.trim() },
       })
       queryClient.setQueryData(meQuery.queryKey, user)
-      await queryClient.invalidateQueries({ queryKey: ['admin'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin'] })
       toast({ title: 'Name saved', description: user.name })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save your name.')

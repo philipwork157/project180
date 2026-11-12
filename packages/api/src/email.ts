@@ -3,6 +3,7 @@
 // - No AWS key pair configured (local dev, tests): nothing is sent; the email is written to the log.
 // - EMAIL_REDIRECT_TO set (the Cloudflare dev environment): every email goes to that one address
 //   instead, with the real recipient shown in the subject and a banner, so testing never emails clients.
+import { TEMP_PASSWORD_DAYS } from '@project180/shared'
 import type { Bindings } from './env'
 
 export interface EmailMessage {
@@ -118,7 +119,8 @@ export async function sendEmail(env: Bindings, message: EmailMessage): Promise<E
     : message.text
 
   if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY || !env.EMAIL_FROM) {
-    console.log(`[email] Not sent (no AWS credentials). To: ${to}\nSubject: ${subject}\n\n${text}`)
+    // Recipient and subject only: the body can hold a temporary password, and logs are kept.
+    console.log(`[email] Not sent (no AWS credentials). To: ${to}\nSubject: ${subject}`)
     return { status: 'logged', to }
   }
 
@@ -179,7 +181,7 @@ export function welcomeEmail(input: {
       `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:6px 0 18px;background:#ece9e1;border-radius:14px"><tr><td style="padding:14px 16px;font:500 14px/22px Helvetica,Arial,sans-serif">
 <b>Email:</b> ${escapeHtml(input.email)}<br><b>Temporary password:</b> <span style="font-family:Menlo,Consolas,monospace">${escapeHtml(input.password)}</span></td></tr></table>`,
       `<a href="${escapeHtml(login)}" style="display:inline-block;background:#b6e63b;color:#202321;text-decoration:none;font:700 16px/1 Helvetica,Arial,sans-serif;padding:16px 26px;border-radius:14px">Open Project 180</a>`,
-      `<p style="margin:18px 0 0;font:500 13px/20px Helvetica,Arial,sans-serif;color:#5b605c">On your phone, open the link and choose "Add to Home Screen" to install it like an app. You'll choose your own password the first time you sign in.</p>`,
+      `<p style="margin:18px 0 0;font:500 13px/20px Helvetica,Arial,sans-serif;color:#5b605c">On your phone, open the link and choose "Add to Home Screen" to install it like an app. You'll choose your own password the first time you sign in. The temporary one works for ${TEMP_PASSWORD_DAYS} days.</p>`,
       `<p style="margin:12px 0 0;font:500 12px/18px Helvetica,Arial,sans-serif;color:#7a7f7b">To help your coach support you, Project 180 records when you use the app, roughly how long, and which devices you're signed in on, alongside the workouts and check-ins you log. Only you, your coach and the Project 180 team can see it. Ask your coach if you'd like it removed.</p>`,
     ].join('\n'),
   )
@@ -192,7 +194,7 @@ Temporary password: ${input.password}
 
 Sign in: ${login}
 
-On your phone, open the link and choose "Add to Home Screen" to install it like an app. You'll choose your own password the first time you sign in.
+On your phone, open the link and choose "Add to Home Screen" to install it like an app. You'll choose your own password the first time you sign in. The temporary one works for ${TEMP_PASSWORD_DAYS} days.
 
 To help your coach support you, Project 180 records when you use the app, roughly how long, and which devices you're signed in on, alongside the workouts and check-ins you log. Only you, your coach and the Project 180 team can see it. Ask your coach if you'd like it removed.
 
@@ -213,13 +215,13 @@ export function newPasswordEmail(input: {
     'Your new password',
     [
       p(
-        `Hi ${escapeHtml(first)}, your coach has set a temporary password for you. You'll choose your own when you sign in.`,
+        `Hi ${escapeHtml(first)}, your coach has set a temporary password for you. It works for ${TEMP_PASSWORD_DAYS} days, and you'll choose your own when you sign in.`,
       ),
       `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:6px 0 18px;background:#ece9e1;border-radius:14px"><tr><td style="padding:14px 16px;font:500 14px/22px Helvetica,Arial,sans-serif">
 <b>Email:</b> ${escapeHtml(input.email)}<br><b>Temporary password:</b> <span style="font-family:Menlo,Consolas,monospace">${escapeHtml(input.password)}</span></td></tr></table>`,
       `<a href="${escapeHtml(login)}" style="display:inline-block;background:#b6e63b;color:#202321;text-decoration:none;font:700 16px/1 Helvetica,Arial,sans-serif;padding:16px 26px;border-radius:14px">Sign in</a>`,
     ].join('\n'),
   )
-  const text = `Hi ${first}, your coach has set a temporary password for you. You'll choose your own when you sign in.\n\nEmail: ${input.email}\nTemporary password: ${input.password}\n\nSign in: ${login}`
+  const text = `Hi ${first}, your coach has set a temporary password for you. It works for ${TEMP_PASSWORD_DAYS} days, and you'll choose your own when you sign in.\n\nEmail: ${input.email}\nTemporary password: ${input.password}\n\nSign in: ${login}`
   return { subject: 'Your temporary Project 180 password', html, text }
 }

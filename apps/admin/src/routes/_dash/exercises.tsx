@@ -38,6 +38,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Archive, ArchiveRestore, Dumbbell, Pencil, Plus, Trash2 } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { SearchInput, Segmented, Toolbar } from '../../components/controls'
+import { ExerciseAlternatives } from '../../components/exercise-alternatives'
 import { ExercisePhotos, ExerciseThumb } from '../../components/exercise-photo'
 import { ExerciseVideo } from '../../components/exercise-video'
 import { PageHeader } from '../../components/page-header'
@@ -464,10 +465,13 @@ function ExercisesPage() {
             <div className="mt-6">
               <ExerciseVideo exercise={editing} />
             </div>
+            <div className="mt-6">
+              <ExerciseAlternatives exercise={editing} />
+            </div>
           </div>
         ) : (
           <p className="mt-6 border-border border-t pt-6 text-[13px] text-ink-muted">
-            Save the exercise first, then add photos and a video.
+            Save the exercise first, then add photos, a video and alternatives.
           </p>
         )}
       </Drawer>
@@ -511,6 +515,8 @@ function emptyTitle(view: 'active' | 'archived', search: string) {
 interface Usage {
   workouts: Array<{ id: number; name: string; archived: boolean }>
   loggedSets: number
+  /** Past workouts it was in (or swapped out of), even with nothing logged. */
+  pastWorkouts: number
 }
 
 /** Delete for good, but only if no workout uses it and nothing has been logged with it. */
@@ -535,14 +541,18 @@ function DeleteExercise({
   const [error, setError] = useState<string>()
   const remove = useMutation({
     mutationFn: (id: number) => api(`/exercises/${id}/permanent`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['exercises'] })
+    onSuccess: (_, id) => {
+      // Drop it from every cached exercise list now; refresh in the background.
+      queryClient.setQueriesData<Exercise[]>({ queryKey: ['exercises'] }, (list) =>
+        Array.isArray(list) ? list.filter((e) => e.id !== id) : list,
+      )
+      void queryClient.invalidateQueries({ queryKey: ['exercises'] })
       toast({ title: 'Exercise deleted' })
       onClose()
     },
   })
   const u = usage.data
-  const inUse = Boolean(u && (u.workouts.length > 0 || u.loggedSets > 0))
+  const inUse = Boolean(u && (u.workouts.length > 0 || u.loggedSets > 0 || u.pastWorkouts > 0))
 
   return (
     <ConfirmDialog
@@ -605,6 +615,12 @@ function DeleteExercise({
             <p>
               <b className="text-ink">{u.loggedSets}</b> logged{' '}
               {u.loggedSets === 1 ? 'set' : 'sets'} in workout history.
+            </p>
+          )}
+          {u.loggedSets === 0 && u.pastWorkouts > 0 && (
+            <p>
+              In <b className="text-ink">{u.pastWorkouts}</b> past{' '}
+              {u.pastWorkouts === 1 ? 'workout' : 'workouts'}, with nothing logged.
             </p>
           )}
         </div>

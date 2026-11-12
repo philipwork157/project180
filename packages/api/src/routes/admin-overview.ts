@@ -1,4 +1,5 @@
 import {
+  accounts,
   appActivity,
   enrollments,
   exercises,
@@ -7,15 +8,23 @@ import {
   workoutSessions,
   workouts,
 } from '@project180/db'
-import { ACTIVE_NOW_MS, type AdminOverview, addDays, average, todayIn } from '@project180/shared'
-import { and, count, desc, eq, gte, inArray } from 'drizzle-orm'
+import {
+  ACTIVE_NOW_MS,
+  type AdminOverview,
+  addDays,
+  average,
+  tempPasswordExpired,
+  todayIn,
+} from '@project180/shared'
+import { and, count, desc, eq, gte, inArray, sum } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { managedUsers } from '../access'
+import { inChunks } from '../batch'
 import type { AppEnv } from '../env'
 import { libraryOnly, visibleTo } from '../library'
 import { requireAdmin, requireUser } from '../middleware'
 import { sessionSummaries } from '../sessions'
-import { buildPlan } from './me'
+import { buildPlans } from './me'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -41,42 +50,89 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
         timezone: users.timezone,
         lastSeenAt: users.lastSeenAt,
         mustChangePassword: users.mustChangePassword,
+        passwordSetAt: accounts.updatedAt,
       })
       .from(users)
+      .leftJoin(accounts, and(eq(accounts.userId, users.id), eq(accounts.providerId, 'credential')))
       .where(and(eq(users.role, 'member'), managedUsers(me)))
     const ids = clients.map((u) => u.id)
     const byId = new Map(clients.map((u) => [u.id, u]))
+    const mine = <T>(query: (slice: number[]) => Promise<T[]>) => inChunks(ids, query)
 
-    // Workouts finished by these clients in the last 14 days.
-    const finished = ids.length
-      ? await db
+    // Independent reads, all at once: a fixed number of queries however many clients there are.
+    const [
+      finished,
+      thisWeek,
+      appRows,
+      plans,
+      recentRows,
+      [exerciseCount],
+      [workoutCount],
+      [programCount],
+      enrollmentCounts,
+    ] = await Promise.all([
+      // Workouts finished by these clients in the last 14 days.
+      mine((slice) =>
+        db
           .select({ userId: workoutSessions.userId, startedAt: workoutSessions.startedAt })
           .from(workoutSessions)
           .where(
             and(
-              inArray(workoutSessions.userId, ids),
+              inArray(workoutSessions.userId, slice),
               eq(workoutSessions.status, 'completed'),
               gte(workoutSessions.startedAt, lastWeekStart),
             ),
-          )
-      : []
-    const thisWeek = ids.length
-      ? await sessionSummaries(
+          ),
+      ),
+      mine((slice) =>
+        sessionSummaries(
           db,
           and(
-            inArray(workoutSessions.userId, ids),
+            inArray(workoutSessions.userId, slice),
             eq(workoutSessions.status, 'completed'),
             gte(workoutSessions.startedAt, weekStart),
           ),
           1000,
-        )
-      : []
-    const appRows = ids.length
-      ? await db
-          .select({ seconds: appActivity.seconds })
+        ),
+      ),
+      mine((slice) =>
+        db
+          .select({ seconds: sum(appActivity.seconds) })
           .from(appActivity)
-          .where(and(inArray(appActivity.userId, ids), gte(appActivity.date, weekFrom)))
-      : []
+          .where(and(inArray(appActivity.userId, slice), gte(appActivity.date, weekFrom))),
+      ),
+      buildPlans(db, clients),
+      mine((slice) =>
+        db
+          .select({
+            id: workoutSessions.id,
+            userId: workoutSessions.userId,
+            startedAt: workoutSessions.startedAt,
+          })
+          .from(workoutSessions)
+          .where(
+            and(inArray(workoutSessions.userId, slice), eq(workoutSessions.status, 'completed')),
+          )
+          .orderBy(desc(workoutSessions.startedAt))
+          .limit(8),
+      ),
+      db.select({ n: count() }).from(exercises).where(visibleTo(exercises, me)),
+      db
+        .select({ n: count() })
+        .from(workouts)
+        .where(and(visibleTo(workouts, me), libraryOnly(workouts))),
+      db
+        .select({ n: count() })
+        .from(programs)
+        .where(and(visibleTo(programs, me), libraryOnly(programs))),
+      mine((slice) =>
+        db
+          .select({ n: count() })
+          .from(enrollments)
+          .where(and(inArray(enrollments.userId, slice), eq(enrollments.status, 'active'))),
+      ),
+    ])
+    const activeEnrollments = enrollmentCounts.reduce((a, r) => a + r.n, 0)
 
     // Day by day for the chart (dates in the coach's time zone).
     const perDay = new Map<string, number>()
@@ -91,14 +147,19 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
     const attention: AdminOverview['attention'] = []
     let onProgram = 0
     for (const client of clients) {
-      const plan = await buildPlan(db, client)
+      const plan = plans.get(client.id) ?? null
       const seen = client.lastSeenAt?.getTime() ?? null
       if (client.mustChangePassword) {
         attention.push({
           userId: client.id,
           name: client.name,
           reason: 'not_started',
-          detail: seen ? 'Hasn’t chosen a password yet' : 'Hasn’t signed in yet',
+          detail:
+            client.passwordSetAt && tempPasswordExpired(client.passwordSetAt, now)
+              ? 'Temporary password expired: set a new one'
+              : seen
+                ? 'Hasn’t chosen a password yet'
+                : 'Hasn’t signed in yet',
         })
         continue
       }
@@ -139,44 +200,21 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
       }
     }
 
-    const recentRows = ids.length
-      ? await db
-          .select({ id: workoutSessions.id, userId: workoutSessions.userId })
-          .from(workoutSessions)
-          .where(and(inArray(workoutSessions.userId, ids), eq(workoutSessions.status, 'completed')))
-          .orderBy(desc(workoutSessions.startedAt))
-          .limit(8)
-      : []
-    const recentSummaries = recentRows.length
+    // The 8 newest across every slice, then their summaries.
+    const newest = recentRows
+      .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+      .slice(0, 8)
+    const recentSummaries = newest.length
       ? await sessionSummaries(
           db,
           inArray(
             workoutSessions.id,
-            recentRows.map((r) => r.id),
+            newest.map((r) => r.id),
           ),
           8,
         )
       : []
-    const ownerOf = new Map(recentRows.map((r) => [r.id, r.userId]))
-
-    const [exerciseCount] = await db
-      .select({ n: count() })
-      .from(exercises)
-      .where(visibleTo(exercises, me))
-    const [workoutCount] = await db
-      .select({ n: count() })
-      .from(workouts)
-      .where(and(visibleTo(workouts, me), libraryOnly(workouts)))
-    const [programCount] = await db
-      .select({ n: count() })
-      .from(programs)
-      .where(and(visibleTo(programs, me), libraryOnly(programs)))
-    const [activeEnrollments] = ids.length
-      ? await db
-          .select({ n: count() })
-          .from(enrollments)
-          .where(and(inArray(enrollments.userId, ids), eq(enrollments.status, 'active')))
-      : [{ n: 0 }]
+    const ownerOf = new Map(newest.map((r) => [r.id, r.userId]))
 
     const overview: AdminOverview = {
       clients: {
@@ -187,7 +225,7 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
         activeThisWeek: clients.filter(
           (u) => u.lastSeenAt && now - u.lastSeenAt.getTime() < 7 * DAY_MS,
         ).length,
-        onProgram: Math.max(onProgram, activeEnrollments?.n ?? 0),
+        onProgram: Math.max(onProgram, activeEnrollments),
       },
       week: {
         workouts: thisWeek.length,
@@ -195,7 +233,7 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
         volumeKg: Math.round(thisWeek.reduce((a, s) => a + s.volumeKg, 0)),
         minutes: Math.round(thisWeek.reduce((a, s) => a + (s.durationSeconds ?? 0), 0) / 60),
         avgFeeling: average(thisWeek.map((s) => s.feeling)),
-        appSeconds: appRows.reduce((a, r) => a + r.seconds, 0),
+        appSeconds: appRows.reduce((a, r) => a + Number(r.seconds ?? 0), 0),
         plannedDone,
         plannedTotal,
       },

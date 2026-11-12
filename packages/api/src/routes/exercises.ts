@@ -1,15 +1,24 @@
 import {
   type Db,
   type ExerciseRow,
+  exerciseAlternatives,
   exercises,
+  sessionExercises,
   setLogs,
   workoutExercises,
   workouts,
 } from '@project180/db'
-import { type Exercise, exerciseInput, exerciseUpdate, type Me } from '@project180/shared'
-import { and, asc, count, eq } from 'drizzle-orm'
+import {
+  type Exercise,
+  exerciseAlternativesInput,
+  exerciseInput,
+  exerciseUpdate,
+  type Me,
+} from '@project180/shared'
+import { and, asc, count, countDistinct, eq, inArray, isNull, or } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import { insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { assertCanEdit, visibleTo } from '../library'
@@ -51,17 +60,36 @@ async function findVisible(
 }
 
 /** Where an exercise is used. Anything used can be archived, not deleted. */
+/** Where an exercise is used: workouts, logged sets, and past workouts it was in (snapshots). */
 async function usageOf(db: Db, id: number) {
-  const inWorkouts = await db
-    .selectDistinct({ id: workouts.id, name: workouts.name, archived: workouts.archivedAt })
-    .from(workoutExercises)
-    .innerJoin(workouts, eq(workouts.id, workoutExercises.workoutId))
-    .where(eq(workoutExercises.exerciseId, id))
-  const [logged] = await db.select({ n: count() }).from(setLogs).where(eq(setLogs.exerciseId, id))
+  const [inWorkouts, [logged], [history]] = await Promise.all([
+    db
+      .selectDistinct({ id: workouts.id, name: workouts.name, archived: workouts.archivedAt })
+      .from(workoutExercises)
+      .innerJoin(workouts, eq(workouts.id, workoutExercises.workoutId))
+      .where(eq(workoutExercises.exerciseId, id)),
+    db.select({ n: count() }).from(setLogs).where(eq(setLogs.exerciseId, id)),
+    // In workouts done before (as prescribed, or swapped from), even with nothing logged.
+    db
+      .select({ n: countDistinct(sessionExercises.sessionId) })
+      .from(sessionExercises)
+      .where(or(eq(sessionExercises.exerciseId, id), eq(sessionExercises.originalExerciseId, id))),
+  ])
   return {
     workouts: inWorkouts.map((w) => ({ id: w.id, name: w.name, archived: w.archived !== null })),
     loggedSets: logged?.n ?? 0,
+    pastWorkouts: history?.n ?? 0,
   }
+}
+
+async function alternativesOf(db: Db, id: number) {
+  const rows = await db
+    .select({ id: exerciseAlternatives.alternativeId })
+    .from(exerciseAlternatives)
+    .innerJoin(exercises, eq(exercises.id, exerciseAlternatives.alternativeId))
+    .where(and(eq(exerciseAlternatives.exerciseId, id), isNull(exercises.archivedAt)))
+    .orderBy(asc(exerciseAlternatives.position))
+  return rows.map((r) => r.id)
 }
 
 export const exerciseRoutes = new Hono<AppEnv>()
@@ -114,12 +142,52 @@ export const exerciseRoutes = new Hono<AppEnv>()
     await findVisible(c.var.db, c.var.user, id, 'any')
     return c.json({ usage: await usageOf(c.var.db, id) })
   })
+  /** The coach's suggested swaps for this exercise, in order (archived ones left out). */
+  .get('/:id/alternatives', async (c) => {
+    const id = parseId(c.req.param('id'))
+    await findVisible(c.var.db, c.var.user, id, 'any')
+    return c.json({ alternativeIds: await alternativesOf(c.var.db, id) })
+  })
+  /**
+   * Set them. Any coach can: they're suggestions shared by the whole team, like the library itself.
+   * Replaces the whole list.
+   */
+  .put('/:id/alternatives', async (c) => {
+    const { db } = c.var
+    const id = parseId(c.req.param('id'))
+    await findVisible(db, c.var.user, id, 'any')
+    const { alternativeIds } = await parseBody(c.req.raw, exerciseAlternativesInput)
+    const ids = alternativeIds.filter((a) => a !== id)
+    const found = ids.length
+      ? await db
+          .select({ id: exercises.id })
+          .from(exercises)
+          .where(and(inArray(exercises.id, ids), isNull(exercises.archivedAt)))
+      : []
+    if (found.length !== ids.length) notFound('Exercise not found')
+    await runAll(db, [
+      db.delete(exerciseAlternatives).where(eq(exerciseAlternatives.exerciseId, id)),
+      ...insertMany(
+        db,
+        exerciseAlternatives,
+        ids.map((alternativeId, position) => ({
+          exerciseId: id,
+          alternativeId,
+          position,
+          createdBy: c.var.user.id,
+        })),
+      ),
+    ])
+    return c.json({ alternativeIds: await alternativesOf(db, id) })
+  })
   /** Delete for good, only when nothing uses it. */
   .delete('/:id/permanent', async (c) => {
     const id = parseId(c.req.param('id'))
     const existing = await findVisible(c.var.db, c.var.user, id, 'any')
     assertCanEdit(c.var.user, existing)
     const usage = await usageOf(c.var.db, id)
+    if (!usage.workouts.length && !usage.loggedSets && usage.pastWorkouts)
+      throw new HTTPException(409, { message: 'It’s in past workouts. Archive it instead.' })
     if (usage.workouts.length || usage.loggedSets) {
       const parts = [
         usage.workouts.length

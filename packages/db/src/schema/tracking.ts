@@ -35,6 +35,8 @@ export const enrollments = sqliteTable(
   },
   (t) => [
     index('enrollments_user_idx').on(t.userId),
+    // Copies and purges look enrollments up by program.
+    index('enrollments_program_idx').on(t.programId),
     // At most one active program per person.
     uniqueIndex('enrollments_one_active_uq').on(t.userId).where(sql`${t.status} = 'active'`),
   ],
@@ -62,7 +64,13 @@ export const workoutSessions = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('workout_sessions_user_started_idx').on(t.userId, t.startedAt)],
+  (t) => [
+    index('workout_sessions_user_started_idx').on(t.userId, t.startedAt),
+    // Every plan (Today screen, admin overview) reads finished sessions by enrollment.
+    index('workout_sessions_enrollment_idx').on(t.enrollmentId, t.status),
+    // Library lists and purges check whether a workout has history.
+    index('workout_sessions_workout_idx').on(t.workoutId),
+  ],
 )
 
 /**
@@ -97,8 +105,15 @@ export const sessionExercises = sqliteTable(
     groupWorkSeconds: integer('group_work_seconds'),
     groupRestSeconds: integer('group_rest_seconds'),
     notes: text('notes'),
+    // Swapped during the session (machine taken, no equipment): what the workout asked for.
+    originalExerciseId: integer('original_exercise_id').references(() => exercises.id),
+    swappedAt: timestamp('swapped_at'),
   },
-  (t) => [index('session_exercises_session_idx').on(t.sessionId, t.position)],
+  (t) => [
+    index('session_exercises_session_idx').on(t.sessionId, t.position),
+    index('session_exercises_original_idx').on(t.originalExerciseId),
+    index('session_exercises_exercise_idx').on(t.exerciseId),
+  ],
 )
 
 /** Every set logged. */
@@ -124,7 +139,8 @@ export const setLogs = sqliteTable(
     notes: text('notes'),
   },
   (t) => [
-    index('set_logs_session_idx').on(t.sessionId),
+    // Sets of a session, and of one exercise within it ("last time", records).
+    index('set_logs_session_exercise_idx').on(t.sessionId, t.exerciseId),
     index('set_logs_exercise_idx').on(t.exerciseId),
   ],
 )
@@ -148,7 +164,11 @@ export const bodyCheckins = sqliteTable(
     notes: text('notes'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('body_checkins_user_date_uq').on(t.userId, t.date)],
+  (t) => [
+    uniqueIndex('body_checkins_user_date_uq').on(t.userId, t.date),
+    // Resetting or deleting a program removes its check-ins.
+    index('body_checkins_enrollment_idx').on(t.enrollmentId),
+  ],
 )
 
 /** Time spent with the app open on screen, per person per day (their local date). */

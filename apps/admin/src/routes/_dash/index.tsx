@@ -23,6 +23,7 @@ import {
 import { type ReactNode, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { PageHeader } from '../../components/page-header'
+import { SwapsLine } from '../../components/swaps-line'
 
 export const Route = createFileRoute('/_dash/')({
   component: Overview,
@@ -336,6 +337,7 @@ function RecentWorkouts({ items }: { items: AdminOverview['recent'] }) {
                   {s.volumeKg ? ` · ${formatNumber(s.volumeKg)} kg` : ''}
                   {s.feeling ? ` · felt ${FEELINGS[s.feeling]?.toLowerCase()}` : ''}
                 </span>
+                <SwapsLine swaps={s.swaps} className="mt-1" />
               </span>
             </li>
           ))}

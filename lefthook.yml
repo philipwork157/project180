@@ -4,6 +4,9 @@ pre-commit:
   commands:
     biome:
       glob: "*.{js,ts,tsx,json,jsonc,css}"
-      run: bunx biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      # Fixes formatting and import order itself and adds the fixes to the commit;
+      # only real lint problems stop it.
+      run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
     typecheck:
       run: bun run typecheck

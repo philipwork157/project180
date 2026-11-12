@@ -440,7 +440,7 @@ function Builder({
       setSaved(JSON.stringify(input))
       setSavedDraft(draft)
       toast({ title: 'Changes saved', description: input.name })
-      await queryClient.invalidateQueries({ queryKey: ['workouts'] })
+      void queryClient.invalidateQueries({ queryKey: ['workouts'] })
       if (!id)
         await navigate({
           to: '/workouts/$workoutId',
@@ -490,7 +490,7 @@ function Builder({
               onClick={async () => {
                 const { workout } = await duplicate.mutateAsync()
                 toast({ title: 'Copy made', description: workout.name })
-                await queryClient.invalidateQueries({ queryKey: ['workouts'] })
+                void queryClient.invalidateQueries({ queryKey: ['workouts'] })
                 await navigate({
                   to: '/workouts/$workoutId',
                   params: { workoutId: String(workout.id) },
@@ -508,7 +508,7 @@ function Builder({
                   title: 'Archived',
                   description: `${draft.name} is hidden. Restore it from Archived.`,
                 })
-                await queryClient.invalidateQueries({ queryKey: ['workouts'] })
+                void queryClient.invalidateQueries({ queryKey: ['workouts'] })
                 await navigate({ to: '/workouts' })
               }}
             />
@@ -1335,7 +1335,7 @@ function ExercisePicker({
     const name = search.trim()
     if (!name) return
     const { exercise } = await create.mutateAsync(name)
-    await queryClient.invalidateQueries({ queryKey: ['exercises'] })
+    void queryClient.invalidateQueries({ queryKey: ['exercises'] })
     add(exercise)
     setSearch('')
   }

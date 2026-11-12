@@ -31,3 +31,18 @@ export async function runAll(db: Db, statements: BatchItem<'sqlite'>[]) {
   const [first, ...rest] = statements
   if (first) await db.batch([first, ...rest])
 }
+
+/**
+ * Runs a query once per slice of ids (each slice small enough for D1's variable limit, with
+ * room for the query's other bound values), all slices together, and joins the rows.
+ */
+export async function inChunks<T>(
+  ids: number[],
+  query: (slice: number[]) => Promise<T[]>,
+  size = MAX_VARIABLES - 10,
+): Promise<T[]> {
+  if (ids.length === 0) return []
+  const slices: number[][] = []
+  for (let i = 0; i < ids.length; i += size) slices.push(ids.slice(i, i + size))
+  return (await Promise.all(slices.map(query))).flat()
+}

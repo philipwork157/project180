@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { emailMode, sendEmail, sigV4Key } from '../src/email'
 import { ADMIN, call, createAdmin, signIn } from './helpers'
 
@@ -51,6 +51,30 @@ describe('new client wizard', () => {
       targetEvent: 'Half marathon',
       latestWeightKg: 82.5,
     })
+  })
+
+  it('refuses a bad program or coach before creating anything, so trying again works', async () => {
+    const cookie = await owner()
+    const program = { programId: 999_999, startDate: '2026-11-16' }
+    const bad = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie,
+      body: { ...SAM, program, currentWeightKg: 80 },
+    })
+    expect(bad.status).toBe(404)
+    const noCoach = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie,
+      body: { ...SAM, coachId: 999_999 },
+    })
+    expect(noCoach.status).toBe(404)
+    // Nothing was made: no account, so the same email works on the next try.
+    const users = await call<Json>('/admin/users', { cookie })
+    expect(users.data.users.map((u: Json) => u.email)).not.toContain(SAM.email)
+    const retry = await call<Json>('/admin/users', { method: 'POST', cookie, body: SAM })
+    expect(retry.status).toBe(201)
+    const taken = await call<Json>('/admin/users', { method: 'POST', cookie, body: SAM })
+    expect(taken.status).toBe(409)
   })
 
   it('lets clients see and update their own goals', async () => {
@@ -133,6 +157,26 @@ describe('email', () => {
 
   it('without AWS keys, only logs (never throws)', async () => {
     expect(await sendEmail(env, message)).toEqual({ status: 'logged', to: 'client@example.com' })
+  })
+
+  it('never writes the email body (temporary passwords) to the logs', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const secret = { ...message, text: 'Temporary password: Cedar-Otter-Kayak-Lark-482' }
+    const live = {
+      ...env,
+      BETTER_AUTH_URL: 'https://project180.co.za',
+      EMAIL_REDIRECT_TO: undefined,
+    }
+    try {
+      await sendEmail(env, secret)
+      await sendEmail(live, secret)
+      await sendEmail({ ...env, EMAIL_REDIRECT_TO: 'dev@example.com' }, secret)
+      const written = log.mock.calls.flat().join('\n')
+      expect(written).toContain('client@example.com')
+      expect(written).not.toContain('Cedar-Otter-Kayak-Lark-482')
+    } finally {
+      log.mockRestore()
+    }
   })
 })
 

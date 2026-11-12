@@ -5,10 +5,12 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { CalendarCheck, Check, Clock, Moon, Play, Timer } from 'lucide-react'
 import { motion } from 'motion/react'
+import { useState } from 'react'
 import { Elapsed } from '../../components/elapsed'
+import { NotificationsButton } from '../../components/notifications'
 import { ScreenHeader } from '../../components/screen-header'
 import { WeekStrip } from '../../components/week-strip'
-import { WeighIn } from '../../components/weigh-in'
+import { useWeighInStatus, WeighInCard, WeighInSheet } from '../../components/weigh-in-card'
 import { useStartWorkout } from '../../lib/use-start-workout'
 
 export const Route = createFileRoute('/_app/')({
@@ -41,12 +43,25 @@ function TodayPage() {
     (d) => d.date > p.today && d.workoutId !== null && d.state === 'planned',
   )
   const thisWeek = stats.data?.weeks.at(-1)
+  const weighIn = useWeighInStatus()
+  const [weighing, setWeighing] = useState(false)
 
   return (
     <div className="flex flex-col gap-6">
       <ScreenHeader
         overline={dateLabel}
         title={`${greeting(new Date().getHours())}, ${firstName}`}
+        action={
+          <NotificationsButton
+            onAction={(n) =>
+              n.kind === 'weigh_in'
+                ? setWeighing(true)
+                : document
+                    .getElementById('today-workout')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            }
+          />
+        }
       />
 
       {activeSession && (
@@ -84,6 +99,16 @@ function TodayPage() {
         </motion.div>
       )}
 
+      {weighIn.status && <WeighInCard status={weighIn.status} onOpen={() => setWeighing(true)} />}
+      {weighIn.today && (
+        <WeighInSheet
+          open={weighing}
+          date={weighIn.today}
+          status={weighIn.status}
+          onClose={() => setWeighing(false)}
+        />
+      )}
+
       {plan.isPending ? (
         <div className="h-56 animate-pulse rounded-xl bg-surface" />
       ) : p ? (
@@ -100,22 +125,23 @@ function TodayPage() {
             <WeekStrip days={week} />
           </section>
 
-          <TodayCard
-            day={today}
-            plan={p}
-            next={next}
-            starting={start.isPending}
-            onStart={(d) =>
-              d.workoutId &&
-              start.mutate({
-                workoutId: d.workoutId,
-                enrollmentId: p.enrollment.id,
-                programDayId: d.programDayId,
-                scheduledDate: d.date,
-              })
-            }
-          />
-          {today?.checkinRequired && <WeighIn date={p.today} />}
+          <div id="today-workout" className="scroll-mt-6">
+            <TodayCard
+              day={today}
+              plan={p}
+              next={next}
+              starting={start.isPending}
+              onStart={(d) =>
+                d.workoutId &&
+                start.mutate({
+                  workoutId: d.workoutId,
+                  enrollmentId: p.enrollment.id,
+                  programDayId: d.programDayId,
+                  scheduledDate: d.date,
+                })
+              }
+            />
+          </div>
         </>
       ) : (
         <NoPlan />

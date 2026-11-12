@@ -117,7 +117,7 @@ export function ExercisePhotos({ exercise }: { exercise: Exercise }) {
       return send(`/exercises/${exercise.id}/photos`, { method: 'POST', body: form })
     },
     onSuccess: async () => {
-      await refresh()
+      void refresh()
       setPicking(false)
       setStart(null)
       setFinish(null)
@@ -133,7 +133,7 @@ export function ExercisePhotos({ exercise }: { exercise: Exercise }) {
   const remove = useMutation({
     mutationFn: () => send(`/exercises/${exercise.id}/photos`, { method: 'DELETE' }),
     onSuccess: async () => {
-      await refresh()
+      void refresh()
       setConfirmRemove(false)
       toast({ title: 'Photos removed', description: 'Clients see the form cue instead.' })
     },

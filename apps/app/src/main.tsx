@@ -4,6 +4,21 @@ import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { routeTree } from './routeTree.gen'
+// Fonts are bundled with the app (no Google Fonts): they work offline on a new phone and no
+// third party sees who opens the app. Only the weights the design uses.
+import '@fontsource/archivo/500.css'
+import '@fontsource/archivo/600.css'
+import '@fontsource/archivo/700.css'
+import '@fontsource/archivo/800.css'
+import '@fontsource/archivo/900.css'
+import '@fontsource/archivo/700-italic.css'
+import '@fontsource/archivo/800-italic.css'
+import '@fontsource/archivo/900-italic.css'
+import '@fontsource/plus-jakarta-sans/400.css'
+import '@fontsource/plus-jakarta-sans/500.css'
+import '@fontsource/plus-jakarta-sans/600.css'
+import '@fontsource/plus-jakarta-sans/700.css'
+import '@fontsource/plus-jakarta-sans/800.css'
 import './styles.css'
 
 /** Signed out on the server (expired, or signed out on another device): back to the login screen. */

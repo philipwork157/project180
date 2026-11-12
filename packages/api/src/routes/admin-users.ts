@@ -3,11 +3,15 @@ import {
   bodyCheckins,
   clientProfiles,
   enrollments,
+  exerciseAlternatives,
+  exercises,
   programs,
   sessions,
   setLogs,
+  signInAttempts,
   users,
   workoutSessions,
+  workouts,
 } from '@project180/db'
 import {
   ACTIVE_NOW_MS,
@@ -16,6 +20,7 @@ import {
   average,
   clientProfileInput,
   createUserInput,
+  type DeletePersonResult,
   deviceLabel,
   isOwner,
   isStaff,
@@ -23,10 +28,11 @@ import {
   type PersonActivity,
   type PersonProgress,
   resetPasswordInput,
+  type SessionSummary,
   todayIn,
   type UserSummary,
 } from '@project180/shared'
-import { and, asc, count, desc, eq, gt, gte, inArray, ne } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -38,10 +44,11 @@ import { forbidden, notFound, parseBody, parseId } from '../errors'
 import { requireAdmin, requireUser } from '../middleware'
 import { loadProfile, logWeight, saveProfile } from '../profiles'
 import { sessionSummaries } from '../sessions'
+import { buildPersonStats } from '../stats'
 import { createUserWithPassword, setPassword } from '../users'
 import { assignProgram } from './enrollments'
 import { buildPlan } from './me'
-import { deleteClientProgram } from './programs'
+import { deleteClientProgram, findVisibleProgram } from './programs'
 
 const resetProgramInput = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
@@ -73,22 +80,48 @@ type Db = AppEnv['Variables']['db']
 
 /** Counts of what's logged on one enrollment: what a reset, remove or delete wipes. */
 async function enrollmentImpact(db: Db, enrollmentId: number) {
-  const inEnrollment = eq(workoutSessions.enrollmentId, enrollmentId)
-  const [sessionCount] = await db.select({ n: count() }).from(workoutSessions).where(inEnrollment)
-  const [setCount] = await db
-    .select({ n: count() })
-    .from(setLogs)
-    .innerJoin(workoutSessions, eq(workoutSessions.id, setLogs.sessionId))
-    .where(inEnrollment)
-  const [checkinCount] = await db
-    .select({ n: count() })
-    .from(bodyCheckins)
-    .where(eq(bodyCheckins.enrollmentId, enrollmentId))
-  return {
-    sessions: sessionCount?.n ?? 0,
-    loggedSets: setCount?.n ?? 0,
-    checkins: checkinCount?.n ?? 0,
+  return (await enrollmentImpacts(db, [enrollmentId])).get(enrollmentId) ?? noImpact
+}
+
+const noImpact = { sessions: 0, loggedSets: 0, checkins: 0 }
+
+/** The same counts for several enrollments in three grouped queries. */
+async function enrollmentImpacts(db: Db, enrollmentIds: number[]) {
+  const out = new Map(enrollmentIds.map((id) => [id, { ...noImpact }]))
+  if (enrollmentIds.length === 0) return out
+  const inEnrollments = inArray(workoutSessions.enrollmentId, enrollmentIds)
+  const [sessionCounts, setCounts, checkinCounts] = await Promise.all([
+    db
+      .select({ id: workoutSessions.enrollmentId, n: count() })
+      .from(workoutSessions)
+      .where(inEnrollments)
+      .groupBy(workoutSessions.enrollmentId),
+    db
+      .select({ id: workoutSessions.enrollmentId, n: count() })
+      .from(setLogs)
+      .innerJoin(workoutSessions, eq(workoutSessions.id, setLogs.sessionId))
+      .where(inEnrollments)
+      .groupBy(workoutSessions.enrollmentId),
+    db
+      .select({ id: bodyCheckins.enrollmentId, n: count() })
+      .from(bodyCheckins)
+      .where(inArray(bodyCheckins.enrollmentId, enrollmentIds))
+      .groupBy(bodyCheckins.enrollmentId),
+  ])
+  const at = (id: number | null) => (id === null ? undefined : out.get(id))
+  for (const r of sessionCounts) {
+    const row = at(r.id)
+    if (row) row.sessions = r.n
   }
+  for (const r of setCounts) {
+    const row = at(r.id)
+    if (row) row.loggedSets = r.n
+  }
+  for (const r of checkinCounts) {
+    const row = at(r.id)
+    if (row) row.checkins = r.n
+  }
+  return out
 }
 
 /** Their archived (or replaced) programs, newest first, each with its history. */
@@ -106,17 +139,34 @@ async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
     .innerJoin(programs, eq(programs.id, enrollments.programId))
     .where(and(eq(enrollments.userId, userId), ne(enrollments.status, 'active')))
     .orderBy(desc(enrollments.updatedAt))
-  const out: PastProgram[] = []
-  for (const r of rows) {
-    const finished = await sessionSummaries(
-      db,
-      and(
-        eq(workoutSessions.enrollmentId, r.enrollmentId),
-        eq(workoutSessions.status, 'completed'),
-      ),
-      500,
-    )
-    out.push({
+  if (rows.length === 0) return []
+  const enrollmentIds = rows.map((r) => r.enrollmentId)
+  // Every past program's history in one go (newest first), then split per program.
+  const finishedIn = and(
+    eq(workoutSessions.userId, userId),
+    inArray(workoutSessions.enrollmentId, enrollmentIds),
+    eq(workoutSessions.status, 'completed'),
+  )
+  const [summaries, owners, impacts] = await Promise.all([
+    sessionSummaries(db, finishedIn, 10_000),
+    db
+      .select({ id: workoutSessions.id, enrollmentId: workoutSessions.enrollmentId })
+      .from(workoutSessions)
+      .where(finishedIn),
+    enrollmentImpacts(db, enrollmentIds),
+  ])
+  const enrollmentOf = new Map(owners.map((o) => [o.id, o.enrollmentId]))
+  const finishedBy = new Map<number, SessionSummary[]>()
+  for (const s of summaries) {
+    const id = enrollmentOf.get(s.id)
+    if (id == null) continue
+    const list = finishedBy.get(id) ?? []
+    list.push(s)
+    finishedBy.set(id, list)
+  }
+  return rows.map((r) => {
+    const finished = finishedBy.get(r.enrollmentId) ?? []
+    return {
       enrollmentId: r.enrollmentId,
       programId: r.programId,
       programName: r.programName,
@@ -127,10 +177,9 @@ async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
       volumeKg: Math.round(finished.reduce((a, x) => a + x.volumeKg, 0)),
       lastWorkoutAt: finished[0]?.startedAt ?? null,
       recent: finished.slice(0, 5),
-      impact: await enrollmentImpact(db, r.enrollmentId),
-    })
-  }
-  return out
+      impact: impacts.get(r.enrollmentId) ?? noImpact,
+    }
+  })
 }
 
 async function ownEnrollment(db: Db, userId: number, enrollmentId: number) {
@@ -196,11 +245,22 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const env = c.env
     const input = await parseBody(c.req.raw, createUserInput)
     if (input.role !== 'member' && !isOwner(me.role)) forbidden('Only an owner can add coaches')
-    let coachId: number | null = input.role === 'member' ? me.id : null
-    if (input.role === 'member' && input.coachId && isOwner(me.role)) {
-      await assertCoach(db, input.coachId)
-      coachId = input.coachId
-    }
+    // A client is coached by whoever adds them, unless an owner picks another coach.
+    const pickedCoach = input.role === 'member' && isOwner(me.role) ? (input.coachId ?? null) : null
+    const coachId = input.role === 'member' ? (pickedCoach ?? me.id) : null
+    // Check everything that can be refused before creating anything, so a mistake (a program
+    // this coach can't use, an unknown coach, an email in use) never leaves a half-made account.
+    await Promise.all([
+      pickedCoach ? assertCoach(db, pickedCoach) : null,
+      input.program ? findVisibleProgram(db, me, input.program.programId, false) : null,
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, input.email))
+        .then(([taken]) => {
+          if (taken) throw new HTTPException(409, { message: 'That email already has an account' })
+        }),
+    ])
     const created = await createUserWithPassword(c.var.auth, { ...input, coachId })
     // The password we set is temporary: they choose their own on first sign-in.
     await db.update(users).set({ mustChangePassword: true }).where(eq(users.id, created.id))
@@ -235,6 +295,69 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const input = await parseBody(c.req.raw, clientProfileInput)
     await saveProfile(c.var.db, person.id, input)
     return c.json({ profile: await loadProfile(c.var.db, person.id) })
+  })
+  /**
+   * Delete someone and everything they logged, for good (owners only; a client may ask under
+   * POPIA). A coach's clients and library (exercises, workouts, programs, swap suggestions) are
+   * handed to the owner doing it. One batch: all of it happens or none of it.
+   */
+  .delete('/:id', async (c) => {
+    const { db, user: me } = c.var
+    if (!isOwner(me.role)) forbidden('Only an owner can delete people')
+    const person = await managedPerson(db, me, parseId(c.req.param('id')))
+    if (person.id === me.id) forbidden('You can’t delete yourself')
+    if (person.role === 'owner') forbidden('Owners can’t be deleted')
+    const id = person.id
+    const n = (rows: { n: number }[]) => rows[0]?.n ?? 0
+    const [[row], sessionRows, checkinRows, clientRows, exerciseRows, workoutRows, programRows] =
+      await Promise.all([
+        db.select({ email: users.email }).from(users).where(eq(users.id, id)),
+        db.select({ n: count() }).from(workoutSessions).where(eq(workoutSessions.userId, id)),
+        db.select({ n: count() }).from(bodyCheckins).where(eq(bodyCheckins.userId, id)),
+        db.select({ n: count() }).from(users).where(eq(users.coachId, id)),
+        db.select({ n: count() }).from(exercises).where(eq(exercises.createdBy, id)),
+        db
+          .select({ n: count() })
+          .from(workouts)
+          .where(and(eq(workouts.createdBy, id), isNull(workouts.clientId))),
+        db
+          .select({ n: count() })
+          .from(programs)
+          .where(and(eq(programs.createdBy, id), isNull(programs.clientId))),
+      ])
+    await db.batch([
+      // Hand over what other people still use.
+      db.update(users).set({ coachId: me.id }).where(eq(users.coachId, id)),
+      db.update(exercises).set({ createdBy: me.id }).where(eq(exercises.createdBy, id)),
+      db.update(workouts).set({ createdBy: me.id }).where(eq(workouts.createdBy, id)),
+      db.update(programs).set({ createdBy: me.id }).where(eq(programs.createdBy, id)),
+      db
+        .update(exerciseAlternatives)
+        .set({ createdBy: me.id })
+        .where(eq(exerciseAlternatives.createdBy, id)),
+      db.update(enrollments).set({ assignedBy: null }).where(eq(enrollments.assignedBy, id)),
+      // Everything they logged (sets and session snapshots go with their sessions).
+      db.delete(workoutSessions).where(eq(workoutSessions.userId, id)),
+      db.delete(bodyCheckins).where(eq(bodyCheckins.userId, id)),
+      db.delete(appActivity).where(eq(appActivity.userId, id)),
+      db.delete(enrollments).where(eq(enrollments.userId, id)),
+      // Their own copies of programs and workouts (days, rows and groups go with them).
+      db.delete(programs).where(eq(programs.clientId, id)),
+      db.delete(workouts).where(eq(workouts.clientId, id)),
+      db.delete(signInAttempts).where(eq(signInAttempts.key, `email:${row?.email ?? ''}`)),
+      // Last: the person (sign-ins, devices and profile go with them).
+      db.delete(users).where(eq(users.id, id)),
+    ])
+    const result: DeletePersonResult = {
+      removed: { workouts: n(sessionRows), checkins: n(checkinRows) },
+      handedOver: {
+        clients: n(clientRows),
+        exercises: n(exerciseRows),
+        workouts: n(workoutRows),
+        programs: n(programRows),
+      },
+    }
+    return c.json(result)
   })
   /** Hand a client to another coach (owners only). */
   .patch('/:id/coach', async (c) => {
@@ -338,11 +461,17 @@ export const adminUserRoutes = new Hono<AppEnv>()
     return c.json({ signedOut: removed.length })
   })
   /** Their current program and how it's going, plus past (archived) programs with their history. */
+  /** Progress over the last weeks: volume, strength per exercise, body weight, records, swaps. */
+  .get('/:id/stats', async (c) => {
+    const { db } = c.var
+    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const weeksBack = Math.min(Math.max(Number(c.req.query('weeks') ?? 12) || 12, 1), 52)
+    return c.json({ stats: await buildPersonStats(db, person, weeksBack) })
+  })
   .get('/:id/progress', async (c) => {
     const { db } = c.var
     const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
-    const plan = await buildPlan(db, person)
-    const past = await pastPrograms(db, person.id)
+    const [plan, past] = await Promise.all([buildPlan(db, person), pastPrograms(db, person.id)])
     if (!plan) return c.json({ progress: null, past })
     const inEnrollment = and(
       eq(workoutSessions.userId, person.id),

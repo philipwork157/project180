@@ -532,6 +532,68 @@ describe('logging a workout', () => {
     )
   })
 
+  it('locks a finished workout: no set changes, and finishing again changes nothing', async () => {
+    const { admin } = await setupHousehold()
+    const { workout, squat } = await library(admin)
+    const start = async () =>
+      (
+        await call<Json>('/sessions', {
+          method: 'POST',
+          cookie: admin,
+          body: { clientUuid: crypto.randomUUID(), workoutId: workout.id },
+        })
+      ).data.session.id as number
+    const setBody = (clientUuid: string, weightKg: number) => ({
+      clientUuid,
+      exerciseId: squat,
+      setNumber: 1,
+      weightKg,
+      reps: 8,
+    })
+    const finish = (id: number, body: Json = {}) =>
+      call<Json>(`/sessions/${id}/finish`, { method: 'POST', cookie: admin, body })
+    const read = async (id: number) =>
+      (await call<Json>(`/sessions/${id}`, { cookie: admin })).data.session
+
+    const id = await start()
+    const uuid = crypto.randomUUID()
+    await call(`/sessions/${id}/sets`, { method: 'PUT', cookie: admin, body: setBody(uuid, 40) })
+    const first = await finish(id, { feeling: 4 })
+    expect(first.status).toBe(200)
+    const done = await read(id)
+
+    // Sets can't be added, changed or removed.
+    const add = await call(`/sessions/${id}/sets`, {
+      method: 'PUT',
+      cookie: admin,
+      body: setBody(crypto.randomUUID(), 100),
+    })
+    expect(add.status).toBe(409)
+    const change = await call(`/sessions/${id}/sets`, {
+      method: 'PUT',
+      cookie: admin,
+      body: setBody(uuid, 100),
+    })
+    expect(change.status).toBe(409)
+    const remove = await call(`/sessions/${id}/sets/${uuid}`, { method: 'DELETE', cookie: admin })
+    expect(remove.status).toBe(409)
+
+    // A retried finish gets the same answer and changes nothing (end time, feeling, duration).
+    const again = await finish(id, { feeling: 1 })
+    expect(again.status).toBe(200)
+    expect(again.data.session).toMatchObject({ id, volumeKg: 320, setCount: 1, feeling: 4 })
+    expect(await read(id)).toEqual(done)
+    // Abandoning a completed workout is refused.
+    expect((await finish(id, { status: 'abandoned' })).status).toBe(409)
+
+    // An abandoned workout can't be turned into a completed one later.
+    const dropped = await start()
+    expect((await finish(dropped, { status: 'abandoned' })).status).toBe(200)
+    expect((await finish(dropped)).status).toBe(409)
+    const stats = await call<Json>('/me/stats', { cookie: admin })
+    expect(stats.data.stats.workouts).toBe(1)
+  })
+
   it("never shows or changes someone else's session", async () => {
     const { admin, member } = await setupHousehold()
     const { workout, squat } = await library(admin)

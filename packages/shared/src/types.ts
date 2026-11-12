@@ -126,6 +126,8 @@ export interface WorkoutExerciseItem {
   targetHrZone: number | null
   supersetGroup: number | null
   notes: string | null
+  /** In a session: the exercise the workout asked for, when the client swapped it. */
+  swappedFrom?: { exerciseId: number; exerciseName: string } | null
 }
 
 /** How exercises sharing a supersetGroup number are done. */
@@ -199,6 +201,20 @@ export interface EnrollmentSummary {
   durationWeeks: number
   startDate: string
   status: 'active' | 'completed' | 'cancelled'
+}
+
+/** Someone on their own copy of a library program, and whether that copy has fallen behind. */
+export interface ProgramCopySummary {
+  enrollmentId: number
+  userId: number
+  userName: string
+  /** Their personal copy. */
+  programId: number
+  startDate: string
+  /** The library program or its workouts changed after their copy was made or last updated. */
+  behind: boolean
+  /** Their copy (or one of its workouts) was changed just for them; updating replaces that. */
+  changedForThem: boolean
 }
 
 export interface PlanDay {
@@ -313,6 +329,35 @@ export interface SessionSummary {
   feeling: number | null
   volumeKg: number
   setCount: number
+  /** Exercises swapped during the workout, in workout order. */
+  swaps: ExerciseSwap[]
+}
+
+/** One exercise swapped for another during a workout. */
+export interface ExerciseSwap {
+  from: string
+  to: string
+}
+
+/** An exercise a client can swap to: just enough to show and search it. */
+export interface SwapCandidate {
+  id: number
+  name: string
+  muscleGroup: MuscleGroup
+  equipment: Equipment
+  trackingType: TrackingType
+  keywords: string | null
+  imageKey: string | null
+}
+
+/** Everything the swap sheet needs, fetched once when a workout opens (works with poor signal). */
+export interface SwapOptions {
+  /** Every exercise in use (not archived), for search. */
+  exercises: SwapCandidate[]
+  /** The coach's alternatives per exercise id, in their order. */
+  coach: Record<number, number[]>
+  /** What this person swapped each exercise for before, most recent first. */
+  mine: Record<number, number[]>
 }
 
 export interface FinishResult {
@@ -334,6 +379,20 @@ export interface MyStats {
   }>
   recent: SessionSummary[]
   bodyWeight: Array<{ date: string; weightKg: number }>
+}
+
+/** A coach's view of one person's progress: the phone's numbers plus more detail. */
+export interface PersonStats extends MyStats {
+  /** Program workouts due in the window on their current program: done, and due so far. */
+  planned: { done: number; due: number } | null
+  /** Their most-logged weighted exercises, one point per workout (their local date). */
+  strength: Array<{
+    exerciseId: number
+    exerciseName: string
+    points: Array<{ date: string; bestWeightKg: number; oneRepMax: number | null }>
+  }>
+  /** What they swapped during workouts in the window, most often first. */
+  swaps: Array<{ fromName: string; toName: string; times: number; lastDate: string | null }>
 }
 
 /** The admin home: how the clients you look after are doing. */
@@ -388,4 +447,10 @@ export interface VideoSearch {
   configured: boolean
   /** The same search on youtube.com, as a fallback. */
   searchUrl: string
+}
+
+/** What deleting a person removed, and what was handed to the owner who deleted them. */
+export interface DeletePersonResult {
+  removed: { workouts: number; checkins: number }
+  handedOver: { clients: number; exercises: number; workouts: number; programs: number }
 }

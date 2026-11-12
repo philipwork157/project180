@@ -120,7 +120,7 @@ function QuickLookBody({ exerciseId, onClose }: { exerciseId: number; onClose: (
         body: { videoUrl: `https://www.youtube.com/watch?v=${videoId}` },
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['exercises'] })
+      void queryClient.invalidateQueries({ queryKey: ['exercises'] })
       setPlaying(null)
       setBrowsing(false)
       toast({

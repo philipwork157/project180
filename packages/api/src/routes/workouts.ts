@@ -200,6 +200,22 @@ function groupRows(workoutId: number, input: { groups: WorkoutInputParsed['group
   }))
 }
 
+/** The row for a client's copy of a workout (rows and groups are copied separately). */
+export function workoutCopyValues(
+  source: typeof workouts.$inferSelect,
+  clientId: number,
+  actorId: number,
+) {
+  return {
+    name: source.name,
+    description: source.description,
+    estimatedMinutes: source.estimatedMinutes,
+    createdBy: actorId,
+    clientId,
+    sourceWorkoutId: source.sourceWorkoutId ?? source.id,
+  }
+}
+
 /**
  * Makes a client's personal copy of a workout (exercises and groups included).
  * Returns the copy's id. Already that client's? Returns it as is.
@@ -215,14 +231,7 @@ export async function copyWorkoutForClient(
   if (source.clientId === clientId) return source.id
   const [copy] = await db
     .insert(workouts)
-    .values({
-      name: source.name,
-      description: source.description,
-      estimatedMinutes: source.estimatedMinutes,
-      createdBy: actorId,
-      clientId,
-      sourceWorkoutId: source.sourceWorkoutId ?? source.id,
-    })
+    .values(workoutCopyValues(source, clientId, actorId))
     .returning({ id: workouts.id })
   if (!copy) throw new Error('Insert returned no row')
   const items = await db
@@ -243,6 +252,41 @@ export async function copyWorkoutForClient(
     ),
   ])
   return copy.id
+}
+
+/**
+ * Rewrites a client's workout copy to match the library workout it came from, keeping its id
+ * (sessions and program days point at it). Past sessions keep their own snapshot.
+ */
+export async function overwriteWorkoutCopy(db: Db, fromId: number, toId: number) {
+  const [[source], items, groups] = await Promise.all([
+    db.select().from(workouts).where(eq(workouts.id, fromId)),
+    db.select().from(workoutExercises).where(eq(workoutExercises.workoutId, fromId)),
+    db.select().from(workoutGroups).where(eq(workoutGroups.workoutId, fromId)),
+  ])
+  if (!source) notFound('Workout not found')
+  await runAll(db, [
+    db
+      .update(workouts)
+      .set({
+        name: source.name,
+        description: source.description,
+        estimatedMinutes: source.estimatedMinutes,
+      })
+      .where(eq(workouts.id, toId)),
+    db.delete(workoutExercises).where(eq(workoutExercises.workoutId, toId)),
+    db.delete(workoutGroups).where(eq(workoutGroups.workoutId, toId)),
+    ...insertMany(
+      db,
+      workoutExercises,
+      items.map(({ id: _id, ...r }) => ({ ...r, workoutId: toId })),
+    ),
+    ...insertMany(
+      db,
+      workoutGroups,
+      groups.map(({ id: _id, ...r }) => ({ ...r, workoutId: toId })),
+    ),
+  ])
 }
 
 async function createWorkout(db: Db, user: Me, input: WorkoutInputParsed) {

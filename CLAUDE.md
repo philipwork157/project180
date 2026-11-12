@@ -1,13 +1,15 @@
 # Project 180 — notes for Claude
 
-- Monorepo: Bun workspaces + Turborepo. Run `bun run check` before finishing a change.
+- Monorepo: Bun workspaces + Turborepo. Before finishing a change run `bun run format` (Biome fixes formatting and import order itself), then `bun run check`, and fix by hand only what's left (lint rules). Write code the way Biome prints it: lines over 100 columns break JSX props, arguments and arrays one per line; imports sorted.
 - Two apps: apps/app (phone PWA, :5173) and apps/admin (dashboard, :5174). Each has its own Worker mounting packages/api at /api; both bind the same D1 database. Locally only apps/app runs workerd; apps/admin proxies /api to :5173. Shared browser code goes in packages/client, shared UI in packages/ui.
+- **Mobile friendly, always (both apps).** Everything we add (screens, dialogs, drawers, tables, sheets, emails) must work on a 375px phone and look good on a desktop. Build phone-first, then check at 375px and 1440px, in light and dark, before calling anything done. Nothing scrolls sideways except chip rows; tap targets are at least 44px; wide admin tables scroll inside their card or turn into stacked rows on phones.
 - Stack: React 19 + Vite + TanStack Router/Query + Tailwind v4; Hono + Better Auth + Drizzle on D1.
 - Styles: use the token utilities from packages/ui/src/tokens.css (`bg-surface`, `text-ink`, `bg-brand`, `text-on-brand`, `bg-lime` …). Never hard-code colours, except the fixed brand charcoal `#202321` / off-white `#f5f3ed` on surfaces that are charcoal in both themes (auth, hero cards, celebration, rest timer). Every screen must work in light and dark.
-- Schema changes: edit packages/db/src/schema, then `bun run db:generate`. Never hand-edit generated migrations.
+- Schema changes: edit packages/db/src/schema, then `bun run db:apply` (generates the migration and applies it to the local database; `db:generate` and `db:migrate` do each step on its own). Never hand-edit generated migrations.
 - API: every route touching personal data uses `requireUser` and filters by `c.var.user.id`. Add a privacy test in packages/api/test for each new resource.
 - Shared logic (dates, stats, validation) lives in packages/shared with unit tests.
 - Code style: Biome (single quotes, no semicolons, 2 spaces, 100 cols).
+- Both apps send a Content-Security-Policy (`apps/*/public/_headers`): no inline scripts, and any new outside host (images, frames, fonts, scripts) must be added there or the browser blocks it. The API refuses cross-site form posts (`csrf()` in packages/api/src/index.ts).
 - Forms: always use Field + Input/Select/Textarea from @project180/ui. Never a bare <select>: the Select component removes the browser arrow and draws a chevron 12px inside the right edge (pr-10).
 - Icon-only actions: always IconButton from @project180/ui (square, tooltip + aria-label built in). Never a padded Button with only an icon.
 - Admin add/edit/assign flows open a Drawer (side panel); assigning always uses AssignForm.
@@ -70,7 +72,7 @@ One spacing scale, so screens never look cramped or doubled up:
 - **Supporting colours are muted and only carry meaning:** `clay` effort/volume/live workout, `steel` time/rest, `sand` feeling/weigh-ins/body weight, `mauve` second series/glutes. Use them as tints (`bg-clay/20 text-clay-text`), thin edges or dots, not big fills.
 - **Hero cards** (today's workout, no program, auth, celebration) are charcoal in both themes with the `TurnArc` (the 180° arc) as the only decoration. No blobs, no gradients.
 - **Sign-in screens** use `AuthShell` (packages/ui/src/auth-shell.tsx): one brand idea, the `TurnDial` (a 180° instrument dial), a calm story line on desktop, and a plain form. No kicker labels above headings, no repeated taglines, no coloured glows (`shadow-brand` is a quiet shadow in dark mode).
-- **Type:** Archivo for display and numbers; `.metric` = heavy italic tabular numbers (stats, timers, weights). Plus Jakarta Sans for everything else.
+- **Type:** Archivo for display and numbers; `.metric` = heavy italic tabular numbers (stats, timers, weights). Plus Jakarta Sans for everything else. Both are bundled with `@fontsource` (imported in each app's `main.tsx`), never loaded from Google.
 - **Logo:** `LogoMark` (the P whose bowl is a 180° arc), `Logo` (mark | PROJECT 180), `Wordmark`, `AppIcon`, `Tagline` in packages/ui/src/logo.tsx. Icons in apps/app/public/icons.
 - **Motion:** meaningful and calm. Arcs draw, checks pop, numbers rise. Confetti only on finishing a workout, in lime/off-white/sand.
 
@@ -95,8 +97,17 @@ One spacing scale, so screens never look cramped or doubled up:
 - Exercise groups: `workout_exercises.superset_group` + `workout_groups` (kind superset | circuit | interval, rounds, work/rest seconds).
 - A workout can't be deleted for good while any program schedules it (`purgeWorkout` answers 409 and the dialog lists the programs to fix first). Archiving is always allowed; programs keep working with archived workouts.
 - D1 allows at most 100 bound values per statement. Multi-row inserts must go through `insertMany` + `runAll` (packages/api/src/batch.ts), never a bare `.values(array)`.
-- Schema changes need a migration in packages/db/drizzle (and its meta snapshot); apply with `bun run db:migrate` locally and `bun run db:migrate:dev` before deploying.
+- Schema changes need a migration in packages/db/drizzle (and its meta snapshot); apply with `bun run db:migrate` locally; `bun run deploy:dev` and `bun run deploy` apply them to the remote database before shipping.
 - Password fields always use `PasswordInput` from `@project180/ui` (eye button to show/hide), never a bare `type="password"` Input.
+
+## Database: normalization, integrity and scale
+
+- **One fact, one place.** Don't copy a column into another table to save a join; join instead. The only intended copies are history snapshots (`session_exercises`), clients' personal copies of programs and workouts, and `body_checkins.enrollment_id` (the program it was logged on). The only derived columns are `target_reps_min/max`, which the validator keeps equal to the lowest/highest of `target_reps_per_set`.
+- **Lists you query live in their own table** (like `exercise_alternatives`), not in JSON. JSON columns are only for small values always read whole (`target_reps_per_set`, profile focus areas, cached video results).
+- **Let the database enforce integrity:** foreign keys with the right `onDelete`, unique indexes for "one per" rules (one active enrollment per person, one check-in per day). Code checks are extra, not instead.
+- **Index every foreign key and every column a query filters, joins or sorts on**, as a composite when the query also filters by status or orders by time (e.g. `workout_sessions (enrollment_id, status)`). Check each new query against the indexes in the schema.
+- **Queries scale with one person's data, never with everyone's:** count and sum in SQL, page or limit anything that grows (sessions, sets, check-ins), fixed number of queries per request (no query per row).
+- **Never a migration that rebuilds a table on D1.** Drizzle rebuilds a table (`__new_<table>` in the SQL) when you change a column's type, NOT NULL, default or foreign key. D1 runs migrations with foreign keys still on, so dropping the old table can cascade-delete its child rows (workouts → workout_exercises, sessions → sets). Add a new nullable column, a new table or an index instead; if a rebuild is truly needed, stop and plan the data copy first. Always read the generated SQL before applying it.
 
 ## Email
 

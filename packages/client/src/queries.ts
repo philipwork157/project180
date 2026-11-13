@@ -1,5 +1,7 @@
 import type {
   AdminOverview,
+  ChatSummary,
+  ChatThread,
   ClientProfile,
   EnrollmentSummary,
   Exercise,
@@ -7,6 +9,7 @@ import type {
   Me,
   MyPlan,
   MyStats,
+  PeoplePage,
   PersonActivity,
   PersonPrograms,
   PersonStats,
@@ -138,6 +141,42 @@ export const clientWorkoutQuery = (userId: number, sessionId: number) =>
       query.state.data?.session.status === 'in_progress' ? 10_000 : false,
   })
 
+/** Your chat with your coach (phone app). Polled faster while the Chat screen is open. */
+export const myChatQuery = queryOptions({
+  queryKey: ['me', 'chat'],
+  queryFn: () => api<{ thread: ChatThread; coach: { name: string } | null }>('/me/chat'),
+})
+
+/** Unread messages from your coach (the badge on the Coach tab). */
+export const myChatUnreadQuery = queryOptions({
+  queryKey: ['me', 'chat', 'unread'],
+  queryFn: async () => (await api<{ unread: number }>('/me/chat/unread')).unread,
+  refetchInterval: 60_000,
+})
+
+/** Every client conversation a coach can open, with unread counts (admin). */
+export const adminChatsQuery = queryOptions({
+  queryKey: ['admin', 'chat'],
+  queryFn: async () => (await api<{ chats: ChatSummary[] }>('/admin/chat')).chats,
+  refetchInterval: 20_000,
+})
+
+/** Unread client messages across everyone you manage (the sidebar badge). */
+export const adminChatUnreadQuery = queryOptions({
+  queryKey: ['admin', 'chat', 'unread'],
+  queryFn: async () => (await api<{ unread: number }>('/admin/chat/unread')).unread,
+  refetchInterval: 60_000,
+})
+
+/** One client's conversation (admin). Polled while it's open. */
+export const adminThreadQuery = (clientId: number) =>
+  queryOptions({
+    queryKey: ['admin', 'chat', 'thread', clientId],
+    queryFn: () =>
+      api<{ thread: ChatThread; client: { id: number; name: string } }>(`/admin/chat/${clientId}`),
+    refetchInterval: 5_000,
+  })
+
 /** Your coach's likes and comments you haven't seen yet (phone app notifications). */
 export const myFeedbackQuery = queryOptions({
   queryKey: ['me', 'feedback'],
@@ -187,6 +226,21 @@ export const coachesQuery = queryOptions({
       )
     ).coaches,
 })
+
+/** One page of the People list (searched, sorted and paged on the server). */
+export const peopleQuery = (params: {
+  view: 'mine' | 'clients' | 'team'
+  q: string
+  sort: 'added' | 'seen' | 'name'
+  page: number
+}) =>
+  queryOptions({
+    queryKey: ['admin', 'users', 'directory', params],
+    queryFn: () =>
+      api<PeoplePage>(
+        `/admin/users/directory?${new URLSearchParams({ ...params, page: String(params.page) })}`,
+      ),
+  })
 
 export const usersQuery = queryOptions({
   queryKey: ['admin', 'users'],

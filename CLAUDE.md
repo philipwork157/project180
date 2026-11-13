@@ -103,6 +103,11 @@ One spacing scale, so screens never look cramped or doubled up:
 - Schema changes need a migration in packages/db/drizzle (and its meta snapshot); apply with `bun run db:migrate` locally; `bun run deploy:dev` and `bun run deploy` apply them to the remote database before shipping.
 - Password fields always use `PasswordInput` from `@project180/ui` (eye button to show/hide), never a bare `type="password"` Input.
 
+## Coach feedback and chat
+
+- A coach sees a client's workout set by set at `GET /admin/users/:id/workouts/:sessionId` (through `managedPerson`; the session must be that person's). Likes and comments live in `session_feedback` (exercise_id null = the whole workout); only the author can delete theirs. Clients read them on the workout (`/sessions/:id/feedback`) and in Notifications (`/me/feedback`), and opening the workout marks them read.
+- Chat: one conversation per client (`messages.client_id`), so it stays with the client if their coach changes. Clients only ever reach their own (`/me/chat`, never a client id from the request); staff reach a client only through `managedPerson` (`/admin/chat/:clientId`), so owners see every chat and coaches only their clients'. Read positions per person in `message_reads`. Sends carry a `clientUuid` (retries never post twice; a uuid used by someone else answers 409). Staff messages push to the client's phone. The chat UI (`useChat`, `ChatView`) is shared in packages/ui. Never add a client-to-client or group chat.
+
 ## Database: normalization, integrity and scale
 
 - **One fact, one place.** Don't copy a column into another table to save a join; join instead. The only intended copies are history snapshots (`session_exercises`), clients' personal copies of programs and workouts, and `body_checkins.enrollment_id` (the program it was logged on). The only derived columns are `target_reps_min/max`, which the validator keeps equal to the lowest/highest of `target_reps_per_set`.

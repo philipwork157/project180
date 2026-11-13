@@ -20,7 +20,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { managedPerson } from '../access'
-import { insertMany, runAll } from '../batch'
+import { inChunks, insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { assertCanEditItem, libraryOnly, visibleTo } from '../library'
@@ -36,7 +36,9 @@ export async function loadWorkoutExercises(
 ): Promise<Map<number, WorkoutExerciseItem[]>> {
   const result = new Map<number, WorkoutExerciseItem[]>()
   if (workoutIds.length === 0) return result
-  const rows = await db
+  // In slices: D1 allows 100 bound values per statement, and the library can be bigger.
+  const rows = await inChunks(workoutIds, (ids) =>
+    db
     .select({
       workoutId: workoutExercises.workoutId,
       exerciseId: workoutExercises.exerciseId,
@@ -62,8 +64,9 @@ export async function loadWorkoutExercises(
     })
     .from(workoutExercises)
     .innerJoin(exercises, eq(exercises.id, workoutExercises.exerciseId))
-    .where(inArray(workoutExercises.workoutId, workoutIds))
-    .orderBy(asc(workoutExercises.workoutId), asc(workoutExercises.position))
+    .where(inArray(workoutExercises.workoutId, ids))
+    .orderBy(asc(workoutExercises.workoutId), asc(workoutExercises.position)),
+  )
   for (const { workoutId, ...item } of rows) {
     const list = result.get(workoutId) ?? []
     list.push(item)
@@ -79,11 +82,13 @@ export async function loadWorkoutGroups(
 ): Promise<Map<number, WorkoutGroup[]>> {
   const result = new Map<number, WorkoutGroup[]>()
   if (workoutIds.length === 0) return result
-  const rows = await db
-    .select()
-    .from(workoutGroups)
-    .where(inArray(workoutGroups.workoutId, workoutIds))
-    .orderBy(asc(workoutGroups.groupNumber))
+  const rows = await inChunks(workoutIds, (ids) =>
+    db
+      .select()
+      .from(workoutGroups)
+      .where(inArray(workoutGroups.workoutId, ids))
+      .orderBy(asc(workoutGroups.groupNumber)),
+  )
   for (const r of rows) {
     const list = result.get(r.workoutId) ?? []
     list.push({
@@ -102,10 +107,9 @@ export async function loadWorkoutGroups(
 export async function clientNames(db: Db, ids: Array<number | null>): Promise<Map<number, string>> {
   const unique = [...new Set(ids.filter((v): v is number => v !== null))]
   if (unique.length === 0) return new Map()
-  const rows = await db
-    .select({ id: users.id, name: users.name })
-    .from(users)
-    .where(inArray(users.id, unique))
+  const rows = await inChunks(unique, (ids) =>
+    db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids)),
+  )
   return new Map(rows.map((r) => [r.id, r.name]))
 }
 
@@ -252,41 +256,6 @@ export async function copyWorkoutForClient(
     ),
   ])
   return copy.id
-}
-
-/**
- * Rewrites a client's workout copy to match the library workout it came from, keeping its id
- * (sessions and program days point at it). Past sessions keep their own snapshot.
- */
-export async function overwriteWorkoutCopy(db: Db, fromId: number, toId: number) {
-  const [[source], items, groups] = await Promise.all([
-    db.select().from(workouts).where(eq(workouts.id, fromId)),
-    db.select().from(workoutExercises).where(eq(workoutExercises.workoutId, fromId)),
-    db.select().from(workoutGroups).where(eq(workoutGroups.workoutId, fromId)),
-  ])
-  if (!source) notFound('Workout not found')
-  await runAll(db, [
-    db
-      .update(workouts)
-      .set({
-        name: source.name,
-        description: source.description,
-        estimatedMinutes: source.estimatedMinutes,
-      })
-      .where(eq(workouts.id, toId)),
-    db.delete(workoutExercises).where(eq(workoutExercises.workoutId, toId)),
-    db.delete(workoutGroups).where(eq(workoutGroups.workoutId, toId)),
-    ...insertMany(
-      db,
-      workoutExercises,
-      items.map(({ id: _id, ...r }) => ({ ...r, workoutId: toId })),
-    ),
-    ...insertMany(
-      db,
-      workoutGroups,
-      groups.map(({ id: _id, ...r }) => ({ ...r, workoutId: toId })),
-    ),
-  ])
 }
 
 async function createWorkout(db: Db, user: Me, input: WorkoutInputParsed) {

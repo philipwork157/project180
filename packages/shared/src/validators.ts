@@ -300,6 +300,27 @@ export const feedbackReadInput = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(90),
 })
 
+/** The People page: which tab, a search, the order and the page. */
+export const peopleQueryInput = z.object({
+  view: z.enum(['mine', 'clients', 'team']).default('mine'),
+  // D1 refuses LIKE patterns over 50 bytes.
+  q: z.string().trim().max(40).default(''),
+  sort: z.enum(['added', 'seen', 'name']).default('added'),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+})
+
+/** One chat message. clientUuid makes a retried send safe. */
+export const messageInput = z.object({
+  clientUuid: z.string().uuid(),
+  body: z.string().trim().min(1, 'Write a message first').max(2000),
+})
+export type MessageInput = z.input<typeof messageInput>
+
+/** Read up to (and including) this message. */
+export const messageReadInput = z.object({
+  upTo: z.number().int().positive(),
+})
+
 /** A coach's suggested swaps for one exercise, in order. */
 export const exerciseAlternativesInput = z.object({
   alternativeIds: z

@@ -84,7 +84,11 @@ describe('coach sees a client’s workout', () => {
     // Training now: on the overview and readable set by set.
     const overview = await call<Json>('/admin/overview', { cookie: coach })
     expect(overview.data.overview.live).toHaveLength(1)
-    expect(overview.data.overview.live[0]).toMatchObject({ id: sessionId, userId: sam, setCount: 1 })
+    expect(overview.data.overview.live[0]).toMatchObject({
+      id: sessionId,
+      userId: sam,
+      setCount: 1,
+    })
     const live = await call<Json>(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: coach })
     expect(live.status).toBe(200)
     expect(live.data.session.status).toBe('in_progress')
@@ -99,9 +103,9 @@ describe('coach sees a client’s workout', () => {
     expect(done.data.session).toMatchObject({ status: 'completed', feeling: 4 })
 
     // The owner sees everyone.
-    expect((await call(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: owner })).status).toBe(
-      200,
-    )
+    expect(
+      (await call(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: owner })).status,
+    ).toBe(200)
   })
 
   it('nobody else can read it', async () => {
@@ -119,9 +123,9 @@ describe('coach sees a client’s workout', () => {
     expect((await call(`/sessions/${sessionId}`, { cookie: leeCookie })).status).toBe(404)
 
     // The coach can't reach it through another person's id (even their own client's).
-    expect((await call(`/admin/users/${lee}/workouts/${sessionId}`, { cookie: coach })).status).toBe(
-      404,
-    )
+    expect(
+      (await call(`/admin/users/${lee}/workouts/${sessionId}`, { cookie: coach })).status,
+    ).toBe(404)
 
     // A coach who doesn't look after Sam gets 404, and Sam never shows on their overview.
     const owner = await signIn(ADMIN.email, ADMIN.password)
@@ -146,10 +150,18 @@ describe('coach sees a client’s workout', () => {
     const { cookie: samCookie, sessionId } = await startWorkout(CLIENT, exerciseId)
     const base = `/admin/users/${sam}/workouts/${sessionId}/feedback`
 
-    const like = await call<Json>(base, { method: 'POST', cookie: coach, body: { exerciseId, kind: 'like' } })
+    const like = await call<Json>(base, {
+      method: 'POST',
+      cookie: coach,
+      body: { exerciseId, kind: 'like' },
+    })
     expect(like.status).toBe(201)
     // Liking again keeps the one like.
-    const again = await call<Json>(base, { method: 'POST', cookie: coach, body: { exerciseId, kind: 'like' } })
+    const again = await call<Json>(base, {
+      method: 'POST',
+      cookie: coach,
+      body: { exerciseId, kind: 'like' },
+    })
     expect(again.data.feedback.id).toBe(like.data.feedback.id)
     await call(base, { method: 'POST', cookie: coach, body: { kind: 'like' } })
     const comment = await call<Json>(base, {
@@ -159,12 +171,22 @@ describe('coach sees a client’s workout', () => {
     })
     expect(comment.data.feedback).toMatchObject({ exerciseId: null, authorName: COACH.name })
     // A comment needs words; an exercise must be in this workout.
-    expect((await call(base, { method: 'POST', cookie: coach, body: { kind: 'comment' } })).status).toBe(400)
     expect(
-      (await call(base, { method: 'POST', cookie: coach, body: { exerciseId: 99999, kind: 'like' } })).status,
+      (await call(base, { method: 'POST', cookie: coach, body: { kind: 'comment' } })).status,
+    ).toBe(400)
+    expect(
+      (
+        await call(base, {
+          method: 'POST',
+          cookie: coach,
+          body: { exerciseId: 99999, kind: 'like' },
+        })
+      ).status,
     ).toBe(404)
 
-    const coachView = await call<Json>(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: coach })
+    const coachView = await call<Json>(`/admin/users/${sam}/workouts/${sessionId}`, {
+      cookie: coach,
+    })
     expect(coachView.data.feedback).toHaveLength(3)
 
     // Sam sees all three as unread, on the workout and in notifications.
@@ -186,7 +208,9 @@ describe('coach sees a client’s workout', () => {
     })
     expect(leeRead.data.read).toBe(0)
     // Clients can't leave feedback, and the coach can't put it on someone else's workout.
-    expect((await call(base, { method: 'POST', cookie: leeCookie, body: { kind: 'like' } })).status).toBe(403)
+    expect(
+      (await call(base, { method: 'POST', cookie: leeCookie, body: { kind: 'like' } })).status,
+    ).toBe(403)
     expect(
       (
         await call(`/admin/users/${lee}/workouts/${sessionId}/feedback`, {
@@ -198,7 +222,11 @@ describe('coach sees a client’s workout', () => {
     ).toBe(404)
 
     // Sam opens the workout: all read, nothing left in notifications, the coach sees it was seen.
-    const read = await call<Json>('/me/feedback/read', { method: 'POST', cookie: samCookie, body: { ids } })
+    const read = await call<Json>('/me/feedback/read', {
+      method: 'POST',
+      cookie: samCookie,
+      body: { ids },
+    })
     expect(read.data.read).toBe(3)
     expect((await call<Json>('/me/feedback', { cookie: samCookie })).data.feedback).toEqual([])
     const seen = await call<Json>(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: coach })

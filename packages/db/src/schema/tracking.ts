@@ -180,6 +180,51 @@ export const sessionFeedback = sqliteTable(
   ],
 )
 
+/**
+ * Chat between a client and their coach. One conversation per client (client_id), so it
+ * stays with them if they change coach; staff who manage the client can read and write it.
+ */
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: id(),
+    // Made on the phone or in the browser, so a retried send never posts twice.
+    clientUuid: text('client_uuid').notNull().unique(),
+    clientId: integer('client_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Kept (without a name) if the sender's account is removed.
+    senderId: integer('sender_id').references(() => users.id, { onDelete: 'set null' }),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // A conversation, newest first, and "unread after my last read".
+    index('messages_client_idx').on(t.clientId, t.id),
+    index('messages_sender_idx').on(t.senderId),
+  ],
+)
+
+/** How far each person has read in a conversation: the last message id they've seen. */
+export const messageReads = sqliteTable(
+  'message_reads',
+  {
+    id: id(),
+    clientId: integer('client_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    lastReadId: integer('last_read_id').notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('message_reads_client_user_uq').on(t.clientId, t.userId),
+    index('message_reads_user_idx').on(t.userId),
+  ],
+)
+
 export const bodyCheckins = sqliteTable(
   'body_checkins',
   {

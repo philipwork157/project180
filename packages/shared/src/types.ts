@@ -76,6 +76,24 @@ export interface UserSummary {
   lastSeenAt: string | null
 }
 
+/** One person on the People page: the summary row, before their details are opened. */
+export interface DirectoryPerson extends UserSummary {
+  /** Their current program, or null. */
+  programName: string | null
+  lastWorkoutAt: string | null
+  /** Coaches: how many clients they coach. */
+  clientCount: number
+}
+
+/** A page of the People list, with the head count of each tab. */
+export interface PeoplePage {
+  people: DirectoryPerson[]
+  total: number
+  page: number
+  pageSize: number
+  counts: { mine: number; clients: number; team: number }
+}
+
 /** One signed-in device (a Better Auth session). */
 export interface SignedInDevice {
   id: number
@@ -343,6 +361,36 @@ export interface SessionFeedback {
 export interface FeedbackNews extends SessionFeedback {
   workoutName: string | null
   exerciseName: string | null
+}
+
+/** One chat message between a client and their coach. */
+export interface ChatMessage {
+  id: number
+  clientUuid: string
+  senderId: number | null
+  /** Null when the sender's account was removed. */
+  senderName: string | null
+  body: string
+  createdAt: string
+}
+
+/** A page of one conversation, oldest first. */
+export interface ChatThread {
+  messages: ChatMessage[]
+  /** There are older messages: ask again with before = the first id. */
+  hasMore: boolean
+  /** The newest message the other side has read (your sent ones up to here show "Seen"). */
+  seenUpTo: number
+  /** The last message you've read. */
+  readUpTo: number
+}
+
+/** A client's conversation in the coach's inbox. */
+export interface ChatSummary {
+  clientId: number
+  name: string
+  unread: number
+  last: { body: string; createdAt: string; fromClient: boolean; fromMe: boolean } | null
 }
 
 export interface SessionSummary {

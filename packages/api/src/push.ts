@@ -5,8 +5,9 @@
 // - No VAPID key pair configured (local dev, tests): nothing is sent.
 // - A phone that has turned notifications off (404 / 410): its subscription is removed.
 import { type Db, pushSubscriptions } from '@project180/db'
-import { eq, inArray } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import type { Context } from 'hono'
+import { chunk, inChunks, runAll } from './batch'
 import type { AppEnv, Bindings } from './env'
 
 const utf8 = new TextEncoder()
@@ -106,13 +107,10 @@ export async function encryptPush(
     false,
     [],
   )
-  const shared = new Uint8Array(
-    await crypto.subtle.deriveBits(
-      { name: 'ECDH', public: phoneKey },
-      pair.privateKey,
-      256,
-    ),
-  )
+  // Workers' types call this key `$public`, but the runtime (like every browser) reads the
+  // standard `public`. Passing a variable skips the literal check without changing behaviour.
+  const ecdh = { name: 'ECDH', public: phoneKey }
+  const shared = new Uint8Array(await crypto.subtle.deriveBits(ecdh, pair.privateKey, 256))
   const keyInfo = concat(utf8.encode('WebPush: info\0'), phonePublic, ourPublic)
   const ikm = await hkdf(authSecret, shared, keyInfo, 32)
   const cek = await hkdf(salt, ikm, utf8.encode('Content-Encoding: aes128gcm\0'), 16)
@@ -203,10 +201,10 @@ export async function sendPush(
 ): Promise<{ sent: number }> {
   if (!pushConfigured(env) || userIds.length === 0) return { sent: 0 }
   try {
-    const targets = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(inArray(pushSubscriptions.userId, userIds.slice(0, 90)))
+    // Everyone, in slices (D1 allows 100 bound values per statement).
+    const targets = await inChunks([...new Set(userIds)], (slice) =>
+      db.select().from(pushSubscriptions).where(inArray(pushSubscriptions.userId, slice)),
+    )
     const results = await Promise.all(
       targets.map((t) =>
         sendOne(env, t, message).catch((err) => {
@@ -216,7 +214,10 @@ export async function sendPush(
       ),
     )
     const gone = targets.filter((_, i) => results[i] === 'gone').map((t) => t.id)
-    for (const id of gone) await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, id))
+    await runAll(
+      db,
+      chunk(gone).map((ids) => db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, ids))),
+    )
     return { sent: results.filter((r) => r === 'sent').length }
   } catch (err) {
     console.error('[push] failed', err)

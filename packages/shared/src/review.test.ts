@@ -68,9 +68,9 @@ describe('setResultLabel', () => {
     expect(setResultLabel({ ...blank, reps: 12 }, 'weight_reps')).toBe('12 reps')
     expect(setResultLabel({ ...blank, reps: 1 }, 'reps')).toBe('1 rep')
     expect(setResultLabel({ ...blank, durationSeconds: 45 }, 'time')).toBe('0:45')
-    expect(setResultLabel({ ...blank, distanceM: 1200, durationSeconds: 390 }, 'distance_time')).toBe(
-      '1.2 km · 6:30',
-    )
+    expect(
+      setResultLabel({ ...blank, distanceM: 1200, durationSeconds: 390 }, 'distance_time'),
+    ).toBe('1.2 km · 6:30')
     expect(setResultLabel(blank, 'time')).toBe('–')
   })
 })
@@ -81,7 +81,9 @@ describe('setTargetLabel', () => {
     expect(setTargetLabel(e, 1)).toBe('12 reps')
     expect(setTargetLabel(e, 3)).toBe('8 reps')
     expect(setTargetLabel(exercise(), 2)).toBe('8–10 reps')
-    expect(setTargetLabel(exercise({ targetRepsMin: null, targetRepsMax: null }), 1)).toBe('Max reps')
+    expect(setTargetLabel(exercise({ targetRepsMin: null, targetRepsMax: null }), 1)).toBe(
+      'Max reps',
+    )
     expect(setTargetLabel(exercise({ trackingType: 'time', targetSeconds: 60 }), 1)).toBe('1:00')
   })
 })

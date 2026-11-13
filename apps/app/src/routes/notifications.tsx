@@ -89,7 +89,8 @@ function NotificationsPage() {
           </span>
           <p className="mt-2 font-bold text-[17px]">You’re all caught up</p>
           <p className="max-w-xs text-[14px] text-ink-muted">
-            Weigh-in days, today’s workout, news about your program and your coach’s feedback show up here.
+            Weigh-in days, today’s workout, news about your program and your coach’s feedback show
+            up here.
           </p>
         </div>
       ) : (

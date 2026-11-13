@@ -167,11 +167,7 @@ function ProgressPage() {
           )}
         </>
       )}
-      <Sheet
-        open={openSession !== null}
-        onClose={closeSession}
-        label="Workout details"
-      >
+      <Sheet open={openSession !== null} onClose={closeSession} label="Workout details">
         {openSession !== null && (
           <div className="pb-4">
             <SessionDetails sessionId={openSession} timezone={me.timezone} />

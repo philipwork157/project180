@@ -32,6 +32,13 @@ export async function runAll(db: Db, statements: BatchItem<'sqlite'>[]) {
   if (first) await db.batch([first, ...rest])
 }
 
+/** Splits ids into slices small enough for one statement (for deletes and updates in a batch). */
+export function chunk(ids: number[], size = MAX_VARIABLES - 10): number[][] {
+  const slices: number[][] = []
+  for (let i = 0; i < ids.length; i += size) slices.push(ids.slice(i, i + size))
+  return slices
+}
+
 /**
  * Runs a query once per slice of ids (each slice small enough for D1's variable limit, with
  * room for the query's other bound values), all slices together, and joins the rows.
@@ -42,7 +49,5 @@ export async function inChunks<T>(
   size = MAX_VARIABLES - 10,
 ): Promise<T[]> {
   if (ids.length === 0) return []
-  const slices: number[][] = []
-  for (let i = 0; i < ids.length; i += size) slices.push(ids.slice(i, i + size))
-  return (await Promise.all(slices.map(query))).flat()
+  return (await Promise.all(chunk(ids, size).map(query))).flat()
 }

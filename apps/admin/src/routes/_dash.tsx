@@ -1,4 +1,4 @@
-import { authClient, forgetLocalData, meQuery } from '@project180/client'
+import { adminChatUnreadQuery, authClient, forgetLocalData, meQuery } from '@project180/client'
 import { isStaff, type Me } from '@project180/shared'
 import { cn, IconButton, Logo, LogoMark, Tooltip } from '@project180/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   ListChecks,
   Menu,
+  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
   UsersRound,
@@ -42,6 +43,8 @@ type NavItem = {
   icon: typeof Dumbbell
   adminOnly?: boolean
   exact?: boolean
+  /** Show the unread message count. */
+  unread?: boolean
 }
 
 const sections: Array<{ title?: string; items: NavItem[] }> = [
@@ -56,7 +59,10 @@ const sections: Array<{ title?: string; items: NavItem[] }> = [
   },
   {
     title: 'People',
-    items: [{ to: '/users', label: 'Users', icon: UsersRound, adminOnly: true }],
+    items: [
+      { to: '/users', label: 'Users', icon: UsersRound, adminOnly: true },
+      { to: '/messages', label: 'Messages', icon: MessageCircle, unread: true },
+    ],
   },
 ]
 
@@ -85,6 +91,7 @@ function Sidebar({
   onSignOut: () => void
 }) {
   const isAdmin = isStaff(me.role)
+  const unread = useQuery({ ...adminChatUnreadQuery, enabled: isAdmin }).data ?? 0
   return (
     <nav
       aria-label="Dashboard"
@@ -127,14 +134,15 @@ function Sidebar({
                   {section.title}
                 </p>
               ))}
-            {items.map(({ to, label, icon: Icon, exact }) => {
+            {items.map(({ to, label, icon: Icon, exact, unread: counts }) => {
               const active = exact ? pathname === to : pathname.startsWith(to)
+              const badge = counts && unread > 0 ? (unread > 99 ? '99+' : String(unread)) : null
               const link = (
                 <Link
                   key={to}
                   to={to}
                   aria-current={active ? 'page' : undefined}
-                  aria-label={collapsed ? label : undefined}
+                  aria-label={collapsed ? (badge ? `${label}, ${badge} unread` : label) : undefined}
                   className={cn(
                     'relative flex h-11 items-center gap-3 rounded-md font-bold text-[15px] transition',
                     collapsed ? 'w-11 justify-center self-center' : 'px-3',
@@ -151,6 +159,17 @@ function Sidebar({
                   )}
                   <Icon className="size-5 shrink-0" strokeWidth={2.2} aria-hidden />
                   {!collapsed && label}
+                  {badge && (
+                    <span
+                      className={cn(
+                        'tabular grid h-5 min-w-5 place-items-center rounded-pill bg-clay px-1.5 font-extrabold text-[11px] text-on-clay',
+                        collapsed ? 'absolute -top-1 -right-1 ring-2 ring-surface' : 'ml-auto',
+                      )}
+                    >
+                      {badge}
+                      {!collapsed && <span className="sr-only"> unread</span>}
+                    </span>
+                  )}
                 </Link>
               )
               return collapsed ? (

@@ -23,12 +23,15 @@ import {
   createUserInput,
   type DeletePersonResult,
   deviceLabel,
+  type DirectoryPerson,
   feedbackInput,
   isClient,
   isOwner,
   isoDate,
   isStaff,
   type PastProgram,
+  type PeoplePage,
+  peopleQueryInput,
   type PersonActivity,
   type PersonProgress,
   resetPasswordInput,
@@ -36,7 +39,22 @@ import {
   todayIn,
   type UserSummary,
 } from '@project180/shared'
-import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  like,
+  max,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -215,6 +233,9 @@ async function ownEnrollment(db: Db, userId: number, enrollmentId: number) {
   return row
 }
 
+/** People per page on the People list. */
+const PEOPLE_PAGE = 25
+
 async function assertCoach(db: Db, coachId: number) {
   const [coach] = await db.select({ role: users.role }).from(users).where(eq(users.id, coachId))
   if (!coach || !isStaff(coach.role)) notFound('Coach not found')
@@ -248,6 +269,118 @@ export const adminUserRoutes = new Hono<AppEnv>()
       lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
     }))
     return c.json({ users: list })
+  })
+  /**
+   * The People page: one tab, searched, sorted and paged on the server, with a one-line
+   * summary per person. A fixed number of queries however many people there are; details
+   * (profile, devices, program) load only when a person is opened.
+   */
+  .get('/directory', async (c) => {
+    const { db, user: me } = c.var
+    const parsed = peopleQueryInput.safeParse(c.req.query())
+    if (!parsed.success) throw new HTTPException(400, { message: 'Bad search' })
+    const input = parsed.data
+    // Coaches only ever see their own clients.
+    const view = isOwner(me.role) ? input.view : 'mine'
+    const isMember = eq(users.role, 'member')
+    const tab =
+      view === 'team'
+        ? ne(users.role, 'member')
+        : view === 'clients'
+          ? isMember
+          : and(isMember, eq(users.coachId, me.id))
+    const pattern = `%${input.q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`
+    const search = input.q
+      ? or(
+          like(users.name, sql`${pattern} escape '\\'`),
+          like(users.email, sql`${pattern} escape '\\'`),
+        )
+      : undefined
+    const where = and(managedUsers(me), tab, search)
+    const order =
+      input.sort === 'name'
+        ? [sql`${users.name} collate nocase`]
+        : input.sort === 'seen'
+          ? [sql`${users.lastSeenAt} is null`, desc(users.lastSeenAt)]
+          : [asc(users.createdAt)]
+    const coach = alias(users, 'coach')
+    const [rows, [total], [counts]] = await Promise.all([
+      db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          role: users.role,
+          coachId: users.coachId,
+          coachName: coach.name,
+          mainGoal: clientProfiles.mainGoal,
+          createdAt: users.createdAt,
+          lastSeenAt: users.lastSeenAt,
+        })
+        .from(users)
+        .leftJoin(coach, eq(coach.id, users.coachId))
+        .leftJoin(clientProfiles, eq(clientProfiles.userId, users.id))
+        .where(where)
+        .orderBy(...order, asc(users.id))
+        .limit(PEOPLE_PAGE)
+        .offset((input.page - 1) * PEOPLE_PAGE),
+      db.select({ n: count() }).from(users).where(where),
+      // Each tab's head count, for the tab labels (all you may see, before the search).
+      db
+        .select({
+          mine: sql<number>`coalesce(sum(case when ${users.role} = 'member' and ${users.coachId} = ${me.id} then 1 else 0 end), 0)`,
+          clients: sql<number>`coalesce(sum(case when ${users.role} = 'member' then 1 else 0 end), 0)`,
+          team: sql<number>`coalesce(sum(case when ${users.role} <> 'member' then 1 else 0 end), 0)`,
+        })
+        .from(users)
+        .where(managedUsers(me)),
+    ])
+    const ids = rows.map((r) => r.id)
+    // The one-line summary for this page only: program, last workout, clients coached.
+    const [programRows, workoutRows, clientRows] = ids.length
+      ? await Promise.all([
+          db
+            .select({ userId: enrollments.userId, name: programs.name })
+            .from(enrollments)
+            .innerJoin(programs, eq(programs.id, enrollments.programId))
+            .where(and(inArray(enrollments.userId, ids), eq(enrollments.status, 'active'))),
+          db
+            .select({ userId: workoutSessions.userId, at: max(workoutSessions.startedAt) })
+            .from(workoutSessions)
+            .where(
+              and(inArray(workoutSessions.userId, ids), eq(workoutSessions.status, 'completed')),
+            )
+            .groupBy(workoutSessions.userId),
+          db
+            .select({ coachId: users.coachId, n: count() })
+            .from(users)
+            .where(and(inArray(users.coachId, ids), eq(users.role, 'member')))
+            .groupBy(users.coachId),
+        ])
+      : [[], [], []]
+    const programOf = new Map(programRows.map((r) => [r.userId, r.name]))
+    const workoutOf = new Map(workoutRows.map((r) => [r.userId, r.at]))
+    const clientsOf = new Map(clientRows.map((r) => [r.coachId, r.n]))
+    const people: DirectoryPerson[] = rows.map((r) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
+      programName: programOf.get(r.id) ?? null,
+      lastWorkoutAt: workoutOf.get(r.id)?.toISOString() ?? null,
+      clientCount: clientsOf.get(r.id) ?? 0,
+    }))
+    const page: PeoplePage = {
+      people,
+      total: total?.n ?? 0,
+      page: input.page,
+      pageSize: PEOPLE_PAGE,
+      counts: {
+        mine: Number(counts?.mine ?? 0),
+        clients: Number(counts?.clients ?? 0),
+        team: Number(counts?.team ?? 0),
+      },
+    }
+    return c.json(page)
   })
   /** Staff who can coach (owners only): for picking or changing someone's coach. */
   .get('/coaches', async (c) => {

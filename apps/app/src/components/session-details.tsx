@@ -1,9 +1,9 @@
 import { api, myFeedbackQuery, sessionFeedbackQuery, sessionQuery } from '@project180/client'
 import {
+  type FeedbackNews,
   formatDuration,
   formatNumber,
   formatWeight,
-  type FeedbackNews,
   type LoggedSet,
   type SessionFeedback,
   totalVolume,

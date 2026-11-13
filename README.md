@@ -171,7 +171,25 @@ Every push runs `bun run check` on GitHub (`.github/workflows/check.yml`).
 
 The Workers Paid plan ($5/month) is recommended: password hashing can exceed the free plan's CPU limit per request.
 
-## Push notifications
+## Going live
+
+`bun run deploy` first runs `scripts/check-live.ts`, which refuses to deploy while the live database id is the placeholder, the two apps point at different databases, or either Worker has no `BETTER_AUTH_SECRET`. It warns (but still deploys) when email or push keys are missing.
+
+Before the first real client:
+
+1. **Workers Paid plan** ($5/month) on the Cloudflare account. The free plan allows 50 database queries per request and 100,000 rows written a day; when a daily limit is hit, every query fails until midnight UTC.
+2. **Live database:** `cd apps/app && bunx wrangler d1 create project180-db`, paste the id into `database_id` in **both** `apps/app/wrangler.jsonc` and `apps/admin/wrangler.jsonc`.
+3. **Photo storage:** `bunx wrangler r2 bucket create project180-media`.
+4. **Secrets, on both Workers** (run each in `apps/app` and again in `apps/admin`, same values):
+   - `bunx wrangler secret put BETTER_AUTH_SECRET` (a long random string)
+   - `bunx wrangler secret put AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (Amazon SES, sending from a verified `hello@project180.co.za`)
+   - `bunx wrangler secret put VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (see Push notifications; the same pair as you'll keep for good)
+   - Optional, phone app only: `YOUTUBE_API_KEY`
+5. **Deploy:** `bun run build && bun run deploy` from the root.
+6. **First owner:** `bun run admin:create:live`.
+7. **Check:** in the live admin, Settings > Email shows "live" and sends a test; open both sites with the browser console open and look for Content-Security-Policy errors.
+8. **Backups:** D1 keeps 30 days of point-in-time recovery on the paid plan. Do one practice restore on the dev database (`bunx wrangler d1 time-travel restore project180-db-dev --timestamp=...`) so the steps are known before they're needed.
+
 
 Clients can turn on notifications under Profile in the phone app. They then hear about a new or changed program even when the app is closed; the bell inside the app shows the same news either way.
 

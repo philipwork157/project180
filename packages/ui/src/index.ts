@@ -1,6 +1,7 @@
 export * from './auth-shell'
 export * from './button'
 export * from './card'
+export * from './chat'
 export * from './chip'
 export * from './choice'
 export * from './choose-password'

@@ -51,9 +51,7 @@ function TodayPage() {
       <ScreenHeader
         overline={dateLabel}
         title={`${greeting(new Date().getHours())}, ${firstName}`}
-        action={
-          <NotificationsButton />
-        }
+        action={<NotificationsButton />}
       />
 
       {activeSession && (

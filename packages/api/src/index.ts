@@ -6,6 +6,7 @@ import { secureHeaders } from 'hono/secure-headers'
 import { createAuth } from './auth'
 import type { AppEnv, Bindings } from './env'
 import { mountMedia } from './media'
+import { adminChatRoutes } from './routes/admin-chat'
 import { adminEmailRoutes } from './routes/admin-email'
 import { adminOverviewRoutes } from './routes/admin-overview'
 import { adminUserRoutes } from './routes/admin-users'
@@ -107,6 +108,7 @@ export function createApp() {
   app.route('/admin/users', adminUserRoutes)
   app.route('/admin/overview', adminOverviewRoutes)
   app.route('/admin/email', adminEmailRoutes)
+  app.route('/admin/chat', adminChatRoutes)
   app.route('/videos', videoRoutes)
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404))

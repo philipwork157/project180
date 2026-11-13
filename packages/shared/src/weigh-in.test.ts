@@ -104,7 +104,9 @@ describe('program news in the notifications', () => {
         id: 'program:4',
         kind: 'program',
         title: 'New program: 4-Week Strength',
-        body: expect.stringMatching(/^Kim set it up for you\. It starts on Monday,? 16 November\.$/),
+        body: expect.stringMatching(
+          /^Kim set it up for you\. It starts on Monday,? 16 November\.$/,
+        ),
       },
     ])
     const started = appNotifications({ ...base, program: { ...program, startDate: '2026-11-10' } })
@@ -145,4 +147,3 @@ describe('program news in the notifications', () => {
     expect(list.map((n) => n.kind)).toEqual(['program', 'workout'])
   })
 })
-

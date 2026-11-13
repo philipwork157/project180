@@ -18,28 +18,29 @@ import {
   programInput,
   syncCopiesInput,
 } from '@project180/shared'
-import { and, asc, eq, inArray, max, notExists, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNotNull, lte, max, notExists, or, sql } from 'drizzle-orm'
+import type { BatchItem } from 'drizzle-orm/batch'
+import { alias } from 'drizzle-orm/sqlite-core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import { managedPerson, managedUsers } from '../access'
-import { inChunks, insertMany, runAll } from '../batch'
+import { managedUsers } from '../access'
+import { chunk, inChunks, insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { assertCanEditItem, libraryOnly, visibleTo } from '../library'
 import { requireAdmin, requireUser } from '../middleware'
-import { pushLater } from '../push'
 import { programImpact, purgeProgram } from '../purge'
+import { pushLater } from '../push'
 import {
   clientNames,
   copyWorkoutForClient,
-  overwriteWorkoutCopy,
   workoutCopyValues,
 } from './workouts'
 
 type ProgramRow = typeof programs.$inferSelect
 type ProgramInputParsed = ReturnType<typeof programInput.parse>
 
-function toSummary(r: ProgramRow, days: ProgramDay[], names: Map<number, string>): ProgramSummary {
+function toSummary(r: ProgramRow, workoutDays: number, names: Map<number, string>): ProgramSummary {
   return {
     id: r.id,
     name: r.name,
@@ -49,7 +50,7 @@ function toSummary(r: ProgramRow, days: ProgramDay[], names: Map<number, string>
     clientId: r.clientId,
     clientName: r.clientId !== null ? (names.get(r.clientId) ?? null) : null,
     sourceProgramId: r.sourceProgramId,
-    workoutDays: days.filter((d) => d.workoutId !== null && d.weekNumber <= r.durationWeeks).length,
+    workoutDays,
     archived: r.archivedAt !== null,
     updatedAt: r.updatedAt.toISOString(),
   }
@@ -58,11 +59,14 @@ function toSummary(r: ProgramRow, days: ProgramDay[], names: Map<number, string>
 export async function loadProgramDays(db: Db, programIds: number[]) {
   const result = new Map<number, ProgramDay[]>()
   if (programIds.length === 0) return result
-  const rows = await db
-    .select()
-    .from(programDays)
-    .where(inArray(programDays.programId, programIds))
-    .orderBy(asc(programDays.weekNumber), asc(programDays.dayNumber))
+  // In slices: D1 allows 100 bound values per statement.
+  const rows = await inChunks(programIds, (ids) =>
+    db
+      .select()
+      .from(programDays)
+      .where(inArray(programDays.programId, ids))
+      .orderBy(asc(programDays.weekNumber), asc(programDays.dayNumber)),
+  )
   for (const r of rows) {
     const list = result.get(r.programId) ?? []
     list.push({
@@ -82,7 +86,10 @@ export async function programDetail(db: Db, row: ProgramRow): Promise<ProgramDet
   const days = ((await loadProgramDays(db, [row.id])).get(row.id) ?? []).filter(
     (d) => d.weekNumber <= row.durationWeeks,
   )
-  return { ...toSummary(row, days, await clientNames(db, [row.clientId])), days }
+  const workoutDays = days.filter(
+    (d) => d.workoutId !== null && d.weekNumber <= row.durationWeeks,
+  ).length
+  return { ...toSummary(row, workoutDays, await clientNames(db, [row.clientId])), days }
 }
 
 /**
@@ -184,7 +191,7 @@ export async function copyProgramForClient(
     // Deleting the copies takes their days, rows and groups with them.
     await db.batch([
       db.delete(programs).where(eq(programs.id, copyId)),
-      ...(created.length ? [db.delete(workouts).where(inArray(workouts.id, created))] : []),
+      ...chunk(created).map((ids) => db.delete(workouts).where(inArray(workouts.id, ids))),
     ])
     throw err
   }
@@ -221,24 +228,37 @@ export async function deleteClientProgram(db: Db, programId: number) {
 
 /** Deletes these workout copies of a client's when no program day or session uses them any more. */
 async function deleteUnusedClientWorkouts(db: Db, workoutIds: number[], clientId: number) {
-  if (workoutIds.length === 0) return
-  await db
-    .delete(workouts)
-    .where(
-      and(
-        inArray(workouts.id, workoutIds),
-        eq(workouts.clientId, clientId),
-        notExists(
-          db.select({ x: sql`1` }).from(programDays).where(eq(programDays.workoutId, workouts.id)),
-        ),
-        notExists(
-          db
-            .select({ x: sql`1` })
-            .from(workoutSessions)
-            .where(eq(workoutSessions.workoutId, workouts.id)),
+  await runAll(db, unusedClientWorkouts(db, workoutIds, clientId))
+}
+
+/** The same as batch statements, one per slice of ids (D1's 100-value limit). */
+function unusedClientWorkouts(
+  db: Db,
+  workoutIds: number[],
+  clientId: number,
+): BatchItem<'sqlite'>[] {
+  return chunk(workoutIds).map((ids) =>
+    db
+      .delete(workouts)
+      .where(
+        and(
+          inArray(workouts.id, ids),
+          eq(workouts.clientId, clientId),
+          notExists(
+            db
+              .select({ x: sql`1` })
+              .from(programDays)
+              .where(eq(programDays.workoutId, workouts.id)),
+          ),
+          notExists(
+            db
+              .select({ x: sql`1` })
+              .from(workoutSessions)
+              .where(eq(workoutSessions.workoutId, workouts.id)),
+          ),
         ),
       ),
-    )
+  )
 }
 
 export async function findVisibleProgram(
@@ -323,59 +343,273 @@ async function writeDays(db: Db, programId: number, input: Pick<ProgramInputPars
  * rewritten in place; logged sessions keep their own snapshot of what was prescribed.
  */
 export async function syncClientCopy(db: Db, copyId: number, actorId: number) {
-  const [copy] = await db.select().from(programs).where(eq(programs.id, copyId))
-  if (!copy || copy.clientId === null || copy.sourceProgramId === null)
-    notFound('Program not found')
-  const clientId = copy.clientId
-  const [source] = await db.select().from(programs).where(eq(programs.id, copy.sourceProgramId))
-  if (!source) notFound('The library program is gone')
-  const days = await loadProgramDays(db, [source.id, copy.id])
-  const sourceDays = days.get(source.id) ?? []
-  const oldIds = [
-    ...new Set((days.get(copy.id) ?? []).map((d) => d.workoutId).filter((v) => v !== null)),
-  ]
-  // Their workout copies, by the library workout each was made from.
-  const theirs = new Map<number, number>()
-  if (oldIds.length > 0) {
-    const rows = await db
-      .select({ id: workouts.id, sourceWorkoutId: workouts.sourceWorkoutId })
-      .from(workouts)
-      .where(and(inArray(workouts.id, oldIds), eq(workouts.clientId, clientId)))
-    for (const w of rows)
-      if (w.sourceWorkoutId !== null && !theirs.has(w.sourceWorkoutId))
-        theirs.set(w.sourceWorkoutId, w.id)
-  }
-  const map = new Map<number, number>()
-  for (const d of sourceDays) {
-    if (d.workoutId === null || map.has(d.workoutId)) continue
-    const mine = theirs.get(d.workoutId)
-    if (mine !== undefined) await overwriteWorkoutCopy(db, d.workoutId, mine)
-    map.set(d.workoutId, mine ?? (await copyWorkoutForClient(db, d.workoutId, clientId, actorId)))
-  }
-  await writeDays(db, copy.id, {
-    days: sourceDays.map((d) => ({
-      weekNumber: d.weekNumber,
-      dayNumber: d.dayNumber,
-      workoutId: d.workoutId === null ? null : (map.get(d.workoutId) ?? null),
-      checkinRequired: d.checkinRequired,
-      notes: d.notes,
-    })),
-  })
-  await db
-    .update(programs)
-    .set({
-      name: source.name,
-      description: source.description,
-      durationWeeks: source.durationWeeks,
-      syncedAt: new Date(),
-    })
-    .where(eq(programs.id, copy.id))
-  const used = new Set(map.values())
-  await deleteUnusedClientWorkouts(
-    db,
-    oldIds.filter((w) => !used.has(w)),
-    clientId,
+  await syncClientCopies(db, [copyId], actorId)
+}
+
+/**
+ * The same for many clients' copies at once, in a fixed number of round trips however many
+ * clients or workouts: read everything, make the new workout copies in one batch (to learn
+ * their ids), then write the rest in one batch. If that second batch fails, the new copies
+ * are removed again, so every client ends up either fully updated or untouched.
+ */
+export async function syncClientCopies(db: Db, copyIds: number[], actorId: number) {
+  const ids = [...new Set(copyIds)]
+  if (ids.length === 0) return
+  // 1. Read: the copies and the library programs they came from.
+  const copies = await inChunks(ids, (slice) =>
+    db.select().from(programs).where(inArray(programs.id, slice)),
   )
+  if (copies.length !== ids.length) notFound('Program not found')
+  for (const copy of copies)
+    if (copy.clientId === null || copy.sourceProgramId === null) notFound('Program not found')
+  const sourceIds = [...new Set(copies.map((c) => c.sourceProgramId as number))]
+  const [sources, days] = await Promise.all([
+    inChunks(sourceIds, (slice) => db.select().from(programs).where(inArray(programs.id, slice))),
+    loadProgramDays(db, [...sourceIds, ...ids]),
+  ])
+  if (sources.length !== sourceIds.length) notFound('The library program is gone')
+  const sourceOf = new Map(sources.map((s) => [s.id, s]))
+
+  // The library workouts the schedules use, and every client's current workout copies.
+  const usedIds = [
+    ...new Set(
+      sourceIds.flatMap((id) =>
+        (days.get(id) ?? []).flatMap((d) => (d.workoutId === null ? [] : [d.workoutId])),
+      ),
+    ),
+  ]
+  const oldIds = [
+    ...new Set(
+      ids.flatMap((id) =>
+        (days.get(id) ?? []).flatMap((d) => (d.workoutId === null ? [] : [d.workoutId])),
+      ),
+    ),
+  ]
+  const [libraryWorkouts, items, groups, current] = await Promise.all([
+    inChunks(usedIds, (slice) => db.select().from(workouts).where(inArray(workouts.id, slice))),
+    inChunks(usedIds, (slice) =>
+      db.select().from(workoutExercises).where(inArray(workoutExercises.workoutId, slice)),
+    ),
+    inChunks(usedIds, (slice) =>
+      db.select().from(workoutGroups).where(inArray(workoutGroups.workoutId, slice)),
+    ),
+    inChunks(oldIds, (slice) =>
+      db
+        .select({
+          id: workouts.id,
+          clientId: workouts.clientId,
+          sourceWorkoutId: workouts.sourceWorkoutId,
+        })
+        .from(workouts)
+        .where(inArray(workouts.id, slice)),
+    ),
+  ])
+  const workoutOf = new Map(libraryWorkouts.map((w) => [w.id, w]))
+  const itemsOf = groupBy(items, (r) => r.workoutId)
+  const groupsOf = groupBy(groups, (r) => r.workoutId)
+
+  // 2. Plan each client's copy: which workout copies to rewrite and which to make.
+  const plans = copies.map((copy) => {
+    const clientId = copy.clientId as number
+    const source = sourceOf.get(copy.sourceProgramId as number)
+    if (!source) notFound('The library program is gone')
+    const mineNow = new Set(
+      (days.get(copy.id) ?? []).flatMap((d) => (d.workoutId === null ? [] : [d.workoutId])),
+    )
+    // Their workout copies on this program, by the library workout each was made from.
+    const theirs = new Map<number, number>()
+    for (const w of current)
+      if (mineNow.has(w.id) && w.clientId === clientId && w.sourceWorkoutId !== null)
+        if (!theirs.has(w.sourceWorkoutId)) theirs.set(w.sourceWorkoutId, w.id)
+    const sourceDays = days.get(source.id) ?? []
+    const libraryIds = [
+      ...new Set(sourceDays.flatMap((d) => (d.workoutId === null ? [] : [d.workoutId]))),
+    ]
+    for (const id of libraryIds) if (!workoutOf.has(id)) notFound('Workout not found')
+    return {
+      copy,
+      clientId,
+      source,
+      sourceDays,
+      oldIds: [...mineNow],
+      rewrite: libraryIds.flatMap((id) => {
+        const to = theirs.get(id)
+        return to === undefined ? [] : [{ from: id, to }]
+      }),
+      create: libraryIds.filter((id) => !theirs.has(id)),
+    }
+  })
+
+  // 3. New workout copies, in one batch, to learn their ids.
+  const toCreate = plans.flatMap((p) =>
+    p.create.map((from) => ({ plan: p, from, source: workoutOf.get(from) as WorkoutRow })),
+  )
+  const createdIds: number[] = []
+  try {
+  for (const part of chunkList(toCreate, 500)) {
+    const [first, ...rest] = part.map((t) =>
+      db
+        .insert(workouts)
+        .values(workoutCopyValues(t.source, t.plan.clientId, actorId))
+        .returning({ id: workouts.id }),
+    )
+    if (!first) continue
+    const made = (await db.batch([first, ...rest])) as Array<Array<{ id: number }>>
+    createdIds.push(...made.map((r) => r[0]?.id as number))
+  }
+  const newCopyOf = new Map<string, number>()
+  toCreate.forEach((t, i) => {
+    newCopyOf.set(`${t.plan.copy.id}:${t.from}`, createdIds[i] as number)
+  })
+
+  // 4. Everything else in one batch: workout contents, schedules, names, leftovers.
+  const rowsFor = (from: number, to: number) => [
+    ...insertMany(
+      db,
+      workoutExercises,
+      (itemsOf.get(from) ?? []).map(({ id: _id, ...r }) => ({ ...r, workoutId: to })),
+    ),
+    ...insertMany(
+      db,
+      workoutGroups,
+      (groupsOf.get(from) ?? []).map(({ id: _id, ...r }) => ({ ...r, workoutId: to })),
+    ),
+  ]
+  const statements: BatchItem<'sqlite'>[] = []
+  const now = new Date()
+  for (const p of plans) {
+    const map = new Map<number, number>()
+    for (const { from, to } of p.rewrite) {
+      const source = workoutOf.get(from) as WorkoutRow
+      map.set(from, to)
+      statements.push(
+        db
+          .update(workouts)
+          .set({
+            name: source.name,
+            description: source.description,
+            estimatedMinutes: source.estimatedMinutes,
+          })
+          .where(eq(workouts.id, to)),
+        db.delete(workoutExercises).where(eq(workoutExercises.workoutId, to)),
+        db.delete(workoutGroups).where(eq(workoutGroups.workoutId, to)),
+        ...rowsFor(from, to),
+      )
+    }
+    for (const from of p.create) {
+      const to = newCopyOf.get(`${p.copy.id}:${from}`) as number
+      map.set(from, to)
+      statements.push(...rowsFor(from, to))
+    }
+    statements.push(
+      ...dayStatements(db, p.copy.id, p.source.id, p.sourceDays, map),
+      db
+        .update(programs)
+        .set({
+          name: p.source.name,
+          description: p.source.description,
+          durationWeeks: p.source.durationWeeks,
+          syncedAt: now,
+        })
+        .where(eq(programs.id, p.copy.id)),
+      ...unusedClientWorkouts(
+        db,
+        p.oldIds.filter((w) => !new Set(map.values()).has(w)),
+        p.clientId,
+      ),
+    )
+  }
+    await runAll(db, statements)
+  } catch (err) {
+    // Take back the copies made in step 3 (their rows and groups go with them).
+    if (createdIds.length > 0)
+      await runAll(
+        db,
+        chunk(createdIds).map((slice) => db.delete(workouts).where(inArray(workouts.id, slice))),
+      )
+    throw err
+  }
+}
+
+type WorkoutRow = typeof workouts.$inferSelect
+
+function groupBy<T>(rows: T[], key: (row: T) => number) {
+  const out = new Map<number, T[]>()
+  for (const r of rows) {
+    const list = out.get(key(r)) ?? []
+    list.push(r)
+    out.set(key(r), list)
+  }
+  return out
+}
+
+function chunkList<T>(list: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
+  return out
+}
+
+/**
+ * A copy's schedule made to match its library program, as batch statements. Day rows are
+ * updated in place (sessions point at them): every library slot is written (several rows per
+ * statement), and a slot the library no longer has becomes a rest day.
+ */
+function dayStatements(
+  db: Db,
+  copyId: number,
+  sourceId: number,
+  sourceDays: ProgramDay[],
+  workoutMap: Map<number, number>,
+): BatchItem<'sqlite'>[] {
+  const source = alias(programDays, 'source')
+  const statements: BatchItem<'sqlite'>[] = [
+    db
+      .update(programDays)
+      .set({ workoutId: null, checkinRequired: false, notes: null })
+      .where(
+        and(
+          eq(programDays.programId, copyId),
+          or(isNotNull(programDays.workoutId), eq(programDays.checkinRequired, true)),
+          notExists(
+            db
+              .select({ x: sql`1` })
+              .from(source)
+              .where(
+                and(
+                  eq(source.programId, sourceId),
+                  eq(source.weekNumber, programDays.weekNumber),
+                  eq(source.dayNumber, programDays.dayNumber),
+                ),
+              ),
+          ),
+        ),
+      ),
+  ]
+  const rows = sourceDays.map((d) => ({
+    programId: copyId,
+    weekNumber: d.weekNumber,
+    dayNumber: d.dayNumber,
+    workoutId: d.workoutId === null ? null : (workoutMap.get(d.workoutId) ?? null),
+    checkinRequired: d.checkinRequired,
+    notes: d.notes ?? null,
+  }))
+  // 6 values per row: 16 rows per statement stays under D1's 100.
+  for (const part of chunkList(rows, 16)) {
+    statements.push(
+      db
+        .insert(programDays)
+        .values(part)
+        .onConflictDoUpdate({
+          target: [programDays.programId, programDays.weekNumber, programDays.dayNumber],
+          set: {
+            workoutId: sql`excluded.workout_id`,
+            checkinRequired: sql`excluded.checkin_required`,
+            notes: sql`excluded.notes`,
+          },
+        }),
+    )
+  }
+  return statements
 }
 
 /** Edits this soon after a copy is made or updated are part of that, not a change for them. */
@@ -420,17 +654,16 @@ export async function programCopies(
   if (!library) return []
   const copyWorkouts = new Map<number, Date | null>()
   if (rows.length > 0) {
-    const edits = await db
-      .select({ programId: programDays.programId, at: max(workouts.updatedAt) })
-      .from(programDays)
-      .innerJoin(workouts, eq(workouts.id, programDays.workoutId))
-      .where(
-        inArray(
-          programDays.programId,
-          rows.map((r) => r.programId),
-        ),
-      )
-      .groupBy(programDays.programId)
+    const edits = await inChunks(
+      rows.map((r) => r.programId),
+      (ids) =>
+        db
+          .select({ programId: programDays.programId, at: max(workouts.updatedAt) })
+          .from(programDays)
+          .innerJoin(workouts, eq(workouts.id, programDays.workoutId))
+          .where(inArray(programDays.programId, ids))
+          .groupBy(programDays.programId),
+    )
     for (const e of edits) copyWorkouts.set(e.programId, e.at)
   }
   const libraryChanged = Math.max(library.updatedAt.getTime(), libraryWorkouts?.at?.getTime() ?? 0)
@@ -455,10 +688,12 @@ async function ownWorkouts(db: Db, input: ProgramInputParsed, clientId: number, 
     ...new Set(input.days.map((d) => d.workoutId).filter((v): v is number => v !== null)),
   ]
   if (ids.length === 0) return input
-  const rows = await db
-    .select({ id: workouts.id, clientId: workouts.clientId })
-    .from(workouts)
-    .where(inArray(workouts.id, ids))
+  const rows = await inChunks(ids, (slice) =>
+    db
+      .select({ id: workouts.id, clientId: workouts.clientId })
+      .from(workouts)
+      .where(inArray(workouts.id, slice)),
+  )
   const map = new Map<number, number>()
   for (const r of rows)
     map.set(
@@ -492,11 +727,27 @@ export const programRoutes = new Hono<AppEnv>()
       .from(programs)
       .where(and(visibleTo(programs, c.var.user, archived), libraryOnly(programs)))
       .orderBy(asc(programs.name))
-    const days = await loadProgramDays(
-      c.var.db,
+    // Workout days per program, counted in SQL (not every day of every program loaded).
+    const counts = await inChunks(
       rows.map((r) => r.id),
+      (ids) =>
+        c.var.db
+          .select({ programId: programDays.programId, n: count() })
+          .from(programDays)
+          .innerJoin(programs, eq(programs.id, programDays.programId))
+          .where(
+            and(
+              inArray(programDays.programId, ids),
+              isNotNull(programDays.workoutId),
+              lte(programDays.weekNumber, programs.durationWeeks),
+            ),
+          )
+          .groupBy(programDays.programId),
     )
-    return c.json({ programs: rows.map((r) => toSummary(r, days.get(r.id) ?? [], new Map())) })
+    const countOf = new Map(counts.map((r) => [r.programId, r.n]))
+    return c.json({
+      programs: rows.map((r) => toSummary(r, countOf.get(r.id) ?? 0, new Map())),
+    })
   })
   .get('/:id', async (c) => {
     const row = await findVisibleProgram(c.var.db, c.var.user, parseId(c.req.param('id')))
@@ -549,20 +800,34 @@ export const programRoutes = new Hono<AppEnv>()
     const { db, user } = c.var
     const row = await findVisibleProgram(db, user, parseId(c.req.param('id')))
     const { enrollmentIds } = await parseBody(c.req.raw, syncCopiesInput)
-    const targets = await db
-      .select({ userId: enrollments.userId, programId: enrollments.programId })
-      .from(enrollments)
-      .innerJoin(programs, eq(programs.id, enrollments.programId))
-      .where(
-        and(
-          inArray(enrollments.id, enrollmentIds),
-          eq(enrollments.status, 'active'),
-          eq(programs.sourceProgramId, row.id),
+    const targets = await inChunks([...new Set(enrollmentIds)], (ids) =>
+      db
+        .select({ userId: enrollments.userId, programId: enrollments.programId })
+        .from(enrollments)
+        .innerJoin(programs, eq(programs.id, enrollments.programId))
+        .where(
+          and(
+            inArray(enrollments.id, ids),
+            eq(enrollments.status, 'active'),
+            eq(programs.sourceProgramId, row.id),
+          ),
         ),
-      )
+    )
     if (targets.length !== new Set(enrollmentIds).size) notFound('Enrollment not found')
-    for (const t of targets) await managedPerson(db, user, t.userId)
-    for (const t of targets) await syncClientCopy(db, t.programId, user.id)
+    // Every one of them must be someone you manage (one query, not one per person).
+    const people = [...new Set(targets.map((t) => t.userId))]
+    const managed = await inChunks(people, (slice) =>
+      db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(inArray(users.id, slice), managedUsers(user))),
+    )
+    if (managed.length !== people.length) notFound('Enrollment not found')
+    await syncClientCopies(
+      db,
+      targets.map((t) => t.programId),
+      user.id,
+    )
     await pushLater(
       c,
       targets.map((t) => t.userId),

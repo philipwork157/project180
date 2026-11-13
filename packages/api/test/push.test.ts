@@ -52,9 +52,9 @@ async function decryptAsPhone(p: Awaited<ReturnType<typeof phone>>, body: Uint8A
     false,
     [],
   )
-  const shared = new Uint8Array(
-    await crypto.subtle.deriveBits({ name: 'ECDH', public: senderKey }, p.pair.privateKey, 256),
-  )
+  // See push.ts: the runtime reads `public`, the types say `$public`.
+  const ecdh = { name: 'ECDH', public: senderKey }
+  const shared = new Uint8Array(await crypto.subtle.deriveBits(ecdh, p.pair.privateKey, 256))
   const info = new Uint8Array([...utf8.encode('WebPush: info\0'), ...p.publicKey, ...sender])
   const ikm = await hkdf(p.auth, shared, info, 32)
   const cek = await hkdf(salt, ikm, utf8.encode('Content-Encoding: aes128gcm\0'), 16)
@@ -88,7 +88,9 @@ describe('push: encryption and signing', () => {
     const body = await encryptPush(p.subscription.keys, utf8.encode('{"title":"New program"}'))
     expect(await decryptAsPhone(p, body)).toBe('{"title":"New program"}')
     // Another phone can't.
-    await expect(decryptAsPhone({ ...(await phone()), publicKey: p.publicKey }, body)).rejects.toThrow()
+    await expect(
+      decryptAsPhone({ ...(await phone()), publicKey: p.publicKey }, body),
+    ).rejects.toThrow()
   })
 
   it('signs requests with our VAPID key, for that push service only', async () => {
@@ -199,7 +201,11 @@ describe('push: sending', () => {
       return new Response(null, { status: 201 })
     })
     const keys = await vapidKeys()
-    const message = { title: 'New program: Base', body: 'Pieter set it up for you.', url: '/calendar' }
+    const message = {
+      title: 'New program: Base',
+      body: 'Pieter set it up for you.',
+      url: '/calendar',
+    }
     const result = await sendPush({ ...env, ...keys }, createDb(env.DB), [me.data.user.id], message)
 
     expect(result).toEqual({ sent: 1 })
@@ -237,7 +243,9 @@ describe('push: sending', () => {
     await call('/me/push', { method: 'PUT', cookie: member, body: subscription })
     const me = await call<Json>('/me', { cookie: member })
     const spy = vi.spyOn(globalThis, 'fetch')
-    expect(await sendPush(env, createDb(env.DB), [me.data.user.id], { title: 'a', body: 'b' })).toEqual({
+    expect(
+      await sendPush(env, createDb(env.DB), [me.data.user.id], { title: 'a', body: 'b' }),
+    ).toEqual({
       sent: 0,
     })
     expect(spy).not.toHaveBeenCalled()

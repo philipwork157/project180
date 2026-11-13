@@ -17,11 +17,14 @@ import {
   clientProfileInput,
   feedbackReadInput,
   heartbeatInput,
+  isClient,
+  isoDate,
+  type MyPlan,
+  messageInput,
+  messageReadInput,
   type PushSetup,
   pushSubscriptionInput,
   pushUnsubscribeInput,
-  isoDate,
-  type MyPlan,
   todayIn,
   updateProfileInput,
 } from '@project180/shared'
@@ -31,12 +34,13 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { inChunks } from '../batch'
+import { loadThread, markRead, postMessage, unreadForClient } from '../chat'
 import type { AppEnv } from '../env'
-import { parseBody } from '../errors'
+import { notFound, parseBody } from '../errors'
 import { markFeedbackRead, unreadFeedback } from '../feedback'
 import { requireUser } from '../middleware'
-import { isPushEndpoint, pushConfigured } from '../push'
 import { loadProfile, saveProfile } from '../profiles'
+import { isPushEndpoint, pushConfigured } from '../push'
 import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
 import { enrollmentQuery } from './enrollments'
@@ -209,6 +213,8 @@ export async function buildPlans(
   return result
 }
 
+const coachUser = alias(users, 'coach')
+
 export const meRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get('/', (c) => c.json({ user: c.var.user }))
@@ -290,6 +296,37 @@ export const meRoutes = new Hono<AppEnv>()
     const { db, user } = c.var
     const weeksBack = Math.min(Math.max(Number(c.req.query('weeks') ?? 8) || 8, 1), 52)
     return c.json({ stats: await buildStats(db, user, weeksBack) })
+  })
+  /** Your chat with your coach (clients only): the newest messages, or the ones before ?before. */
+  .get('/chat', async (c) => {
+    const { db, user } = c.var
+    if (!isClient(user.role)) notFound()
+    const n = Number(c.req.query('before'))
+    const [thread, [coach]] = await Promise.all([
+      loadThread(db, user.id, user.id, Number.isInteger(n) && n > 0 ? n : undefined),
+      db
+        .select({ name: coachUser.name })
+        .from(users)
+        .innerJoin(coachUser, eq(coachUser.id, users.coachId))
+        .where(eq(users.id, user.id)),
+    ])
+    return c.json({ thread, coach: coach ?? null })
+  })
+  /** Messages from your coach you haven't read (the badge on the Coach tab). */
+  .get('/chat/unread', async (c) => {
+    const { db, user } = c.var
+    return c.json({ unread: isClient(user.role) ? await unreadForClient(db, user.id) : 0 })
+  })
+  .post('/chat', async (c) => {
+    if (!isClient(c.var.user.role)) notFound()
+    const input = await parseBody(c.req.raw, messageInput)
+    return c.json({ message: await postMessage(c, c.var.user.id, input) }, 201)
+  })
+  .post('/chat/read', async (c) => {
+    const { db, user } = c.var
+    if (!isClient(user.role)) notFound()
+    const { upTo } = await parseBody(c.req.raw, messageReadInput)
+    return c.json({ readUpTo: await markRead(db, user.id, user.id, upTo) })
   })
   /** Your coach's likes and comments you haven't seen yet, newest first. */
   .get('/feedback', async (c) =>

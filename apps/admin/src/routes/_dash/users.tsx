@@ -3,18 +3,21 @@ import {
   adminOverviewQuery,
   api,
   coachesQuery,
+  peopleQuery,
   personActivityQuery,
   usersQuery,
 } from '@project180/client'
 import {
   ACTIVE_NOW_MS,
   type DeletePersonResult,
+  type DirectoryPerson,
   generateTempPassword,
   isClient,
   isOwner,
   isStaff,
   ROLE_LABELS,
   TEMP_PASSWORD_DAYS,
+  timeAgo,
   type UserSummary,
 } from '@project180/shared'
 import {
@@ -30,20 +33,24 @@ import {
   IconButton,
   Input,
   Select,
+  Tooltip,
   toast,
 } from '@project180/ui'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import {
   ChartLine,
+  ChevronDown,
   KeyRound,
+  MessageCircle,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   UserRoundCog,
   UsersRound,
 } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { ProfileSummary } from '../../components/client-profile'
 import { Segmented, Toolbar } from '../../components/controls'
@@ -60,13 +67,7 @@ export const Route = createFileRoute('/_dash/users')({
 })
 
 type Sort = 'added' | 'seen' | 'name'
-
-const seenAt = (u: UserSummary) => (u.lastSeenAt ? new Date(u.lastSeenAt).getTime() : 0)
-const sorters: Record<Sort, (a: UserSummary, b: UserSummary) => number> = {
-  added: () => 0,
-  seen: (a, b) => seenAt(b) - seenAt(a),
-  name: (a, b) => a.name.localeCompare(b.name),
-}
+type View = 'mine' | 'clients' | 'team'
 
 type Panel =
   | { kind: 'add' }
@@ -74,27 +75,50 @@ type Panel =
   | { kind: 'password'; user: UserSummary }
   | null
 
+/** What you typed, once you've stopped typing for a moment. */
+function useSettled<T>(value: T, ms = 250) {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return settled
+}
+
+/**
+ * The People list: one tab at a time, searched, sorted and paged on the server, one compact
+ * row per person. A person's details (profile, devices, program) load only when you open them,
+ * so the page costs the same with 10 clients or 1,000.
+ */
 function UsersPage() {
   const { me } = Route.useRouteContext()
-  const users = useQuery(usersQuery)
   const owner = isOwner(me.role)
-  const [view, setView] = useState<'mine' | 'clients' | 'team'>('mine')
+  const [view, setView] = useState<View>('mine')
   const [sort, setSort] = useState<Sort>('added')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [open, setOpen] = useState<number | null>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const close = () => setPanel(null)
   const sortId = useId()
-
-  const all = users.data ?? []
-  // Clients only: staff (you included) are on the Team tab, never in a client list.
-  const clients = all.filter((u) => isClient(u.role))
-  const mine = clients.filter((u) => u.coachId === me.id)
-  const team = all.filter((u) => isStaff(u.role))
-  const clientCount = (coachId: number) => clients.filter((c) => c.coachId === coachId).length
-  const tab = owner ? view : 'mine'
-  const shown = [...(tab === 'mine' ? mine : tab === 'clients' ? clients : team)].sort(
-    sorters[sort],
-  )
-  const now = Date.now()
+  const searchId = useId()
+  const q = useSettled(search.trim())
+  const tab: View = owner ? view : 'mine'
+  const people = useQuery({
+    ...peopleQuery({ view: tab, q, sort, page }),
+    placeholderData: keepPreviousData,
+  })
+  const data = people.data
+  const list = data?.people ?? []
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
+  // A new tab, search or order starts at page 1 with nothing open.
+  const reset = () => {
+    setPage(1)
+    setOpen(null)
+  }
+  // Searching changes the list: back to page 1.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the settled search changes
+  useEffect(() => reset(), [q])
 
   return (
     <>
@@ -119,14 +143,34 @@ function UsersPage() {
           <Segmented
             label="Show"
             value={view}
-            onChange={setView}
+            onChange={(v) => {
+              setView(v)
+              reset()
+            }}
             options={[
-              { value: 'mine', label: 'My clients', count: mine.length },
-              { value: 'clients', label: 'All clients', count: clients.length },
-              { value: 'team', label: 'Team', count: team.length },
+              { value: 'mine', label: 'My clients', count: data?.counts.mine },
+              { value: 'clients', label: 'All clients', count: data?.counts.clients },
+              { value: 'team', label: 'Team', count: data?.counts.team },
             ]}
           />
         )}
+        <label htmlFor={searchId} className="relative w-full sm:w-64">
+          <span className="sr-only">Search by name or email</span>
+          <Search
+            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 size-4 text-ink-muted"
+            aria-hidden
+          />
+          <Input
+            id={searchId}
+            type="search"
+            compact
+            value={search}
+            maxLength={40}
+            placeholder="Search by name or email"
+            className="pl-9"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
         <label
           htmlFor={sortId}
           className="ml-auto flex items-center gap-2 font-semibold text-[13px] text-ink-muted"
@@ -137,7 +181,10 @@ function UsersPage() {
             compact
             className="w-36"
             value={sort}
-            onChange={(e) => setSort(e.target.value as Sort)}
+            onChange={(e) => {
+              setSort(e.target.value as Sort)
+              reset()
+            }}
           >
             <option value="added">Date added</option>
             <option value="seen">Last seen</option>
@@ -145,18 +192,26 @@ function UsersPage() {
           </Select>
         </label>
       </Toolbar>
-      <div
-        className={cn('grid grid-cols-1 items-start gap-5', shown.length > 1 && '2xl:grid-cols-2')}
-      >
-        {users.isPending &&
-          [0, 1].map((i) => (
-            <div key={i} className="h-96 animate-pulse rounded-lg bg-surface shadow-card" />
+
+      {people.isPending ? (
+        <Card className="flex flex-col gap-3">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-14 animate-pulse rounded-md bg-surface-raised" />
           ))}
-        {!users.isPending && shown.length === 0 && (
+        </Card>
+      ) : people.isError ? (
+        <Card>
+          <p className="text-[14px] text-ink-muted">Couldn’t load people. Try again.</p>
+        </Card>
+      ) : list.length === 0 ? (
+        q ? (
+          <Card>
+            <p className="text-[14px] text-ink-muted">Nobody matches “{q}”.</p>
+          </Card>
+        ) : (
           <EmptyState
-            className="col-span-full"
             icon={<UsersRound className="size-7" aria-hidden />}
-            title={tab === 'mine' ? 'No clients yet' : 'No clients on the team yet'}
+            title={tab === 'team' ? 'No team yet' : 'No clients yet'}
             action={
               <Button
                 icon={<Plus className="size-5" aria-hidden />}
@@ -170,75 +225,66 @@ function UsersPage() {
               ? 'Clients you add are yours: you build their programs and see how they’re going.'
               : 'Clients your coaches add show up here too.'}
           </EmptyState>
-        )}
-        {shown.map((u) => (
-          <Card key={u.id} className="flex flex-col gap-5">
-            <div className="flex items-center gap-4">
-              <span className="relative grid size-12 shrink-0 place-items-center rounded-full bg-brand-soft font-display font-extrabold text-[20px] text-brand-text">
-                {u.name.charAt(0).toUpperCase()}
-                <ActiveDot
-                  active={!!u.lastSeenAt && now - seenAt(u) < ACTIVE_NOW_MS}
-                  className="absolute right-0 bottom-0"
-                />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-2 font-bold text-[17px]">
-                  <span className="truncate">{u.name}</span>
-                  {u.id === me.id && (
-                    <span className="font-semibold text-[13px] text-ink-muted">(you)</span>
-                  )}
-                  <Chip tone={isStaff(u.role) ? 'brand' : 'neutral'} className="h-6 text-[12px]">
-                    {ROLE_LABELS[u.role]}
-                  </Chip>
-                </p>
-                <p className="truncate font-semibold text-[13px] text-ink-muted">
-                  {u.email}
-                  {isClient(u.role) && u.coachId !== me.id && (
-                    <> · coached by {u.coachName ?? 'nobody yet'}</>
-                  )}
-                </p>
-              </div>
-              {owner && isClient(u.role) && <CoachPicker user={u} />}
-              <Link
-                to="/users/$userId"
-                params={{ userId: String(u.id) }}
-                className={buttonClasses('secondary', 'md')}
-              >
-                <ChartLine className="size-4" aria-hidden />
-                Progress
-              </Link>
-              {/* Your own password is changed in Settings; owners change their own. */}
-              {u.id !== me.id && u.role !== 'owner' && (
-                <IconButton
-                  label={`Set a temporary password for ${u.name}`}
-                  icon={<KeyRound aria-hidden />}
-                  size="lg"
-                  onClick={() => setPanel({ kind: 'password', user: u })}
-                />
-              )}
-              {owner && u.id !== me.id && u.role !== 'owner' && (
-                <DeletePersonButton user={u} clients={clientCount(u.id)} />
-              )}
-            </div>
-            {isClient(u.role) && <ProfileSummary userId={u.id} name={u.name} />}
-            <PersonActivityPanel userId={u.id} name={u.name} isMe={u.id === me.id} />
-            {isClient(u.role) ? (
-              <PersonProgressPanel
-                userId={u.id}
-                name={u.name}
+        )
+      ) : (
+        <Card
+          className={cn('p-0 transition-opacity md:p-0', people.isPlaceholderData && 'opacity-60')}
+        >
+          <ul className="flex flex-col divide-y divide-border">
+            {list.map((u) => (
+              <PersonRow
+                key={u.id}
+                person={u}
+                isMe={u.id === me.id}
+                owner={owner}
+                meId={me.id}
+                open={open === u.id}
+                onToggle={() => setOpen((id) => (id === u.id ? null : u.id))}
                 onAssign={() => setPanel({ kind: 'assign', user: u })}
+                onPassword={() => setPanel({ kind: 'password', user: u })}
               />
-            ) : (
-              <p className="flex items-center gap-2 rounded-md bg-surface-raised p-4 font-semibold text-[14px] text-ink-muted">
-                <UsersRound className="size-4" aria-hidden />
-                {clientCount(u.id) === 0
-                  ? 'No clients yet'
-                  : `Coaches ${clientCount(u.id)} client${clientCount(u.id) === 1 ? '' : 's'}`}
-              </p>
-            )}
-          </Card>
-        ))}
-      </div>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {data && data.total > data.pageSize && (
+        <nav
+          aria-label="Pages"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 text-[14px]"
+        >
+          <span className="tabular font-semibold text-ink-muted">
+            {(data.page - 1) * data.pageSize + 1}–{Math.min(data.page * data.pageSize, data.total)}{' '}
+            of {data.total}
+          </span>
+          <span className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-11 sm:h-9"
+              disabled={page <= 1}
+              onClick={() => {
+                setPage((p) => p - 1)
+                setOpen(null)
+              }}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-11 sm:h-9"
+              disabled={page >= pages}
+              onClick={() => {
+                setPage((p) => p + 1)
+                setOpen(null)
+              }}
+            >
+              Next
+            </Button>
+          </span>
+        </nav>
+      )}
 
       <NewClientDrawer open={panel?.kind === 'add'} onClose={close} me={me} />
 
@@ -272,6 +318,142 @@ function UsersPage() {
         )}
       </Drawer>
     </>
+  )
+}
+
+/**
+ * One person: a compact row (who, coach, program, last workout, last seen). Tapping it opens
+ * their actions and details underneath, which load only then.
+ */
+function PersonRow({
+  person: u,
+  isMe,
+  owner,
+  meId,
+  open,
+  onToggle,
+  onAssign,
+  onPassword,
+}: {
+  person: DirectoryPerson
+  isMe: boolean
+  owner: boolean
+  meId: number
+  open: boolean
+  onToggle: () => void
+  onAssign: () => void
+  onPassword: () => void
+}) {
+  const client = isClient(u.role)
+  const active = !!u.lastSeenAt && Date.now() - new Date(u.lastSeenAt).getTime() < ACTIVE_NOW_MS
+  const detailId = `person-${u.id}`
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={detailId}
+        className={cn(
+          'flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition md:px-5',
+          open ? 'bg-surface-raised' : 'hover:bg-surface-raised',
+        )}
+      >
+        <span className="relative grid size-10 shrink-0 place-items-center rounded-full bg-brand-soft font-display font-extrabold text-[17px] text-brand-text">
+          {u.name.charAt(0).toUpperCase()}
+          <ActiveDot active={active} className="absolute right-0 bottom-0" />
+        </span>
+        <span className="grid min-w-0 flex-1 grid-cols-1 gap-x-6 gap-y-1 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center">
+          <span className="min-w-0">
+            <span className="flex items-center gap-2 font-bold text-[15px]">
+              <span className="truncate">{u.name}</span>
+              {isMe && <span className="font-semibold text-[13px] text-ink-muted">(you)</span>}
+              {!client && (
+                <Chip tone="brand" className="h-6 shrink-0 text-[12px]">
+                  {ROLE_LABELS[u.role]}
+                </Chip>
+              )}
+            </span>
+            <span className="block truncate text-[13px] text-ink-muted">
+              {u.email}
+              {client && u.coachId !== meId && <> · coached by {u.coachName ?? 'nobody yet'}</>}
+            </span>
+          </span>
+          <span className="truncate text-[13px] text-ink-muted md:text-[14px]">
+            {client ? (
+              u.programName ? (
+                <span className="font-semibold text-ink">{u.programName}</span>
+              ) : (
+                <span className="font-semibold text-sand-text">No program</span>
+              )
+            ) : u.clientCount === 0 ? (
+              'No clients yet'
+            ) : (
+              `Coaches ${u.clientCount} client${u.clientCount === 1 ? '' : 's'}`
+            )}
+          </span>
+          <span className="truncate text-[13px] text-ink-muted">
+            {client &&
+              (u.lastWorkoutAt
+                ? `Trained ${timeAgo(u.lastWorkoutAt).toLowerCase()}`
+                : 'No workouts yet')}
+            {client && ' · '}
+            {active ? 'active now' : u.lastSeenAt ? `seen ${timeAgo(u.lastSeenAt).toLowerCase()}` : 'not signed in yet'}
+          </span>
+        </span>
+        <ChevronDown
+          className={cn('size-5 shrink-0 text-ink-muted transition', open && 'rotate-180')}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div
+          id={detailId}
+          className="flex flex-col gap-5 border-border border-t bg-surface px-4 py-5 md:px-5"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/users/$userId"
+              params={{ userId: String(u.id) }}
+              className={buttonClasses('secondary', 'md')}
+            >
+              <ChartLine className="size-4" aria-hidden />
+              Progress
+            </Link>
+            {client && (
+              <Tooltip label={`Message ${u.name}`}>
+                <Link
+                  to="/messages"
+                  search={{ client: u.id }}
+                  aria-label={`Message ${u.name}`}
+                  className="grid size-11 shrink-0 place-items-center rounded-sm bg-surface-raised text-ink-muted transition hover:text-ink active:scale-95"
+                >
+                  <MessageCircle className="size-[18px]" aria-hidden />
+                </Link>
+              </Tooltip>
+            )}
+            {owner && client && <CoachPicker user={u} />}
+            <span className="ml-auto flex gap-2">
+              {/* Your own password is changed in Settings; owners change their own. */}
+              {!isMe && u.role !== 'owner' && (
+                <IconButton
+                  label={`Set a temporary password for ${u.name}`}
+                  icon={<KeyRound aria-hidden />}
+                  size="lg"
+                  onClick={onPassword}
+                />
+              )}
+              {owner && !isMe && u.role !== 'owner' && (
+                <DeletePersonButton user={u} clients={u.clientCount} />
+              )}
+            </span>
+          </div>
+          {client && <ProfileSummary userId={u.id} name={u.name} />}
+          <PersonActivityPanel userId={u.id} name={u.name} isMe={isMe} />
+          {client && <PersonProgressPanel userId={u.id} name={u.name} onAssign={onAssign} />}
+        </div>
+      )}
+    </li>
   )
 }
 

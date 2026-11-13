@@ -133,9 +133,7 @@ export async function addFeedback(
   const what = exerciseName ?? workout?.name ?? 'workout'
   await pushLater(c, [session.userId], {
     title: isLike ? `${coach} liked your ${what}` : `${coach} commented on your ${what}`,
-    body: isLike
-      ? 'Your coach saw your work. Keep it up!'
-      : (input.body ?? '').slice(0, 140),
+    body: isLike ? 'Your coach saw your work. Keep it up!' : (input.body ?? '').slice(0, 140),
     url: `/progress?workout=${session.id}`,
     // One notification per workout: a newer like or comment replaces the last one.
     tag: `feedback-${session.id}`,

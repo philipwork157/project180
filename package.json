@@ -25,7 +25,7 @@
     "admin:create:live": "bun packages/api/scripts/create-admin.ts --live",
     "db:seed": "bun packages/db/scripts/seed-library.ts",
     "db:seed:remote": "bun packages/db/scripts/seed-library.ts --remote",
-    "deploy": "bun run db:migrate:live && turbo run deploy --filter=@project180/app --filter=@project180/admin",
+    "deploy": "bun scripts/check-live.ts && bun run db:migrate:live && turbo run deploy --filter=@project180/app --filter=@project180/admin",
     "deploy:dev": "bun run db:migrate:dev && turbo run deploy:dev --filter=@project180/app --filter=@project180/admin",
     "db:migrate:dev": "bun run --filter @project180/app db:migrate:dev",
     "db:migrate:live": "bun run --filter @project180/app db:migrate:remote",

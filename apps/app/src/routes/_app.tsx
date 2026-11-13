@@ -1,8 +1,9 @@
-import { meQuery, planQuery } from '@project180/client'
+import { meQuery, myChatUnreadQuery, planQuery } from '@project180/client'
+import { isClient } from '@project180/shared'
 import { cn } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, Outlet, redirect, useLocation } from '@tanstack/react-router'
-import { CalendarDays, ChevronUp, Flame, TrendingUp, UserRound } from 'lucide-react'
+import { CalendarDays, ChevronUp, Flame, MessageCircle, TrendingUp, UserRound } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Elapsed } from '../components/elapsed'
 import { useWeighInStatus } from '../components/weigh-in-card'
@@ -23,11 +24,17 @@ const tabs = [
   { to: '/', label: 'Today', icon: Flame },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },
   { to: '/progress', label: 'Progress', icon: TrendingUp },
+  // Chat with your coach (clients only): opens full screen, Back returns here.
+  { to: '/chat', label: 'Coach', icon: MessageCircle },
   { to: '/profile', label: 'Profile', icon: UserRound },
 ] as const
 
 function AppLayout() {
+  const { me } = Route.useRouteContext()
   const { pathname } = useLocation()
+  const client = isClient(me.role)
+  const shown = tabs.filter((t) => t.to !== '/chat' || client)
+  const unreadChat = useQuery({ ...myChatUnreadQuery, enabled: client }).data ?? 0
   useHeartbeat()
   const active = useQuery(planQuery).data?.activeSession ?? null
   // Today has its own big banner; everywhere else gets the mini bar.
@@ -82,8 +89,8 @@ function AppLayout() {
             </motion.div>
           )}
         </AnimatePresence>
-        <ul className="grid w-full grid-cols-4">
-          {tabs.map(({ to, label, icon: Icon }) => {
+        <ul className={cn('grid w-full', shown.length === 5 ? 'grid-cols-5' : 'grid-cols-4')}>
+          {shown.map(({ to, label, icon: Icon }) => {
             const active = to === '/' ? pathname === '/' : pathname.startsWith(to)
             return (
               <li key={to}>
@@ -103,6 +110,12 @@ function AppLayout() {
                     <Icon className="size-6" strokeWidth={2.2} aria-hidden />
                     {to === '/' && active && (
                       <span className="absolute top-1 right-3 size-2.5 rounded-full bg-clay ring-2 ring-surface" />
+                    )}
+                    {to === '/chat' && unreadChat > 0 && (
+                      <span className="tabular absolute -top-1 right-1.5 grid h-5 min-w-5 place-items-center rounded-pill bg-clay px-1 font-extrabold text-[11px] text-on-clay ring-2 ring-surface">
+                        {unreadChat > 9 ? '9+' : unreadChat}
+                        <span className="sr-only"> unread</span>
+                      </span>
                     )}
                     {to === '/' && !active && weighInDue && (
                       <span className="absolute top-0.5 right-2.5 size-2.5 rounded-full bg-sand ring-2 ring-surface" />

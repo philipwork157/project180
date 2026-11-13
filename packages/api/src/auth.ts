@@ -30,6 +30,12 @@ export function createAuth(env: Bindings) {
       // renewed at most once a day while in use. See wrangler.jsonc.
       expiresIn: (Number(env.SESSION_DAYS) || 30) * DAY,
       updateAge: DAY,
+      // Trust the signed session cookie for a short while instead of reading the database on
+      // every call (chat and lists refresh often). Off unless SESSION_CACHE_SECONDS is set.
+      cookieCache:
+        Number(env.SESSION_CACHE_SECONDS) > 0
+          ? { enabled: true, maxAge: Number(env.SESSION_CACHE_SECONDS) }
+          : undefined,
     },
     user: {
       additionalFields: {

@@ -110,7 +110,8 @@ export const enrollmentsQuery = (programId?: number) =>
     queryFn: async () =>
       (
         await api<{ enrollments: EnrollmentSummary[] }>(
-          `/enrollments${programId ? `?programId=${programId}` : ''}`,
+          // Current programs only: no screen lists past ones from here.
+          `/enrollments?status=active${programId ? `&programId=${programId}` : ''}`,
         )
       ).enrollments,
   })

@@ -38,6 +38,8 @@ export const enrollments = sqliteTable(
     index('enrollments_user_idx').on(t.userId),
     // Copies and purges look enrollments up by program.
     index('enrollments_program_idx').on(t.programId),
+    // Deleting a coach clears who assigned what.
+    index('enrollments_assigned_by_idx').on(t.assignedBy),
     // At most one active program per person.
     uniqueIndex('enrollments_one_active_uq').on(t.userId).where(sql`${t.status} = 'active'`),
   ],
@@ -71,6 +73,12 @@ export const workoutSessions = sqliteTable(
     index('workout_sessions_enrollment_idx').on(t.enrollmentId, t.status),
     // Library lists and purges check whether a workout has history.
     index('workout_sessions_workout_idx').on(t.workoutId),
+    // Removing a program day checks nothing still points at it.
+    index('workout_sessions_program_day_idx').on(t.programDayId),
+    // At most one workout in progress per person.
+    uniqueIndex('workout_sessions_one_in_progress_uq')
+      .on(t.userId)
+      .where(sql`${t.status} = 'in_progress'`),
   ],
 )
 

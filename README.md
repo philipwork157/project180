@@ -190,6 +190,17 @@ Before the first real client:
 7. **Check:** in the live admin, Settings > Email shows "live" and sends a test; open both sites with the browser console open and look for Content-Security-Policy errors.
 8. **Backups:** D1 keeps 30 days of point-in-time recovery on the paid plan. Do one practice restore on the dev database (`bunx wrangler d1 time-travel restore project180-db-dev --timestamp=...`) so the steps are known before they're needed.
 
+## Running the live site
+
+- **Daily cleanup:** the phone app Worker runs `runDailyCleanup` at 02:00 UTC (`triggers` in `apps/app/wrangler.jsonc`): expired sign-ins and wrong-password counters are removed, and workouts left in progress for over a day are closed as abandoned. Its result is in the Worker's logs as `[cleanup]`.
+- **Rate limits:** every API call is limited per person (300 a minute) and sending chat messages or coach feedback to 20 a minute (`ratelimits` in both `wrangler.jsonc`). Counts are approximate and per Cloudflare location; they stop floods, not normal use. Locally and in tests there is no limit.
+- **Sign-in cache:** `SESSION_CACHE_SECONDS` (60) lets the API trust the signed session cookie for a minute instead of reading the database on every call. The trade-off: signing someone out, resetting their password or deleting them takes up to a minute to bite.
+- **Uptime:** `GET /api/health` answers 200 only when the Worker and the database both work, 503 otherwise. Point an uptime monitor at `https://project180.co.za/api/health` and `https://admin.project180.co.za/api/health` (any service that emails you on a non-200; every few minutes is plenty).
+- **Errors:** both Workers have Workers Logs on (`observability`), kept 7 days on the paid plan. Errors are logged with a `[area]` prefix.
+- **Database backups:** D1 Time Travel keeps every minute of the last 30 days (paid plan), always on. To restore: `bunx wrangler d1 time-travel restore project180-db --timestamp=<RFC3339 or unix time>`; it prints a bookmark to undo the restore. Practise once on `project180-db-dev`.
+- **Photos:** coach-uploaded photos in R2 have no automatic backup. They can be uploaded again if lost; if that ever matters, copy the bucket now and then (R2's S3 API with `rclone`).
+
+## Push notifications
 
 Clients can turn on notifications under Profile in the phone app. They then hear about a new or changed program even when the app is closed; the bell inside the app shows the same news either way.
 

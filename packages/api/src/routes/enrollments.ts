@@ -80,8 +80,13 @@ export const enrollmentRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
     const { user, db } = c.var
     const programId = c.req.query('programId')
+    // ?status=active: only current programs (what every screen shows), not the whole history.
+    const status = c.req.query('status')
     const filters = [
       managedUsers(user),
+      status === 'active' || status === 'completed' || status === 'cancelled'
+        ? eq(enrollments.status, status)
+        : undefined,
       // A library program: its own enrollments plus everyone's personal copies of it.
       programId
         ? or(

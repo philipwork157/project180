@@ -31,8 +31,17 @@
     "AWS_REGION": "af-south-1",
     "EMAIL_FROM": "Project 180 <hello@project180.co.za>",
     // Signed out after this many days without use (renewed while in use).
-    "SESSION_DAYS": "7"
+    "SESSION_DAYS": "7",
+    // Seconds a sign-in is trusted from its cookie before the database is asked again.
+    // Signing someone out (or deleting them) takes up to this long to bite.
+    "SESSION_CACHE_SECONDS": "60"
   },
+  // Rate limits (approximate, per Cloudflare location): every API call per person, and
+  // sending chat messages or coach feedback. Both apps share the counters (same ids).
+  "ratelimits": [
+    { "name": "API_LIMIT", "namespace_id": "1801", "simple": { "limit": 300, "period": 60 } },
+    { "name": "SEND_LIMIT", "namespace_id": "1802", "simple": { "limit": 20, "period": 60 } }
+  ],
   "observability": { "enabled": true },
 
   // Cloudflare dev environment: its own Worker and its own database, so testing
@@ -55,12 +64,19 @@
       ],
       // Uploaded photos (exercise photos from the admin). Create with: bunx wrangler r2 bucket create project180-media-dev
       "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "project180-media-dev" }],
+      // Rate limits (approximate, per Cloudflare location): every API call per person, and
+      // sending chat messages or coach feedback. Both apps share the counters (same ids).
+      "ratelimits": [
+        { "name": "API_LIMIT", "namespace_id": "1811", "simple": { "limit": 300, "period": 60 } },
+        { "name": "SEND_LIMIT", "namespace_id": "1812", "simple": { "limit": 20, "period": 60 } }
+      ],
       "vars": {
         "BETTER_AUTH_URL": "https://admin-dev.project180.co.za",
         "APP_URL": "https://dev.project180.co.za",
         "AWS_REGION": "af-south-1",
         "EMAIL_FROM": "Project 180 Dev <hello@project180.co.za>",
         "SESSION_DAYS": "7",
+        "SESSION_CACHE_SECONDS": "60",
         // Every email from dev goes to the developer, never to real people.
         "EMAIL_REDIRECT_TO": "philipwork157@gmail.com"
       }

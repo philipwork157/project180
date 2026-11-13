@@ -20,6 +20,7 @@ import { workoutRoutes } from './routes/workouts'
 import { clearFailures, minutesLocked, recordFailure } from './sign-in-limit'
 import { refuseExpiredTempPassword, TEMP_PASSWORD_EXPIRED_MESSAGE } from './temp-password'
 
+export { dailyCleanup, runDailyCleanup } from './cleanup'
 export type { Bindings } from './env'
 
 const originOf = (url: string) => {
@@ -97,7 +98,16 @@ export function createApp() {
     return res
   })
   app.on(['GET', 'POST'], '/auth/*', (c) => c.var.auth.handler(c.req.raw))
-  app.get('/health', (c) => c.json({ ok: true }))
+  // For an uptime monitor: 200 only when the Worker and the database both answer.
+  app.get('/health', async (c) => {
+    try {
+      await c.env.DB.prepare('select 1').first()
+      return c.json({ ok: true })
+    } catch (err) {
+      console.error('[health] database', err)
+      return c.json({ ok: false, error: 'Database unavailable' }, 503)
+    }
+  })
   mountMedia(app)
   app.route('/me', meRoutes)
   app.route('/exercises', exerciseRoutes)

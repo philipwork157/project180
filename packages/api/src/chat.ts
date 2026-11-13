@@ -10,6 +10,7 @@ import { inChunks } from './batch'
 import type { AppEnv } from './env'
 import { conflict } from './errors'
 import { pushLater } from './push'
+import { assertCanSend } from './rate-limit'
 
 const PAGE = 50
 
@@ -77,6 +78,7 @@ export async function postMessage(
   input: MessageInput,
 ): Promise<ChatMessage> {
   const { db, user: me } = c.var
+  await assertCanSend(c.env.SEND_LIMIT, me.id)
   const [created] = await db
     .insert(messages)
     .values({ clientUuid: input.clientUuid, clientId, senderId: me.id, body: input.body.trim() })
@@ -139,6 +141,27 @@ export async function unreadForClient(db: Db, clientId: number): Promise<number>
     .from(messages)
     .where(
       and(eq(messages.clientId, clientId), gt(messages.id, read?.id ?? 0), fromOthers(clientId)),
+    )
+  return row?.n ?? 0
+}
+
+/** Unread client messages across everyone `me` manages, in one query (the sidebar badge). */
+export async function unreadForStaff(db: Db, me: Me): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(messages)
+    .innerJoin(users, eq(users.id, messages.clientId))
+    .leftJoin(
+      messageReads,
+      and(eq(messageReads.clientId, messages.clientId), eq(messageReads.userId, me.id)),
+    )
+    .where(
+      and(
+        eq(users.role, 'member'),
+        managedUsers(me),
+        gt(messages.id, sql`coalesce(${messageReads.lastReadId}, 0)`),
+        fromOthers(me.id),
+      ),
     )
   return row?.n ?? 0
 }

@@ -16,6 +16,7 @@ import type { AppEnv } from './env'
 import { notFound } from './errors'
 import { iso } from './library'
 import { pushLater } from './push'
+import { assertCanSend } from './rate-limit'
 
 type SessionRow = typeof workoutSessions.$inferSelect
 
@@ -92,6 +93,7 @@ export async function addFeedback(
   input: FeedbackInput,
 ): Promise<SessionFeedback> {
   const { db, user: me } = c.var
+  await assertCanSend(c.env.SEND_LIMIT, me.id)
   const exerciseId = input.exerciseId ?? null
   const [exerciseName, [workout]] = await Promise.all([
     exerciseId === null ? Promise.resolve(null) : exerciseInSession(db, session.id, exerciseId),

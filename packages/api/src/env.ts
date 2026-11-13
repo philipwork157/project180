@@ -33,6 +33,15 @@ export interface Bindings {
   MEDIA?: R2Bucket
   /** Days without use before a sign-in expires (renewed while in use). App 30, admin 7. */
   SESSION_DAYS?: string
+  /**
+   * Seconds a sign-in is trusted from its signed cookie before the database is asked again
+   * (Better Auth's cookie cache). 0 or unset: always ask (local dev and tests).
+   */
+  SESSION_CACHE_SECONDS?: string
+  /** Every API call, per person (Workers rate limiting). Unset locally and in tests. */
+  API_LIMIT?: RateLimit
+  /** Sending chat messages and coach feedback, per person. */
+  SEND_LIMIT?: RateLimit
 }
 
 export interface Variables {

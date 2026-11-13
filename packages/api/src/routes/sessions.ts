@@ -124,7 +124,30 @@ async function assertOwnPlanDay(
 
 async function previousSets(db: Db, userId: number, sessionId: number, exerciseIds: number[]) {
   const previous: Record<number, PreviousSet[]> = {}
-  if (exerciseIds.length === 0) return previous
+  const ids = [...new Set(exerciseIds)]
+  if (ids.length === 0) return previous
+  // 1. The latest finished session per exercise, worked out in SQL (one row per exercise; SQLite
+  //    takes the session id from the row with the latest start).
+  const latest = await db
+    .select({
+      exerciseId: setLogs.exerciseId,
+      sessionId: setLogs.sessionId,
+      at: max(workoutSessions.startedAt),
+    })
+    .from(setLogs)
+    .innerJoin(workoutSessions, eq(workoutSessions.id, setLogs.sessionId))
+    .where(
+      and(
+        completedBy(userId),
+        ne(workoutSessions.id, sessionId),
+        eq(setLogs.isWarmup, false),
+        inArray(setLogs.exerciseId, ids),
+      ),
+    )
+    .groupBy(setLogs.exerciseId)
+  if (latest.length === 0) return previous
+  // 2. Only those sessions' sets.
+  const sessionOf = new Map(latest.map((r) => [r.exerciseId, r.sessionId]))
   const rows = await db
     .select({
       exerciseId: setLogs.exerciseId,
@@ -136,22 +159,16 @@ async function previousSets(db: Db, userId: number, sessionId: number, exerciseI
       distanceM: setLogs.distanceM,
     })
     .from(setLogs)
-    .innerJoin(workoutSessions, eq(workoutSessions.id, setLogs.sessionId))
     .where(
       and(
-        completedBy(userId),
-        ne(workoutSessions.id, sessionId),
+        inArray(setLogs.sessionId, [...new Set(sessionOf.values())]),
+        inArray(setLogs.exerciseId, [...sessionOf.keys()]),
         eq(setLogs.isWarmup, false),
-        inArray(setLogs.exerciseId, exerciseIds),
       ),
     )
-    .orderBy(desc(workoutSessions.startedAt), asc(setLogs.setNumber))
-    .limit(1000)
-  const sessionFor = new Map<number, number>()
+    .orderBy(asc(setLogs.setNumber))
   for (const { exerciseId, sessionId: sid, ...set } of rows) {
-    const chosen = sessionFor.get(exerciseId) ?? sid
-    sessionFor.set(exerciseId, chosen)
-    if (chosen !== sid) continue
+    if (sessionOf.get(exerciseId) !== sid) continue
     previous[exerciseId] ??= []
     previous[exerciseId].push(set)
   }
@@ -506,23 +523,40 @@ export const sessionRoutes = new Hono<AppEnv>()
       assertCanDoWorkout(db, user, input.workoutId),
       assertOwnPlanDay(db, user, input.enrollmentId ?? null, input.programDayId ?? null),
     ])
-    // One workout at a time: an unfinished one is closed when a new one starts.
-    await db
-      .update(workoutSessions)
-      .set({ status: 'abandoned', endedAt: new Date() })
-      .where(and(eq(workoutSessions.userId, user.id), eq(workoutSessions.status, 'in_progress')))
-    const [row] = await db
-      .insert(workoutSessions)
-      .values({
-        clientUuid: input.clientUuid,
-        userId: user.id,
-        workoutId: input.workoutId,
-        enrollmentId: input.enrollmentId ?? null,
-        programDayId: input.programDayId ?? null,
-        scheduledDate: input.scheduledDate ?? null,
-        startedAt: new Date(),
-      })
-      .returning()
+    // One workout at a time: an unfinished one is closed when a new one starts. Both in one
+    // batch (all or nothing), and the database allows only one in progress per person.
+    let row: SessionRow | undefined
+    try {
+      const [, inserted] = await db.batch([
+        db
+          .update(workoutSessions)
+          .set({ status: 'abandoned', endedAt: new Date() })
+          .where(
+            and(eq(workoutSessions.userId, user.id), eq(workoutSessions.status, 'in_progress')),
+          ),
+        db
+          .insert(workoutSessions)
+          .values({
+            clientUuid: input.clientUuid,
+            userId: user.id,
+            workoutId: input.workoutId,
+            enrollmentId: input.enrollmentId ?? null,
+            programDayId: input.programDayId ?? null,
+            scheduledDate: input.scheduledDate ?? null,
+            startedAt: new Date(),
+          })
+          .returning(),
+      ])
+      row = inserted[0]
+    } catch (err) {
+      // The same start sent twice at once: the first one won, so answer with it.
+      const [same] = await db
+        .select()
+        .from(workoutSessions)
+        .where(eq(workoutSessions.clientUuid, input.clientUuid))
+      if (same?.userId === user.id) return c.json({ session: await sessionDetail(db, same) })
+      throw err
+    }
     if (!row) throw new Error('Insert returned no row')
     await snapshotTargets(db, row.id, input.workoutId)
     return c.json({ session: await sessionDetail(db, row) }, 201)

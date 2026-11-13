@@ -199,5 +199,8 @@ export const exerciseAlternatives = sqliteTable(
   (t) => [
     uniqueIndex('exercise_alternatives_pair_uq').on(t.exerciseId, t.alternativeId),
     index('exercise_alternatives_exercise_idx').on(t.exerciseId, t.position),
+    // Deleting an exercise or a coach checks these.
+    index('exercise_alternatives_alternative_idx').on(t.alternativeId),
+    index('exercise_alternatives_created_by_idx').on(t.createdBy),
   ],
 )

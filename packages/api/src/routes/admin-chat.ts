@@ -1,7 +1,7 @@
 import { isClient, messageInput, messageReadInput } from '@project180/shared'
 import { Hono } from 'hono'
 import { managedPerson } from '../access'
-import { inbox, loadThread, markRead, postMessage } from '../chat'
+import { inbox, loadThread, markRead, postMessage, unreadForStaff } from '../chat'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { requireAdmin, requireUser } from '../middleware'
@@ -27,10 +27,7 @@ export const adminChatRoutes = new Hono<AppEnv>()
   /** Every conversation you can open, with unread counts and the latest message. */
   .get('/', async (c) => c.json({ chats: await inbox(c.var.db, c.var.user) }))
   /** Unread messages across all your clients (the sidebar badge). */
-  .get('/unread', async (c) => {
-    const chats = await inbox(c.var.db, c.var.user)
-    return c.json({ unread: chats.reduce((n, x) => n + x.unread, 0) })
-  })
+  .get('/unread', async (c) => c.json({ unread: await unreadForStaff(c.var.db, c.var.user) }))
   .get('/:clientId', async (c) => {
     const client = await managedClient(c, c.req.param('clientId'))
     const thread = await loadThread(

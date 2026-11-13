@@ -741,13 +741,13 @@ function ExerciseCard({
       : repsOnly
         ? ['Reps']
         : ['kg', 'Reps']
-  // Inputs keep one width across cards; the space left over goes to Previous (or stays empty).
+  // Last time stays narrow, right next to the set number; the inputs take the rest of the row,
+  // so a wide card never has an empty gap in the middle. No last time: no column at all.
   const rowColumns = {
     gridTemplateColumns: [
       '28px',
-      // No last time: skip the column and let the inputs take the whole row.
-      ...(hasPrevious ? ['minmax(4.5rem,1fr)'] : []),
-      ...fields.map(() => (hasPrevious ? 'minmax(0,8rem)' : 'minmax(0,1fr)')),
+      ...(hasPrevious ? ['minmax(4.5rem,7.5rem)'] : []),
+      ...fields.map(() => 'minmax(0,1fr)'),
       '48px',
     ].join(' '),
   }
@@ -839,7 +839,7 @@ function ExerciseCard({
         )}
       >
         <span>Set</span>
-        {hasPrevious && <span className="text-center">Last time</span>}
+        {hasPrevious && <span className="pl-1">Last time</span>}
         {fields.map((f) => (
           <span key={f} className="text-center">
             {f}
@@ -884,7 +884,7 @@ function ExerciseCard({
                     onEdit(s, patch)
                     onCommit({ ...s, ...patch })
                   }}
-                  className="tabular h-12 min-w-0 truncate rounded-sm px-1 font-semibold text-[14px] text-ink-muted transition hover:bg-surface-raised hover:text-ink active:scale-95"
+                  className="tabular h-12 min-w-0 truncate rounded-sm px-1 text-left font-semibold text-[14px] text-ink-muted transition hover:bg-surface-raised hover:text-ink active:scale-95"
                 >
                   {prevText}
                 </button>

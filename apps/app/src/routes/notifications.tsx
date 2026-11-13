@@ -94,7 +94,8 @@ function NotificationsPage() {
           </p>
         </div>
       ) : (
-        <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+        // One full-width row each: two columns leave half the screen empty.
+        <ul className="flex w-full flex-col gap-2 md:gap-3">
           {list.map((n, i) => {
             const { icon: Icon, tint } = LOOK[n.kind]
             const isNew = !seenBefore.includes(n.id)
@@ -108,7 +109,7 @@ function NotificationsPage() {
                 <button
                   type="button"
                   onClick={() => open(n)}
-                  className="flex min-h-[72px] w-full items-center gap-3 rounded-lg bg-surface p-4 text-left shadow-card transition active:scale-[0.98]"
+                  className="flex min-h-[72px] w-full items-center gap-3 rounded-lg bg-surface p-4 text-left shadow-card transition active:scale-[0.98] md:gap-4 md:p-5"
                 >
                   <span
                     className={cn('grid size-11 shrink-0 place-items-center rounded-full', tint)}

@@ -16,6 +16,7 @@
 - cn() uses tailwind-merge, so a className passed to a component overrides its defaults.
 - Dates: always use DatePicker from @project180/ui (react-day-picker, Monday-first), never <input type="date">.
 - Layout: full width at every screen size, no max-width page columns. Grow padding (px-4 md:px-8 lg:px-12) and add grid columns instead.
+- **Every new feature, every time: mobile friendly first, then full width. Don't waste screen space.** Build it for a 375px phone first, then make it fill the whole page on a laptop/desktop: no narrow centred column, no `max-w-*` / `mx-auto` wrappers on pages, no card or list that stops halfway across the screen leaving empty space beside it. Lists of rows (notifications, messages, history) are one full-width row each (`flex w-full flex-col`), not split into 2 columns that leave half the screen empty when there are only a few items; only use multi-column grids for things that fill them (cards, stats, galleries). Check at 375px and 1440px before calling it done.
 - Deleting: only with ConfirmDialog. Library items in use (workouts, logged history) are archived, never deleted; the API refuses with 409.
 
 ## Phone app (apps/app): every feature must feel native on a phone AND look good in a browser

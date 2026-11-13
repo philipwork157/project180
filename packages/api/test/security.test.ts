@@ -340,3 +340,135 @@ describe('cross-site requests and security headers', () => {
     expect(res.headers.get('cross-origin-resource-policy')).toBeNull()
   })
 })
+
+describe('privacy: weigh-ins, stats, videos and plan days', () => {
+  const OTHER = { name: 'Other Client', email: 'other@example.com', password: 'other-password-1' }
+  type Json = Record<string, any>
+
+  /** Owner, two clients, and a program (one workout, one exercise) for the first client. */
+  async function twoClients() {
+    const { admin, member } = await setupHousehold()
+    await call('/admin/users', { method: 'POST', cookie: admin, body: OTHER })
+    const other = await signIn(OTHER.email, OTHER.password)
+    const ex = await call<Json>('/exercises', {
+      method: 'POST',
+      cookie: admin,
+      body: { name: 'Squat', muscleGroup: 'legs' },
+    })
+    const exerciseId = ex.data.exercise.id as number
+    const w = await call<Json>('/workouts', {
+      method: 'POST',
+      cookie: admin,
+      body: {
+        name: 'Legs',
+        exercises: [
+          { exerciseId, targetSets: 3, targetRepsMin: 8, targetRepsMax: 10, restSeconds: 90 },
+        ],
+      },
+    })
+    const p = await call<Json>('/programs', {
+      method: 'POST',
+      cookie: admin,
+      body: {
+        name: 'Base',
+        durationWeeks: 1,
+        days: [{ weekNumber: 1, dayNumber: 1, workoutId: w.data.workout.id }],
+      },
+    })
+    const me = await call<Json>('/me', { cookie: member })
+    await call('/enrollments', {
+      method: 'POST',
+      cookie: admin,
+      body: { userId: me.data.user.id, programId: p.data.program.id, startDate: '2026-11-09' },
+    })
+    return { admin, member, other, exerciseId }
+  }
+
+  it("weigh-ins stay your own: nobody sees or overwrites someone else's", async () => {
+    const { member, other } = await twoClients()
+    const uuid = crypto.randomUUID()
+    const mine = await call('/me/checkins', {
+      method: 'PUT',
+      cookie: member,
+      body: { clientUuid: uuid, date: '2026-11-10', weightKg: 80 },
+    })
+    expect(mine.status).toBe(200)
+    // Reusing someone else's weigh-in id is refused (409, not a 500) and changes nothing.
+    const stolen = await call('/me/checkins', {
+      method: 'PUT',
+      cookie: other,
+      body: { clientUuid: uuid, date: '2026-11-10', weightKg: 120 },
+    })
+    expect(stolen.status).toBe(409)
+    const theirs = await call<Json>('/me/stats', { cookie: other })
+    expect(theirs.data.stats.bodyWeight).toEqual([])
+    const stats = await call<Json>('/me/stats', { cookie: member })
+    expect(stats.data.stats.bodyWeight).toEqual([{ date: '2026-11-10', weightKg: 80 }])
+    // Your own id on another day is refused too.
+    const otherDay = await call('/me/checkins', {
+      method: 'PUT',
+      cookie: member,
+      body: { clientUuid: uuid, date: '2026-11-11', weightKg: 79 },
+    })
+    expect(otherDay.status).toBe(409)
+  })
+
+  it('refuses dates that do not exist', async () => {
+    const { member } = await twoClients()
+    const res = await call('/me/checkins', {
+      method: 'PUT',
+      cookie: member,
+      body: { clientUuid: crypto.randomUUID(), date: '2026-02-30', weightKg: 80 },
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('stats only count your own workouts', async () => {
+    const { member, other } = await twoClients()
+    const plan = await call<Json>('/me/plan', { cookie: member })
+    const day = plan.data.plan.days.find((d: Json) => d.workoutId !== null)
+    const s = await call<Json>('/sessions', {
+      method: 'POST',
+      cookie: member,
+      body: { clientUuid: crypto.randomUUID(), workoutId: day.workoutId },
+    })
+    const id = s.data.session.id
+    await call(`/sessions/${id}/finish`, { method: 'POST', cookie: member, body: {} })
+    expect((await call<Json>('/me/stats', { cookie: member })).data.stats.workouts).toBe(1)
+    expect((await call<Json>('/me/stats', { cookie: other })).data.stats.workouts).toBe(0)
+  })
+
+  it("a session can't be tied to someone else's program day", async () => {
+    const { member, other } = await twoClients()
+    const plan = await call<Json>('/me/plan', { cookie: member })
+    const day = plan.data.plan.days.find((d: Json) => d.workoutId !== null)
+    const res = await call('/sessions', {
+      method: 'POST',
+      cookie: other,
+      body: {
+        clientUuid: crypto.randomUUID(),
+        workoutId: day.workoutId,
+        programDayId: day.programDayId,
+      },
+    })
+    expect(res.status).toBe(404)
+  })
+
+  it('clients can only look up videos for exercises in their own workouts', async () => {
+    const { admin, member, other, exerciseId } = await twoClients()
+    expect((await call(`/videos?exerciseId=${exerciseId}`, { cookie: admin })).status).toBe(200)
+    expect((await call(`/videos?exerciseId=${exerciseId}`, { cookie: member })).status).toBe(200)
+    expect((await call(`/videos?exerciseId=${exerciseId}`, { cookie: other })).status).toBe(404)
+  })
+
+  it("your time zone and weight unit can't be changed", async () => {
+    const { member } = await twoClients()
+    const res = await call<Json>('/me', {
+      method: 'PATCH',
+      cookie: member,
+      body: { timezone: 'Europe/London', weightUnit: 'lb' },
+    })
+    expect(res.status).toBe(200)
+    expect(res.data.user).toMatchObject({ timezone: 'Africa/Johannesburg', weightUnit: 'kg' })
+  })
+})

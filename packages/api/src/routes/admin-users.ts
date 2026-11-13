@@ -6,6 +6,7 @@ import {
   exerciseAlternatives,
   exercises,
   programs,
+  pushSubscriptions,
   sessions,
   setLogs,
   signInAttempts,
@@ -22,7 +23,10 @@ import {
   createUserInput,
   type DeletePersonResult,
   deviceLabel,
+  feedbackInput,
+  isClient,
   isOwner,
+  isoDate,
   isStaff,
   type PastProgram,
   type PersonActivity,
@@ -34,13 +38,14 @@ import {
 } from '@project180/shared'
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { managedPerson, managedUsers } from '../access'
 import { newPasswordEmail, sendEmail, welcomeEmail } from '../email'
 import type { AppEnv } from '../env'
 import { forbidden, notFound, parseBody, parseId } from '../errors'
+import { addFeedback, loadFeedback, removeFeedback } from '../feedback'
 import { requireAdmin, requireUser } from '../middleware'
 import { loadProfile, logWeight, saveProfile } from '../profiles'
 import { sessionSummaries } from '../sessions'
@@ -49,10 +54,29 @@ import { createUserWithPassword, setPassword } from '../users'
 import { assignProgram } from './enrollments'
 import { buildPlan } from './me'
 import { deleteClientProgram, findVisibleProgram } from './programs'
+import { sessionDetail } from './sessions'
 
 const resetProgramInput = z.object({
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD'),
+  startDate: isoDate,
 })
+
+/** A workout of someone you manage, from `/:id/workouts/:sessionId`; anything else is 404. */
+async function managedSession(c: Context<AppEnv>) {
+  const { db, user: me } = c.var
+  const person = await managedPerson(db, me, parseId(c.req.param('id') ?? ''))
+  const [row] = await db
+    .select()
+    .from(workoutSessions)
+    .where(
+      and(
+        eq(workoutSessions.id, parseId(c.req.param('sessionId') ?? '')),
+        eq(workoutSessions.userId, person.id),
+      ),
+    )
+    .limit(1)
+  if (!row) notFound('Workout not found')
+  return row
+}
 
 async function activeEnrollment(db: Db, userId: number) {
   const [enrollment] = await db
@@ -244,10 +268,10 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const { db, user: me } = c.var
     const env = c.env
     const input = await parseBody(c.req.raw, createUserInput)
-    if (input.role !== 'member' && !isOwner(me.role)) forbidden('Only an owner can add coaches')
+    if (isStaff(input.role) && !isOwner(me.role)) forbidden('Only an owner can add coaches')
     // A client is coached by whoever adds them, unless an owner picks another coach.
-    const pickedCoach = input.role === 'member' && isOwner(me.role) ? (input.coachId ?? null) : null
-    const coachId = input.role === 'member' ? (pickedCoach ?? me.id) : null
+    const pickedCoach = isClient(input.role) && isOwner(me.role) ? (input.coachId ?? null) : null
+    const coachId = isClient(input.role) ? (pickedCoach ?? me.id) : null
     // Check everything that can be refused before creating anything, so a mistake (a program
     // this coach can't use, an unknown coach, an email in use) never leaves a half-made account.
     await Promise.all([
@@ -364,7 +388,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const { db, user: me } = c.var
     if (!isOwner(me.role)) forbidden('Only an owner can change who coaches whom')
     const person = await managedPerson(db, me, parseId(c.req.param('id')))
-    if (person.role !== 'member') forbidden('Only clients have a coach')
+    if (!isClient(person.role)) forbidden('Only clients have a coach')
     const { coachId } = await parseBody(c.req.raw, assignCoachInput)
     await assertCoach(db, coachId)
     await db.update(users).set({ coachId }).where(eq(users.id, person.id))
@@ -385,6 +409,8 @@ export const adminUserRoutes = new Hono<AppEnv>()
       await db.batch([
         db.update(users).set({ mustChangePassword: true }).where(eq(users.id, person.id)),
         db.delete(sessions).where(eq(sessions.userId, person.id)),
+        // Signed out everywhere, so no phone keeps getting their notifications either.
+        db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id)),
       ])
     }
     if (!notify) return c.body(null, 204)
@@ -443,6 +469,31 @@ export const adminUserRoutes = new Hono<AppEnv>()
     }
     return c.json({ activity })
   })
+  /**
+   * One of their workouts in full (planned vs done, set by set), finished or still going.
+   * Someone you don't manage, or a session that isn't theirs, answers 404.
+   */
+  .get('/:id/workouts/:sessionId', async (c) => {
+    const { db } = c.var
+    const row = await managedSession(c)
+    const [session, feedback] = await Promise.all([
+      sessionDetail(db, row),
+      loadFeedback(db, row.id),
+    ])
+    return c.json({ session, feedback })
+  })
+  /** Like or comment on their workout, or one exercise in it. They get a push on their phone. */
+  .post('/:id/workouts/:sessionId/feedback', async (c) => {
+    const row = await managedSession(c)
+    const input = await parseBody(c.req.raw, feedbackInput)
+    return c.json({ feedback: await addFeedback(c, row, input) }, 201)
+  })
+  /** Take back your own like or comment. */
+  .delete('/:id/workouts/:sessionId/feedback/:feedbackId', async (c) => {
+    const row = await managedSession(c)
+    await removeFeedback(c.var.db, c.var.user, row.id, parseId(c.req.param('feedbackId')))
+    return c.body(null, 204)
+  })
   /** Sign them out on one device. */
   .delete('/:id/sessions/:sessionId', async (c) => {
     const { db, user: me } = c.var
@@ -458,6 +509,9 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const mine = eq(sessions.userId, person.id)
     const where = person.id === me.id ? and(mine, ne(sessions.id, c.var.sessionId)) : mine
     const removed = await db.delete(sessions).where(where).returning({ id: sessions.id })
+    // Someone else signed out everywhere (lost phone): their phones stop getting notifications.
+    if (person.id !== me.id)
+      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id))
     return c.json({ signedOut: removed.length })
   })
   /** Their current program and how it's going, plus past (archived) programs with their history. */

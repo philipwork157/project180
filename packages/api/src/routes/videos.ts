@@ -1,6 +1,20 @@
-import { exercises, videoSearches } from '@project180/db'
-import { exerciseVideoSearchUrl, type VideoResult, type VideoSearch } from '@project180/shared'
-import { eq } from 'drizzle-orm'
+import {
+  type Db,
+  exercises,
+  sessionExercises,
+  videoSearches,
+  workoutExercises,
+  workoutSessions,
+  workouts,
+} from '@project180/db'
+import {
+  exerciseVideoSearchUrl,
+  isStaff,
+  type Me,
+  type VideoResult,
+  type VideoSearch,
+} from '@project180/shared'
+import { and, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../env'
@@ -35,11 +49,37 @@ const decodeHtml = (s: string) =>
  * "How to do this exercise" videos, searched on YouTube once per exercise and cached.
  * Without YOUTUBE_API_KEY it answers configured: false and the app opens YouTube instead.
  */
+/**
+ * Staff may look up any exercise. A client only exercises in their own workouts (their program
+ * copies, or a workout they've started, swaps included), so nobody can walk through every id
+ * and use up the day's YouTube searches.
+ */
+async function mayWatch(db: Db, user: Me, exerciseId: number) {
+  if (isStaff(user.role)) return true
+  const [[inProgram], [inSession]] = await Promise.all([
+    db
+      .select({ id: workoutExercises.id })
+      .from(workoutExercises)
+      .innerJoin(workouts, eq(workouts.id, workoutExercises.workoutId))
+      .where(and(eq(workoutExercises.exerciseId, exerciseId), eq(workouts.clientId, user.id)))
+      .limit(1),
+    db
+      .select({ id: sessionExercises.id })
+      .from(sessionExercises)
+      .innerJoin(workoutSessions, eq(workoutSessions.id, sessionExercises.sessionId))
+      .where(and(eq(sessionExercises.exerciseId, exerciseId), eq(workoutSessions.userId, user.id)))
+      .limit(1),
+  ])
+  return Boolean(inProgram || inSession)
+}
+
 export const videoRoutes = new Hono<AppEnv>().use(requireUser).get('/', async (c) => {
   const { db } = c.var
   const parsed = query.safeParse({ exerciseId: c.req.query('exerciseId') })
   if (!parsed.success) notFound('Exercise not found')
   const id = parsed.data.exerciseId
+  // 404 like any other "not yours", so ids reveal nothing.
+  if (!(await mayWatch(db, c.var.user, id))) notFound('Exercise not found')
   const [exercise] = await db
     .select({ name: exercises.name, muscleGroup: exercises.muscleGroup })
     .from(exercises)

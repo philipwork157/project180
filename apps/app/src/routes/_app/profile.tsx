@@ -11,8 +11,10 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { ChangePassword, MyGoals } from '../../components/my-goals'
+import { PushSettings } from '../../components/push-settings'
 import { ScreenHeader } from '../../components/screen-header'
 import { Sheet } from '../../components/sheet'
+import { turnPushOff } from '../../lib/push'
 
 export const Route = createFileRoute('/_app/profile')({
   component: ProfilePage,
@@ -35,6 +37,8 @@ function ProfilePage() {
   async function signOut() {
     setSigningOut(true)
     try {
+      // While still signed in: this phone stops getting this person's notifications.
+      await turnPushOff()
       await authClient.signOut()
     } finally {
       queryClient.clear()
@@ -58,6 +62,8 @@ function ProfilePage() {
       </section>
 
       <MyGoals />
+
+      <PushSettings />
 
       <section className="flex flex-col gap-3">
         <h2 className="font-bold text-[17px]">Appearance</h2>

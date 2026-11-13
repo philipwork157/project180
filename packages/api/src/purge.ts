@@ -10,9 +10,9 @@ import {
   workoutSessions,
   workouts,
 } from '@project180/db'
-import { isStaff, type Me } from '@project180/shared'
+import type { Me } from '@project180/shared'
 import { and, count, countDistinct, eq, inArray, ne, or, type SQL } from 'drizzle-orm'
-import { conflict, forbidden } from './errors'
+import { conflict } from './errors'
 
 export interface PurgeImpact {
   /** Programs that schedule this workout (workouts only). */
@@ -87,13 +87,6 @@ export async function programImpact(db: Db, user: Me, programId: number): Promis
   }
 }
 
-/** Other people's logged workouts can only be wiped by staff. */
-function assertMayWipe(user: Me, impact: PurgeImpact) {
-  if (impact.otherPeoplesSessions > 0 && !isStaff(user.role)) {
-    forbidden('Other people have logged this. Only an admin can delete it.')
-  }
-}
-
 /**
  * Deletes a workout with its logged sessions and sets. Refused while a program still schedules it:
  * take it off those days (or delete the program) first, so no program quietly loses a workout.
@@ -106,7 +99,6 @@ export async function purgeWorkout(db: Db, user: Me, workoutId: number) {
       `It's still in ${impact.programs.length === 1 ? 'a program' : `${impact.programs.length} programs`} (${names}). Take it out of ${impact.programs.length === 1 ? 'that program' : 'those programs'} first.`,
     )
   }
-  assertMayWipe(user, impact)
   await db.batch([
     // set_logs go with their session (ON DELETE CASCADE).
     db.delete(workoutSessions).where(workoutSessionFilter(workoutId)),
@@ -116,8 +108,7 @@ export async function purgeWorkout(db: Db, user: Me, workoutId: number) {
 }
 
 /** Deletes a program, its schedule, assignments and the sessions logged as part of it. */
-export async function purgeProgram(db: Db, user: Me, programId: number) {
-  assertMayWipe(user, await programImpact(db, user, programId))
+export async function purgeProgram(db: Db, programId: number) {
   const programEnrollments = db
     .select({ id: enrollments.id })
     .from(enrollments)

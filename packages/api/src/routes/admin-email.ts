@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { emailMode, sendEmail } from '../email'
+import { emailMode, escapeHtml, sendEmail } from '../email'
 import type { AppEnv } from '../env'
 import { requireAdmin, requireUser } from '../middleware'
 
@@ -12,7 +12,7 @@ export const adminEmailRoutes = new Hono<AppEnv>()
     const result = await sendEmail(c.env, {
       to: me.email,
       subject: 'Project 180 test email',
-      html: `<p style="font:500 15px/23px Helvetica,Arial,sans-serif">Hi ${me.name.split(' ')[0]}, email from Project 180 is working.</p>`,
+      html: `<p style="font:500 15px/23px Helvetica,Arial,sans-serif">Hi ${escapeHtml(me.name.split(' ')[0] ?? '')}, email from Project 180 is working.</p>`,
       text: `Hi ${me.name.split(' ')[0]}, email from Project 180 is working.`,
     })
     return c.json({ email: result })

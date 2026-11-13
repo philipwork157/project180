@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createUserInput, exerciseInput, exerciseUpdate, updateProfileInput } from './validators'
+import {
+  createUserInput,
+  exerciseInput,
+  exerciseUpdate,
+  isoDate,
+  updateProfileInput,
+} from './validators'
 
 describe('validators', () => {
   it('normalises email addresses', () => {
@@ -40,8 +46,32 @@ describe('validators', () => {
 })
 
 describe('updateProfileInput', () => {
-  it('only accepts real time zones', () => {
-    expect(updateProfileInput.safeParse({ timezone: 'Africa/Johannesburg' }).success).toBe(true)
-    expect(updateProfileInput.safeParse({ timezone: 'Mars/Olympus' }).success).toBe(false)
+  it('only changes the name: time zone and weight unit are fixed', () => {
+    expect(
+      updateProfileInput.parse({ name: 'Sam', timezone: 'Europe/London', weightUnit: 'lb' }),
+    ).toEqual({ name: 'Sam' })
+  })
+})
+
+describe('isoDate', () => {
+  it('accepts real dates only', () => {
+    expect(isoDate.safeParse('2026-11-12').success).toBe(true)
+    expect(isoDate.safeParse('2028-02-29').success).toBe(true)
+    expect(isoDate.safeParse('2026-02-29').success).toBe(false)
+    expect(isoDate.safeParse('2026-13-45').success).toBe(false)
+    expect(isoDate.safeParse('12/11/2026').success).toBe(false)
+  })
+})
+
+describe('exercise video links', () => {
+  const ok = (videoUrl: string) => exerciseUpdate.safeParse({ videoUrl }).success
+  it('takes https YouTube and Vimeo links only', () => {
+    expect(ok('https://www.youtube.com/watch?v=abc123')).toBe(true)
+    expect(ok('https://youtu.be/abc123')).toBe(true)
+    expect(ok('https://vimeo.com/123456')).toBe(true)
+    expect(ok('http://www.youtube.com/watch?v=abc123')).toBe(false)
+    expect(ok('javascript:alert(1)')).toBe(false)
+    expect(ok('https://evil.example/youtube.com')).toBe(false)
+    expect(ok('https://youtube.com.evil.example/x')).toBe(false)
   })
 })

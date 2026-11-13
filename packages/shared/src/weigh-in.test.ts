@@ -86,3 +86,63 @@ describe('appNotifications', () => {
     ).toEqual([])
   })
 })
+
+describe('program news in the notifications', () => {
+  const base = { today: '2026-11-13', workoutInProgress: false, todayWorkout: null, weighIn: null }
+  const program = {
+    enrollmentId: 4,
+    programName: '4-Week Strength',
+    startDate: '2026-11-16',
+    assignedAt: '2026-11-13T05:00:00.000Z',
+    updatedAt: '2026-11-13T05:00:01.000Z',
+    coachName: 'Kim Coach',
+  }
+
+  it('announces a new program, with when it starts', () => {
+    expect(appNotifications({ ...base, program })).toEqual([
+      {
+        id: 'program:4',
+        kind: 'program',
+        title: 'New program: 4-Week Strength',
+        body: expect.stringMatching(/^Kim set it up for you\. It starts on Monday,? 16 November\.$/),
+      },
+    ])
+    const started = appNotifications({ ...base, program: { ...program, startDate: '2026-11-10' } })
+    expect(started[0]?.body).toBe('Kim set it up for you. Your plan is ready.')
+  })
+
+  it('drops off after a week, and says "Your coach" when the coach is unknown', () => {
+    expect(appNotifications({ ...base, today: '2026-11-20', program })).toHaveLength(1)
+    expect(appNotifications({ ...base, today: '2026-11-21', program })).toEqual([])
+    const [n] = appNotifications({ ...base, program: { ...program, coachName: null } })
+    expect(n?.body).toContain('Your coach set it up')
+  })
+
+  it('announces changes the coach brought to it later, as a new notification each time', () => {
+    const updated = { ...program, assignedAt: '2026-10-01T05:00:00.000Z' }
+    const first = appNotifications({
+      ...base,
+      program: { ...updated, updatedAt: '2026-11-12T09:00:00.000Z' },
+    })
+    expect(first).toEqual([
+      expect.objectContaining({
+        id: 'program-update:4:2026-11-12T09:00:00.000Z',
+        title: 'Your program was updated',
+      }),
+    ])
+    const second = appNotifications({
+      ...base,
+      program: { ...updated, updatedAt: '2026-11-13T09:00:00.000Z' },
+    })
+    expect(second[0]?.id).not.toBe(first[0]?.id)
+    // An old program with no recent changes says nothing.
+    expect(appNotifications({ ...base, program: { ...updated, updatedAt: null } })).toEqual([])
+  })
+
+  it('comes before the things to do today', () => {
+    const todayWorkout = { date: '2026-11-13', workoutName: 'Legs', state: 'planned' as const }
+    const list = appNotifications({ ...base, todayWorkout, program })
+    expect(list.map((n) => n.kind)).toEqual(['program', 'workout'])
+  })
+})
+

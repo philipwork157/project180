@@ -5,6 +5,7 @@ import {
   GOAL_LABELS,
   generateTempPassword,
   isOwner,
+  isStaff,
   type Me,
   type Role,
   TEMP_PASSWORD_DAYS,
@@ -93,7 +94,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
 
   const updateProfile = (patch: Partial<ProfileDraft>) => setProfile((p) => ({ ...p, ...patch }))
   const first = name.trim().split(' ')[0] || 'them'
-  const isClient = role === 'member'
+  const isClient = !isStaff(role)
 
   const create = useMutation({
     mutationFn: (input: CreateUserInput) =>

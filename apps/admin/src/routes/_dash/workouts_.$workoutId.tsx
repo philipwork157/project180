@@ -1,4 +1,4 @@
-import { ApiError, api, exercisesQuery, workoutQuery } from '@project180/client'
+import { ApiError, api, exercisesQuery, putExercise, workoutQuery } from '@project180/client'
 import {
   type Exercise,
   formatDuration,
@@ -1335,6 +1335,7 @@ function ExercisePicker({
     const name = search.trim()
     if (!name) return
     const { exercise } = await create.mutateAsync(name)
+    putExercise(queryClient, exercise, true)
     void queryClient.invalidateQueries({ queryKey: ['exercises'] })
     add(exercise)
     setSearch('')

@@ -90,12 +90,12 @@ export function TurnDial({ className }: { className?: string }) {
       />
       <motion.path
         d={`M ${CX - TRACK} ${CY} A ${TRACK} ${TRACK} 0 0 1 ${CX + TRACK} ${CY}`}
-        stroke="#b6e63b"
+        stroke="var(--lime)"
         strokeWidth="2.5"
         strokeLinecap="round"
         style={{ pathLength: progress }}
       />
-      <motion.circle r="5" fill="#b6e63b" cx={dotX} cy={dotY} />
+      <motion.circle r="5" fill="var(--lime)" cx={dotX} cy={dotY} />
       <motion.text
         x={CX}
         y={CY - 34}
@@ -118,7 +118,7 @@ export function TurnArc({ className }: { className?: string }) {
       <circle cx="200" cy="200" r="170" stroke="#f5f3ed" strokeOpacity="0.06" strokeWidth="34" />
       <motion.path
         d="M200 30 A170 170 0 0 1 200 370"
-        stroke="#b6e63b"
+        stroke="var(--lime)"
         strokeWidth="34"
         initial={{ pathLength: 0 }}
         animate={{ pathLength: 1 }}

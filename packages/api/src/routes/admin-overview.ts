@@ -27,6 +27,8 @@ import { sessionSummaries } from '../sessions'
 import { buildPlans } from './me'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+// A workout left open longer than this was forgotten, not one being done right now.
+const LIVE_MS = 4 * 60 * 60 * 1000
 
 /**
  * The dashboard home: how the clients you look after are doing this week, who needs a nudge,
@@ -66,6 +68,7 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
       appRows,
       plans,
       recentRows,
+      liveRows,
       [exerciseCount],
       [workoutCount],
       [programCount],
@@ -115,6 +118,23 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
           )
           .orderBy(desc(workoutSessions.startedAt))
           .limit(8),
+      ),
+      // Training right now: started in the last few hours and not finished yet.
+      mine((slice) =>
+        db
+          .select({
+            id: workoutSessions.id,
+            userId: workoutSessions.userId,
+            startedAt: workoutSessions.startedAt,
+          })
+          .from(workoutSessions)
+          .where(
+            and(
+              inArray(workoutSessions.userId, slice),
+              eq(workoutSessions.status, 'in_progress'),
+              gte(workoutSessions.startedAt, new Date(now - LIVE_MS)),
+            ),
+          ),
       ),
       db.select({ n: count() }).from(exercises).where(visibleTo(exercises, me)),
       db
@@ -204,17 +224,23 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
     const newest = recentRows
       .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
       .slice(0, 8)
-    const recentSummaries = newest.length
+    // One summary query for the newest finished and the live ones together.
+    const wanted = [...newest, ...liveRows]
+    const summaries = wanted.length
       ? await sessionSummaries(
           db,
           inArray(
             workoutSessions.id,
-            newest.map((r) => r.id),
+            wanted.map((r) => r.id),
           ),
-          8,
+          wanted.length,
         )
       : []
-    const ownerOf = new Map(newest.map((r) => [r.id, r.userId]))
+    const summaryOf = new Map(summaries.map((s) => [s.id, s]))
+    const withName = (r: { id: number; userId: number }) => {
+      const s = summaryOf.get(r.id)
+      return s ? [{ ...s, userId: r.userId, name: byId.get(r.userId)?.name ?? 'Client' }] : []
+    }
 
     const overview: AdminOverview = {
       clients: {
@@ -242,10 +268,10 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
         return { date, workouts: perDay.get(date) ?? 0 }
       }),
       attention,
-      recent: recentSummaries.map((s) => {
-        const userId = ownerOf.get(s.id) ?? 0
-        return { ...s, userId, name: byId.get(userId)?.name ?? 'Client' }
-      }),
+      recent: newest.flatMap(withName),
+      live: liveRows
+        .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+        .flatMap(withName),
       library: {
         exercises: exerciseCount?.n ?? 0,
         workouts: workoutCount?.n ?? 0,

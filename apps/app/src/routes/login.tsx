@@ -1,4 +1,4 @@
-import { authClient, forgetLocalData, meQuery } from '@project180/client'
+import { authClient, claimLocalData, meQuery } from '@project180/client'
 import { AuthShell, Button, Field, Input, PasswordInput } from '@project180/ui'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
@@ -22,7 +22,7 @@ function LoginPage() {
     const form = new FormData(e.currentTarget)
     setPending(true)
     setError(undefined)
-    const { error } = await authClient.signIn.email({
+    const { data, error } = await authClient.signIn.email({
       email: String(form.get('email')),
       password: String(form.get('password')),
     })
@@ -32,8 +32,9 @@ function LoginPage() {
       return
     }
     // Start clean: nothing cached from whoever used this phone before (or the "signed out" answer).
+    // Sets they hadn't sent yet are kept only if it's the same person signing back in.
     queryClient.clear()
-    forgetLocalData()
+    claimLocalData(data?.user.id)
     await navigate({ to: '/' })
   }
 

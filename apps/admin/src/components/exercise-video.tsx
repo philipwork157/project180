@@ -1,10 +1,4 @@
-import {
-  ApiError,
-  api,
-  exercisesQuery,
-  exerciseVideosQuery,
-  putExercise,
-} from '@project180/client'
+import { ApiError, api, exercisesQuery, exerciseVideosQuery, putExercise } from '@project180/client'
 import {
   type Exercise,
   exerciseVideoSearchUrl,

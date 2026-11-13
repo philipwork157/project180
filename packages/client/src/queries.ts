@@ -3,6 +3,7 @@ import type {
   ClientProfile,
   EnrollmentSummary,
   Exercise,
+  FeedbackNews,
   Me,
   MyPlan,
   MyStats,
@@ -13,6 +14,7 @@ import type {
   ProgramDetail,
   ProgramSummary,
   SessionDetail,
+  SessionFeedback,
   SwapOptions,
   UserSummary,
   VideoSearch,
@@ -53,9 +55,7 @@ export function putExercise(queryClient: QueryClient, exercise: Exercise, isNew 
   const swap = (list: Exercise[] | undefined) =>
     list?.map((e) => (e.id === exercise.id ? exercise : e))
   queryClient.setQueryData(exercisesQuery(false).queryKey, (list) =>
-    isNew && list
-      ? [...list, exercise].sort((a, b) => a.name.localeCompare(b.name))
-      : swap(list),
+    isNew && list ? [...list, exercise].sort((a, b) => a.name.localeCompare(b.name)) : swap(list),
   )
   queryClient.setQueryData(exercisesQuery(true).queryKey, swap)
 }
@@ -124,6 +124,33 @@ export const personProgressQuery = (userId: number) =>
   queryOptions({
     queryKey: ['admin', 'users', userId, 'progress'],
     queryFn: () => api<PersonPrograms>(`/admin/users/${userId}/progress`),
+  })
+
+/** One of a client's workouts in full, for the coach. Refreshes while they're still training. */
+export const clientWorkoutQuery = (userId: number, sessionId: number) =>
+  queryOptions({
+    queryKey: ['admin', 'users', userId, 'workouts', sessionId],
+    queryFn: () =>
+      api<{ session: SessionDetail; feedback: SessionFeedback[] }>(
+        `/admin/users/${userId}/workouts/${sessionId}`,
+      ),
+    refetchInterval: (query) =>
+      query.state.data?.session.status === 'in_progress' ? 10_000 : false,
+  })
+
+/** Your coach's likes and comments you haven't seen yet (phone app notifications). */
+export const myFeedbackQuery = queryOptions({
+  queryKey: ['me', 'feedback'],
+  queryFn: async () => (await api<{ feedback: FeedbackNews[] }>('/me/feedback')).feedback,
+  refetchInterval: 120_000,
+})
+
+/** Your coach's likes and comments on one of your workouts. */
+export const sessionFeedbackQuery = (sessionId: number) =>
+  queryOptions({
+    queryKey: ['sessions', sessionId, 'feedback'],
+    queryFn: async () =>
+      (await api<{ feedback: SessionFeedback[] }>(`/sessions/${sessionId}/feedback`)).feedback,
   })
 
 /** When someone was last seen, time in the app this week, and their signed-in devices (admin). */

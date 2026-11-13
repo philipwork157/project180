@@ -1,4 +1,4 @@
-import { statsQuery } from '@project180/client'
+import { myProfileQuery, statsQuery } from '@project180/client'
 import {
   formatDuration,
   formatNumber,
@@ -11,13 +11,19 @@ import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { ChevronRight, TrendingUp, Trophy } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ScreenHeader } from '../../components/screen-header'
 import { SessionDetails } from '../../components/session-details'
 import { Sheet } from '../../components/sheet'
-import { WeighIn } from '../../components/weigh-in'
+import { WeighInSheet } from '../../components/weigh-in-card'
+import { WeightChart } from '../../components/weight-chart'
 
 export const Route = createFileRoute('/_app/progress')({
+  // ?workout=<id> opens that workout (a coach's like or comment links here).
+  validateSearch: (search: Record<string, unknown>): { workout?: number } => {
+    const id = Number(search.workout)
+    return Number.isInteger(id) && id > 0 ? { workout: id } : {}
+  },
   component: ProgressPage,
 })
 
@@ -27,7 +33,19 @@ function ProgressPage() {
   const { me } = Route.useRouteContext()
   const stats = useQuery(statsQuery(8))
   const s = stats.data
-  const [openSession, setOpenSession] = useState<number | null>(null)
+  const { workout } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const [openSession, setOpenSession] = useState<number | null>(workout ?? null)
+  useEffect(() => {
+    if (workout) setOpenSession(workout)
+  }, [workout])
+  const closeSession = () => {
+    setOpenSession(null)
+    if (workout) void navigate({ search: {}, replace: true })
+  }
+  const goalKg = useQuery(myProfileQuery).data?.goalWeightKg ?? null
+  const [weighing, setWeighing] = useState(false)
+  const today = todayIn(me.timezone)
 
   return (
     <div className="flex flex-col gap-6">
@@ -61,14 +79,24 @@ function ProgressPage() {
 
           <section className="flex flex-col gap-3">
             <h2 className="font-bold text-[17px]">Body weight</h2>
-            <WeighIn date={todayIn(me.timezone)} statsWeeks={8} />
-            {s.bodyWeight.length > 1 && <WeightLine points={s.bodyWeight} />}
-            {s.bodyWeight.length === 1 && (
-              <p className="text-[14px] text-ink-muted">
-                {formatWeight(s.bodyWeight[0]?.weightKg ?? 0)} kg on {s.bodyWeight[0]?.date}. Log
-                again to see the trend.
-              </p>
-            )}
+            <WeightChart
+              points={s.bodyWeight}
+              today={today}
+              goalKg={goalKg}
+              onLog={() => setWeighing(true)}
+            />
+            <WeighInSheet
+              open={weighing}
+              date={today}
+              status={{
+                kind: 'today',
+                date: today,
+                done: s.bodyWeight.some((b) => b.date === today),
+                weightKg: s.bodyWeight.find((b) => b.date === today)?.weightKg ?? null,
+                previous: s.bodyWeight.filter((b) => b.date < today).at(-1) ?? null,
+              }}
+              onClose={() => setWeighing(false)}
+            />
           </section>
 
           {s.records.length > 0 && (
@@ -141,7 +169,7 @@ function ProgressPage() {
       )}
       <Sheet
         open={openSession !== null}
-        onClose={() => setOpenSession(null)}
+        onClose={closeSession}
         label="Workout details"
       >
         {openSession !== null && (
@@ -205,64 +233,5 @@ function WeeklyVolume({ weeks }: { weeks: MyStats['weeks'] }) {
         })}
       </div>
     </section>
-  )
-}
-
-function WeightLine({ points }: { points: MyStats['bodyWeight'] }) {
-  const recent = points.slice(-20)
-  const values = recent.map((p) => p.weightKg)
-  const min = Math.min(...values) - 0.5
-  const max = Math.max(...values) + 0.5
-  const w = 300
-  const h = 90
-  const x = (i: number) => (recent.length === 1 ? w / 2 : (i / (recent.length - 1)) * w)
-  const y = (v: number) => h - ((v - min) / (max - min)) * h
-  const path = recent
-    .map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.weightKg).toFixed(1)}`)
-    .join(' ')
-  const first = recent[0]
-  const last = recent.at(-1)
-  const change = first && last ? last.weightKg - first.weightKg : 0
-  return (
-    <div className="rounded-lg bg-surface p-4 shadow-card">
-      <div className="flex items-baseline justify-between">
-        <span className="tabular font-bold font-display text-[24px]">
-          {formatWeight(last?.weightKg ?? 0)} kg
-        </span>
-        <span className="font-semibold text-[13px] text-ink-muted">
-          {change === 0
-            ? 'No change'
-            : `${change > 0 ? '+' : '−'}${formatWeight(Math.abs(change))} kg`}{' '}
-          since {first?.date}
-        </span>
-      </div>
-      <svg
-        viewBox={`-6 -6 ${w + 12} ${h + 12}`}
-        className="mt-3 h-28 w-full"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Body weight trend"
-      >
-        <path
-          d={path}
-          fill="none"
-          stroke="var(--sand)"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-        {recent.map((p, i) => (
-          <circle
-            key={p.date}
-            cx={x(i)}
-            cy={y(p.weightKg)}
-            r="3.5"
-            fill="var(--sand)"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </svg>
-    </div>
   )
 }

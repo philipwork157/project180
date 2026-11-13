@@ -24,6 +24,7 @@ import {
   CalendarClock,
   Check,
   ChevronDown,
+  ChevronRight,
   Dumbbell,
   History,
   Moon,
@@ -37,6 +38,7 @@ import {
 import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 import { SwapsLine } from './swaps-line'
+import { type OpenWorkout, WorkoutReviewDrawer } from './workout-review'
 
 const DAY_STYLE: Record<PlanDay['state'], { cell: string; icon: typeof Check; label: string }> = {
   done: { cell: 'bg-lime text-on-lime', icon: Check, label: 'Done' },
@@ -60,6 +62,8 @@ export function PersonProgressPanel({
   onAssign: () => void
 }) {
   const query = useQuery(personProgressQuery(userId))
+  const [review, setReview] = useState<OpenWorkout | null>(null)
+  const openWorkout = (sessionId: number) => setReview({ userId, sessionId, name })
 
   if (query.isPending) return <div className="h-48 animate-pulse rounded-md bg-surface-raised" />
   if (query.isError)
@@ -73,7 +77,13 @@ export function PersonProgressPanel({
   return (
     <div className="flex flex-col gap-6">
       {progress ? (
-        <CurrentProgram p={progress} userId={userId} name={name} onAssign={onAssign} />
+        <CurrentProgram
+          p={progress}
+          userId={userId}
+          name={name}
+          onAssign={onAssign}
+          onOpenWorkout={openWorkout}
+        />
       ) : (
         <div className="flex flex-col items-start gap-3 rounded-md border-[1.5px] border-border-strong border-dashed p-5">
           <p className="font-bold text-[15px]">No current program</p>
@@ -88,8 +98,15 @@ export function PersonProgressPanel({
         </div>
       )}
       {past.length > 0 && (
-        <PastPrograms past={past} userId={userId} name={name} hasCurrent={progress !== null} />
+        <PastPrograms
+          past={past}
+          userId={userId}
+          name={name}
+          hasCurrent={progress !== null}
+          onOpenWorkout={openWorkout}
+        />
       )}
+      <WorkoutReviewDrawer workout={review} onClose={() => setReview(null)} />
     </div>
   )
 }
@@ -109,11 +126,13 @@ function CurrentProgram({
   userId,
   name,
   onAssign,
+  onOpenWorkout,
 }: {
   p: PersonProgress
   userId: number
   name: string
   onAssign: () => void
+  onOpenWorkout: (sessionId: number) => void
 }) {
   const [resetting, setResetting] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -254,20 +273,30 @@ function CurrentProgram({
           <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
             Latest workouts
           </p>
-          <ul className="flex flex-col divide-y divide-border rounded-md bg-surface-raised">
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-md bg-surface-raised">
             {p.recent.map((s) => (
-              <li key={s.id} className="flex flex-col gap-1 px-4 py-3">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
-                    {s.workoutName ?? 'Workout'}
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenWorkout(s.id)}
+                  className="flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-border/40 active:scale-[0.99]"
+                >
+                  <span className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
+                        {s.workoutName ?? 'Workout'}
+                      </span>
+                      <span className="tabular font-semibold text-[13px] text-ink-muted">
+                        {relativeDay(s.startedAt)} · {s.setCount}{' '}
+                        {s.setCount === 1 ? 'set' : 'sets'}
+                        {s.volumeKg ? ` · ${formatNumber(Math.round(s.volumeKg))} kg` : ''}
+                        {s.feeling ? ` · felt ${s.feeling}/5` : ''}
+                      </span>
+                    </span>
+                    <SwapsLine swaps={s.swaps} />
                   </span>
-                  <span className="tabular font-semibold text-[13px] text-ink-muted">
-                    {relativeDay(s.startedAt)} · {s.setCount} {s.setCount === 1 ? 'set' : 'sets'}
-                    {s.volumeKg ? ` · ${formatNumber(Math.round(s.volumeKg))} kg` : ''}
-                    {s.feeling ? ` · felt ${s.feeling}/5` : ''}
-                  </span>
-                </div>
-                <SwapsLine swaps={s.swaps} />
+                  <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden />
+                </button>
               </li>
             ))}
           </ul>
@@ -348,8 +377,8 @@ function ResetProgramDialog({
   const reset = useMutation({
     mutationFn: () =>
       api(`/admin/users/${userId}/reset-program`, { method: 'POST', body: { startDate } }),
-    onSuccess: async () => {
-      await Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: personProgressQuery(userId).queryKey }),
         queryClient.invalidateQueries({ queryKey: ['enrollments'] }),
       ])
@@ -442,7 +471,7 @@ function ArchiveProgramDialog({
   const programName = progress.plan.enrollment.programName
   const archive = useMutation({
     mutationFn: () => api(`/admin/users/${userId}/program/archive`, { method: 'POST' }),
-    onSuccess: async () => {
+    onSuccess: () => {
       void invalidatePerson(queryClient, userId)
       toast({
         title: 'Program archived',
@@ -489,11 +518,13 @@ function PastPrograms({
   userId,
   name,
   hasCurrent,
+  onOpenWorkout,
 }: {
   past: PastProgram[]
   userId: number
   name: string
   hasCurrent: boolean
+  onOpenWorkout: (sessionId: number) => void
 }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState<number | null>(null)
@@ -502,7 +533,7 @@ function PastPrograms({
   const restore = useMutation({
     mutationFn: (enrollmentId: number) =>
       api(`/admin/users/${userId}/enrollments/${enrollmentId}/restore`, { method: 'POST' }),
-    onSuccess: async (_, enrollmentId) => {
+    onSuccess: (_, enrollmentId) => {
       void invalidatePerson(queryClient, userId)
       const item = past.find((x) => x.enrollmentId === enrollmentId)
       toast({
@@ -588,24 +619,27 @@ function PastPrograms({
                     {expanded ? 'Hide history' : 'Show history'}
                   </button>
                   {expanded && (
-                    <ul className="mt-2 divide-y divide-border rounded-sm bg-surface">
+                    <ul className="mt-2 divide-y divide-border overflow-hidden rounded-sm bg-surface">
                       {x.recent.map((s) => (
-                        <li
-                          key={s.id}
-                          className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-[13px]"
-                        >
-                          <span className="w-16 shrink-0 font-semibold text-ink-muted">
-                            {shortDate(s.startedAt.slice(0, 10))}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate font-bold">
-                            {s.workoutName ?? 'Workout'}
-                          </span>
-                          <span className="tabular text-ink-muted">
-                            {s.setCount} {s.setCount === 1 ? 'set' : 'sets'} ·{' '}
-                            {formatNumber(Math.round(s.volumeKg))} kg
-                            {s.feeling ? ` · felt ${s.feeling}/5` : ''}
-                          </span>
-                          <SwapsLine swaps={s.swaps} className="basis-full pl-[76px]" />
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            onClick={() => onOpenWorkout(s.id)}
+                            className="flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left text-[13px] transition hover:bg-surface-raised"
+                          >
+                            <span className="w-16 shrink-0 font-semibold text-ink-muted">
+                              {shortDate(s.startedAt.slice(0, 10))}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate font-bold">
+                              {s.workoutName ?? 'Workout'}
+                            </span>
+                            <span className="tabular text-ink-muted">
+                              {s.setCount} {s.setCount === 1 ? 'set' : 'sets'} ·{' '}
+                              {formatNumber(Math.round(s.volumeKg))} kg
+                              {s.feeling ? ` · felt ${s.feeling}/5` : ''}
+                            </span>
+                            <SwapsLine swaps={s.swaps} className="basis-full pl-[76px]" />
+                          </button>
                         </li>
                       ))}
                       {x.workouts > x.recent.length && (
@@ -653,7 +687,7 @@ function DeletePastDialog({
   const remove = useMutation({
     mutationFn: (enrollmentId: number) =>
       api(`/admin/users/${userId}/enrollments/${enrollmentId}`, { method: 'DELETE' }),
-    onSuccess: async () => {
+    onSuccess: () => {
       void invalidatePerson(queryClient, userId)
       toast({
         title: 'Deleted for good',
@@ -747,8 +781,8 @@ function RemoveProgramDialog({
   const programName = progress.plan.enrollment.programName
   const remove = useMutation({
     mutationFn: () => api(`/admin/users/${userId}/program`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: personProgressQuery(userId).queryKey }),
         queryClient.invalidateQueries({ queryKey: ['enrollments'] }),
       ])

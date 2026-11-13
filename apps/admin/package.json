@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsr generate && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.worker.json",
+    "e2e": "playwright test",
     "deploy": "wrangler deploy",
     "build:dev": "vite build --mode dev",
     "deploy:dev": "vite build --mode dev && wrangler deploy"
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.67.0",
     "@cloudflare/workers-types": "^5.20261101.1",
+    "@playwright/test": "^1.65.0",
     "@project180/api": "workspace:*",
     "@project180/config": "workspace:*",
     "@tailwindcss/vite": "^4.3.5",

@@ -25,7 +25,6 @@ import {
   Archive,
   ArrowLeft,
   CopyCheck,
-  Paintbrush,
   RefreshCw,
   Scale,
   Trash2,
@@ -41,6 +40,7 @@ import { DeleteForGood } from '../../components/delete-for-good'
 import { HistoryControls, useDraftBackup, useDraftHistory } from '../../components/draft-history'
 import { useUnsavedChangesGuard } from '../../components/unsaved-changes'
 import { UpdateClientsDrawer } from '../../components/update-clients'
+import { WorkoutPalette } from '../../components/workout-palette'
 
 export const Route = createFileRoute('/_dash/programs_/$programId')({
   component: ProgramEditorPage,
@@ -347,72 +347,36 @@ function Builder({
         </p>
       )}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <section aria-label="Schedule" className="flex min-w-0 flex-col gap-3">
-          {canEdit && (
-            <div className="flex flex-col gap-2 rounded-lg bg-surface p-3 shadow-card sm:flex-row sm:flex-wrap sm:items-center">
-              <span className="flex items-center gap-2 px-1 font-bold text-[13px] text-ink-muted">
-                <Paintbrush className="size-4" aria-hidden />
-                Quick fill:
-              </span>
-              {/* Phones: one row that scrolls sideways instead of a wall of chips. */}
-              <div className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 sm:contents">
-                {(workouts.data ?? []).map((w) => (
-                  <button
-                    key={w.id}
-                    type="button"
-                    aria-pressed={brush === w.id}
-                    onClick={() => setBrush(brush === w.id ? null : w.id)}
-                    className={cn(
-                      'h-8 shrink-0 whitespace-nowrap rounded-pill px-3 font-bold text-[13px] transition',
-                      brush === w.id
-                        ? 'bg-brand text-on-brand'
-                        : 'bg-brand-soft text-brand-text hover:ring-2 hover:ring-brand',
-                    )}
-                  >
-                    {w.name}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  aria-pressed={brush === 'rest'}
-                  onClick={() => setBrush(brush === 'rest' ? null : 'rest')}
-                  className={cn(
-                    'h-8 shrink-0 whitespace-nowrap rounded-pill px-3 font-bold text-[13px] transition',
-                    brush === 'rest'
-                      ? 'bg-ink text-bg'
-                      : 'bg-surface-raised text-ink-muted hover:text-ink',
-                  )}
-                >
-                  Rest
-                </button>
-              </div>
-              {workouts.data?.length === 0 && (
-                <Link
-                  to="/workouts/$workoutId"
-                  params={{ workoutId: 'new' }}
-                  className="font-bold text-[13px] text-brand-text"
-                >
-                  Build a workout first →
-                </Link>
-              )}
-              <span className="px-1 text-[12px] text-ink-muted sm:ml-auto">
-                {brush
-                  ? 'Click days to fill them. Click the chip again to stop. Wrong day? Undo puts it back.'
-                  : 'Pick a workout, then click days.'}
-              </span>
-            </div>
-          )}
+      {/* Phones: fill-days list, then the schedule, then settings. Desktop: tools on the left. */}
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
+        {canEdit && (
+          <div className="flex flex-col gap-2">
+            <WorkoutPalette workouts={workouts.data ?? []} brush={brush} onBrush={setBrush} />
+            {workouts.data?.length === 0 && (
+              <Link
+                to="/workouts/$workoutId"
+                params={{ workoutId: 'new' }}
+                className="px-1 font-bold text-[13px] text-brand-text"
+              >
+                Build a workout first →
+              </Link>
+            )}
+          </div>
+        )}
 
+        <section
+          aria-label="Schedule"
+          className="flex min-w-0 flex-col gap-3 xl:col-start-2 xl:row-span-2 xl:row-start-1"
+        >
           <div className="overflow-x-auto rounded-lg bg-surface p-3 shadow-card">
-            <table className="w-full min-w-[760px] border-separate border-spacing-1.5">
+            <table className="w-full min-w-[560px] table-fixed border-separate border-spacing-1">
               <thead>
                 <tr>
-                  <th className="sticky left-0 z-10 w-16 bg-surface sm:w-20" />
+                  <th className="sticky left-0 z-20 w-14 bg-surface" />
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => (
                     <th
                       key={day}
-                      className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]"
+                      className="pb-1 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]"
                     >
                       Day {day}
                     </th>
@@ -425,10 +389,18 @@ function Builder({
                   <tr key={week}>
                     <th
                       scope="row"
-                      // Stays in view while the days scroll sideways on a phone.
-                      className="sticky left-0 z-10 bg-surface pr-1 text-left font-bold text-[13px]"
+                      // Stays in view while the days scroll sideways on a phone; solid so days
+                      // pass cleanly underneath.
+                      className="sticky left-0 z-20 bg-surface pr-2 text-left align-middle"
                     >
-                      Week {week}
+                      <span className="flex flex-col">
+                        <span className="font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.08em]">
+                          Week
+                        </span>
+                        <span className="tabular font-display font-extrabold text-[18px] leading-6">
+                          {week}
+                        </span>
+                      </span>
                     </th>
                     {[1, 2, 3, 4, 5, 6, 7].map((day) => {
                       const cell = draft.cells[keyOf(week, day)] ?? {
@@ -436,28 +408,32 @@ function Builder({
                         checkinRequired: false,
                       }
                       const hasWorkout = cell.workoutId !== null
+                      const label = hasWorkout
+                        ? (names.get(cell.workoutId ?? 0) ?? 'Archived workout')
+                        : 'Rest'
                       return (
                         <td key={day} className="p-0 align-top">
                           <motion.div
                             layout
                             className={cn(
-                              'relative flex h-[72px] flex-col justify-between rounded-md p-1.5 transition',
-                              hasWorkout ? 'bg-brand-soft' : 'bg-surface-raised',
-                              cell.checkinRequired && 'ring-2 ring-sand ring-inset',
+                              'relative flex h-[76px] flex-col justify-between gap-1 rounded-md p-1.5 transition focus-within:ring-2 focus-within:ring-brand',
+                              hasWorkout
+                                ? 'bg-surface-raised'
+                                : 'border border-border border-dashed',
                             )}
                           >
-                            {brush !== null && canEdit ? (
-                              <button
-                                type="button"
-                                aria-label={`Fill week ${week} day ${day}`}
-                                onClick={() =>
-                                  setCell(week, day, { workoutId: brush === 'rest' ? null : brush })
-                                }
-                                className="absolute inset-0 z-10 rounded-md hover:ring-2 hover:ring-brand"
-                              />
-                            ) : null}
+                            <span
+                              aria-hidden
+                              className={cn(
+                                'line-clamp-2 break-words font-semibold text-[12px] leading-4',
+                                hasWorkout ? 'text-ink' : 'text-ink-muted',
+                              )}
+                            >
+                              {label}
+                            </span>
+                            {/* The real control, invisible over the cell: click anywhere to change. */}
                             <select
-                              aria-label={`Week ${week} day ${day}`}
+                              aria-label={`Week ${week} day ${day}: ${label}`}
                               value={cell.workoutId ?? ''}
                               disabled={!canEdit}
                               onChange={(e) =>
@@ -465,10 +441,7 @@ function Builder({
                                   workoutId: e.target.value ? Number(e.target.value) : null,
                                 })
                               }
-                              className={cn(
-                                'w-full cursor-pointer appearance-none truncate bg-transparent font-bold text-[12px] leading-4 outline-none',
-                                hasWorkout ? 'text-brand-text' : 'text-ink-muted',
-                              )}
+                              className="absolute inset-0 z-10 cursor-pointer appearance-none rounded-md opacity-0 disabled:cursor-default"
                             >
                               <option value="">Rest</option>
                               {(workouts.data ?? []).map((w) => (
@@ -480,7 +453,17 @@ function Builder({
                                 <option value={cell.workoutId}>Archived workout</option>
                               )}
                             </select>
-                            <div className="flex justify-end">
+                            {brush !== null && canEdit ? (
+                              <button
+                                type="button"
+                                aria-label={`Fill week ${week} day ${day}`}
+                                onClick={() =>
+                                  setCell(week, day, { workoutId: brush === 'rest' ? null : brush })
+                                }
+                                className="absolute inset-0 z-[15] cursor-copy rounded-md hover:ring-2 hover:ring-brand"
+                              />
+                            ) : null}
+                            <div className="relative z-20 flex">
                               <Tooltip
                                 label={
                                   cell.checkinRequired
@@ -497,10 +480,10 @@ function Builder({
                                     setCell(week, day, { checkinRequired: !cell.checkinRequired })
                                   }
                                   className={cn(
-                                    'relative z-20 grid size-7 place-items-center rounded-sm transition',
+                                    'grid size-6 place-items-center rounded-sm transition',
                                     cell.checkinRequired
-                                      ? 'bg-sand text-on-sand'
-                                      : 'text-ink-muted/60 hover:text-ink',
+                                      ? 'bg-sand/25 text-sand-text'
+                                      : 'text-ink-muted/50 hover:bg-surface hover:text-ink disabled:hidden',
                                   )}
                                 >
                                   <Scale className="size-3.5" aria-hidden />
@@ -527,12 +510,12 @@ function Builder({
             </table>
           </div>
           <p className="text-[13px] text-ink-muted">
-            Day 1 is the start date you pick when assigning. {workoutCount} workouts in total; empty
-            days are rest days. A yellow outline marks a weigh-in day.
+            Day 1 is the start date you pick when assigning. {workoutCount} workouts in total;
+            dashed days are rest days. The scale marks a weigh-in day.
           </p>
         </section>
 
-        <div className="flex flex-col gap-6 xl:sticky xl:top-8">
+        <div className="flex flex-col gap-6 xl:col-start-1">
           <Card>
             <h2 className="mb-4 font-bold text-[17px]">Settings</h2>
             <div className="flex flex-col gap-4">

@@ -1,4 +1,4 @@
-import { ApiError, exercisesQuery } from '@project180/client'
+import { ApiError, exercisesQuery, putExercise } from '@project180/client'
 import { type Exercise, exercisePhotos } from '@project180/shared'
 import { Button, ConfirmDialog, cn, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -116,7 +116,8 @@ export function ExercisePhotos({ exercise }: { exercise: Exercise }) {
       if (finish) form.set('finish', await shrink(finish))
       return send(`/exercises/${exercise.id}/photos`, { method: 'POST', body: form })
     },
-    onSuccess: async () => {
+    onSuccess: (saved) => {
+      if (saved) putExercise(queryClient, saved)
       void refresh()
       setPicking(false)
       setStart(null)
@@ -132,7 +133,8 @@ export function ExercisePhotos({ exercise }: { exercise: Exercise }) {
   })
   const remove = useMutation({
     mutationFn: () => send(`/exercises/${exercise.id}/photos`, { method: 'DELETE' }),
-    onSuccess: async () => {
+    onSuccess: (saved) => {
+      if (saved) putExercise(queryClient, saved)
       void refresh()
       setConfirmRemove(false)
       toast({ title: 'Photos removed', description: 'Clients see the form cue instead.' })

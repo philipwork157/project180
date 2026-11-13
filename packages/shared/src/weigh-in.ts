@@ -64,22 +64,82 @@ export function weightChange(fromKg: number, toKg: number): string {
 export interface AppNotification {
   /** Stable per thing and day, so "seen" can be remembered. */
   id: string
-  kind: 'weigh_in' | 'workout'
+  kind: 'weigh_in' | 'workout' | 'program' | 'feedback'
   title: string
   body: string
+  /** Feedback: the workout it's on. */
+  sessionId?: number
+}
+
+/** News about a program stays in the list this many days. */
+export const PROGRAM_NEWS_DAYS = 7
+
+/** "Monday 16 November", for a YYYY-MM-DD day. */
+function longDay(day: string): string {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  })
+}
+
+/** What the bell needs to know about the program someone is on. */
+export interface ProgramNews {
+  enrollmentId: number
+  programName: string
+  startDate: string
+  /** When it was assigned, and when their coach last brought changes to it (ISO moments). */
+  assignedAt: string
+  updatedAt: string | null
+  coachName: string | null
+}
+
+/** A new program, or changes to it, from the last few days. Newest news only. */
+function programNotification(p: ProgramNews, today: string): AppNotification | null {
+  const coach = p.coachName?.split(' ')[0] || 'Your coach'
+  const recent = (iso: string) => {
+    const days = daysBetween(iso.slice(0, 10), today)
+    return days >= -1 && days <= PROGRAM_NEWS_DAYS
+  }
+  // Changed at least a minute after it was assigned (assigning also stamps the copy).
+  const changed =
+    p.updatedAt !== null && Date.parse(p.updatedAt) - Date.parse(p.assignedAt) > 60_000
+  if (changed && p.updatedAt && recent(p.updatedAt)) {
+    return {
+      id: `program-update:${p.enrollmentId}:${p.updatedAt}`,
+      kind: 'program',
+      title: 'Your program was updated',
+      body: `${coach} made changes to ${p.programName}. Have a look at what's coming up.`,
+    }
+  }
+  if (!recent(p.assignedAt)) return null
+  return {
+    id: `program:${p.enrollmentId}`,
+    kind: 'program',
+    title: `New program: ${p.programName}`,
+    body:
+      p.startDate > today
+        ? `${coach} set it up for you. It starts on ${longDay(p.startDate)}.`
+        : `${coach} set it up for you. Your plan is ready.`,
+  }
 }
 
 /**
- * The notifications list in the phone app: things to do today. Worked out from the plan, so
- * they appear and clear themselves (weigh in, and the weigh-in notification goes away).
+ * The notifications list in the phone app: things to do today, and news about your program.
+ * Worked out from the plan, so they appear and clear themselves (weigh in, and the weigh-in
+ * notification goes away; program news drops off after a week).
  */
 export function appNotifications(input: {
   today: string
   weighIn: WeighInStatus | null
   todayWorkout: Pick<PlanDay, 'date' | 'workoutName' | 'state'> | null
   workoutInProgress: boolean
+  program?: ProgramNews | null
 }): AppNotification[] {
   const list: AppNotification[] = []
+  const news = input.program ? programNotification(input.program, input.today) : null
+  if (news) list.push(news)
   const w = input.weighIn
   if (w && !w.done) {
     const late = daysBetween(w.date, input.today)

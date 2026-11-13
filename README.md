@@ -19,21 +19,21 @@ Create your admin account(s) with `bun run admin:create` (it asks for name, emai
 
 The local database lives in `.wrangler/state` at the repo root. Locally the phone app runs the API and database; the admin dev server forwards `/api` to it, so start them together with `bun run dev`.
 
-Each app has a `.dev.vars` with local secrets (already created, not committed). See `.dev.vars.example` in each app. The apps find each other through `VITE_ADMIN_URL` / `VITE_APP_URL` in their `.env.*` files.
+Each app has a `.dev.vars` with local secrets (already created, not committed). See `.dev.vars.example` in each app. The admin finds the phone app (for exercise photos and the "Open the phone app" link) through `VITE_APP_URL` in its `.env.*` files; the phone app never links to the admin.
 
 To try it on your phone, run `bun run dev -- --host` and open your Mac's IP on port 5173 on the same Wi-Fi. Installing to the home screen needs HTTPS, so use the deployed site for that.
 
 ## Everyday commands
 
-| Command               | What it does                                                                  |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `bun run dev`         | App + API + local database, with hot reload                                   |
-| `bun run check`       | Biome lint, TypeScript, unit and API tests                                    |
-| `bun run test`        | Unit tests (shared) and API tests (Workers runtime + D1)                      |
-| `bun run e2e`         | Playwright on a phone-sized screen (`bunx playwright install chromium` first) |
-| `bun run format`      | Format and fix with Biome                                                     |
-| `bun run db:generate` | New migration after changing `packages/db/src/schema`                         |
-| `bun run db:migrate`  | Apply migrations locally                                                      |
+| Command               | What it does                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| `bun run dev`         | App + API + local database, with hot reload                                              |
+| `bun run check`       | Biome lint, TypeScript, unit and API tests                                               |
+| `bun run test`        | Unit tests (shared) and API tests (Workers runtime + D1)                                 |
+| `bun run e2e`         | Playwright: the phone app, then the dashboard (`bunx playwright install chromium` first) |
+| `bun run format`      | Format and fix with Biome                                                                |
+| `bun run db:generate` | New migration after changing `packages/db/src/schema`                                    |
+| `bun run db:migrate`  | Apply migrations locally                                                                 |
 
 ## Accounts, coaches and clients
 
@@ -126,7 +126,7 @@ A full copy of the app on Cloudflare for testing, with its own Workers and its o
 | Admin     | `project180-admin-dev` → https://admin-dev.project180.co.za | `project180-admin` → https://admin.project180.co.za |
 | Database  | `project180-db-dev`                                         | `project180-db`                                     |
 
-The addresses are Cloudflare custom domains (`routes` in `apps/*/wrangler.jsonc`): `project180.co.za` must be a zone in the same Cloudflare account (its nameservers pointed at Cloudflare). Wrangler creates the DNS records and certificates on deploy, and stops if a record with the same name already exists, so delete any old `dev`, `admin-dev` (or, for live, root and `admin`) records first. Each address is set in three places: `routes`, `vars.BETTER_AUTH_URL` and the other app's `.env.dev` / `.env.production`.
+The addresses are Cloudflare custom domains (`routes` in `apps/*/wrangler.jsonc`): `project180.co.za` must be a zone in the same Cloudflare account (its nameservers pointed at Cloudflare). Wrangler creates the DNS records and certificates on deploy, and stops if a record with the same name already exists, so delete any old `dev`, `admin-dev` (or, for live, root and `admin`) records first. Each address is set in `routes` and `vars.BETTER_AUTH_URL`; the phone app's address is also in the admin's `.env.dev` / `.env.production` (the phone app never links to the admin).
 
 **One-time setup**
 
@@ -170,6 +170,22 @@ The live addresses (project180.co.za and admin.project180.co.za) are already set
 Every push runs `bun run check` on GitHub (`.github/workflows/check.yml`).
 
 The Workers Paid plan ($5/month) is recommended: password hashing can exceed the free plan's CPU limit per request.
+
+## Push notifications
+
+Clients can turn on notifications under Profile in the phone app. They then hear about a new or changed program even when the app is closed; the bell inside the app shows the same news either way.
+
+- **Android (Chrome):** works in the browser and in the installed app.
+- **iPhone / iPad:** iOS 16.4 or later, and only from the app added to the Home Screen (Share, then "Add to Home Screen"). Safari itself can't.
+- Nothing is pushed until a key pair is set. Make one pair, once, and give the same pair to both Workers (the admin sends the pushes when a coach assigns a program):
+
+```bash
+bunx web-push generate-vapid-keys
+cd apps/app   && bunx wrangler secret put VAPID_PUBLIC_KEY --env dev && bunx wrangler secret put VAPID_PRIVATE_KEY --env dev
+cd ../admin   && bunx wrangler secret put VAPID_PUBLIC_KEY --env dev && bunx wrangler secret put VAPID_PRIVATE_KEY --env dev
+```
+
+Leave out `--env dev` for the live site. Keep the pair: changing it signs every phone out of notifications. Locally, put the pair in both `.dev.vars` files, but note the dev server has no service worker, so test on the deployed dev site.
 
 ## Layout
 

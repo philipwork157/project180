@@ -60,7 +60,7 @@ export function PersonActivityPanel({
   const signOutOne = useMutation({
     mutationFn: (sessionId: number) =>
       api(`/admin/users/${userId}/sessions/${sessionId}`, { method: 'DELETE' }),
-    onSuccess: async () => {
+    onSuccess: () => {
       void refresh()
       setConfirm(null)
       toast({
@@ -73,7 +73,7 @@ export function PersonActivityPanel({
   const signOutAll = useMutation({
     mutationFn: () =>
       api<{ signedOut: number }>(`/admin/users/${userId}/sign-out-everywhere`, { method: 'POST' }),
-    onSuccess: async ({ signedOut }) => {
+    onSuccess: ({ signedOut }) => {
       void refresh()
       setConfirm(null)
       toast({

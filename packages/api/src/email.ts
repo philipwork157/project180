@@ -18,7 +18,7 @@ export type EmailResult =
   | { status: 'logged'; to: string }
   | { status: 'failed'; to: string; error: string }
 
-const escapeHtml = (v: string) =>
+export const escapeHtml = (v: string) =>
   v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const utf8 = new TextEncoder()

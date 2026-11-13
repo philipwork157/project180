@@ -6,11 +6,11 @@ import {
   weighInStatus,
   weightChange,
 } from '@project180/shared'
-import { Button, cn } from '@project180/ui'
+import { Button, cn, Input } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Minus, Plus, Scale } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Sheet } from './sheet'
 
 /** Is a weigh-in due today (or recently missed)? From the plan and the weights already logged. */
@@ -177,6 +177,7 @@ function WeighInForm({
   onDone: () => void
 }) {
   const last = status?.weightKg ?? status?.previous?.weightKg ?? null
+  const inputId = useId()
   const [value, setValue] = useState(status?.weightKg != null ? String(status.weightKg) : '')
   const save = useLogWeight(onDone)
   const weight = Number.parseFloat(value.replace(',', '.'))
@@ -213,18 +214,23 @@ function WeighInForm({
         >
           <Minus className="size-6" aria-hidden />
         </button>
-        <label className="flex min-w-0 items-baseline justify-center gap-2 rounded-lg bg-surface-raised px-4 py-3 ring-1 ring-border-strong ring-inset focus-within:ring-2 focus-within:ring-brand">
+        <label
+          htmlFor={inputId}
+          className="flex min-w-0 items-baseline justify-center gap-2 rounded-lg bg-surface-raised px-4 py-3 ring-1 ring-border-strong ring-inset focus-within:ring-2 focus-within:ring-brand"
+        >
           <span className="sr-only">Body weight in kg</span>
-          <input
+          <Input
+            id={inputId}
             inputMode="decimal"
             enterKeyHint="done"
             autoComplete="off"
-            // biome-ignore lint/a11y/noAutofocus: the sheet opens only to type this one number
+            // The sheet opens only to type this one number.
             autoFocus
             placeholder={last != null ? formatWeight(last) : '0.0'}
             value={value}
             onChange={(e) => setValue(e.target.value.replace(/[^\d.,]/g, ''))}
-            className="metric w-[5ch] min-w-0 bg-transparent text-center text-[44px] text-ink leading-none outline-none placeholder:text-ink-muted/50"
+            // The label around it draws the box; the input is just the big number.
+            className="metric h-auto w-[5ch] min-w-0 bg-transparent px-0 text-center text-[44px] leading-none ring-0 focus:ring-0 placeholder:text-ink-muted/50"
           />
           <span className="font-bold text-[17px] text-ink-muted">kg</span>
         </label>

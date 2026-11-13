@@ -2,7 +2,7 @@ import type { Db } from '@project180/db'
 import type { Me } from '@project180/shared'
 import type { Auth } from './auth'
 
-/** Worker bindings: see apps/web/wrangler.jsonc and .dev.vars. */
+/** Worker bindings: see apps/app/wrangler.jsonc, apps/admin/wrangler.jsonc and .dev.vars. */
 export interface Bindings {
   DB: D1Database
   BETTER_AUTH_SECRET: string
@@ -21,6 +21,14 @@ export interface Bindings {
   EMAIL_REDIRECT_TO?: string
   /** YouTube Data API v3 key, for "how to" video search inside the app. Optional. */
   YOUTUBE_API_KEY?: string
+  /**
+   * Push notifications (Web Push "VAPID" key pair, from `bunx web-push generate-vapid-keys`).
+   * Without both, nothing is pushed and the app hides the switch.
+   */
+  VAPID_PUBLIC_KEY?: string
+  VAPID_PRIVATE_KEY?: string
+  /** Who the push services can contact about our pushes, e.g. "mailto:hello@project180.co.za". */
+  VAPID_SUBJECT?: string
   /** Uploaded photos (R2). Without it, uploading answers 503. */
   MEDIA?: R2Bucket
   /** Days without use before a sign-in expires (renewed while in use). App 30, admin 7. */

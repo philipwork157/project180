@@ -27,6 +27,7 @@ import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { assertCanEditItem, libraryOnly, visibleTo } from '../library'
 import { requireAdmin, requireUser } from '../middleware'
+import { pushLater } from '../push'
 import { programImpact, purgeProgram } from '../purge'
 import {
   clientNames,
@@ -562,6 +563,16 @@ export const programRoutes = new Hono<AppEnv>()
     if (targets.length !== new Set(enrollmentIds).size) notFound('Enrollment not found')
     for (const t of targets) await managedPerson(db, user, t.userId)
     for (const t of targets) await syncClientCopy(db, t.programId, user.id)
+    await pushLater(
+      c,
+      targets.map((t) => t.userId),
+      {
+        title: 'Your program was updated',
+        body: `${user.name.split(' ')[0]} made changes to ${row.name}.`,
+        url: '/calendar',
+        tag: 'program',
+      },
+    )
     return c.json({ copies: await programCopies(db, user, row.id) })
   })
   .get('/:id/impact', async (c) => {
@@ -574,7 +585,7 @@ export const programRoutes = new Hono<AppEnv>()
     const id = parseId(c.req.param('id'))
     const existing = await findVisibleProgram(c.var.db, c.var.user, id)
     await assertCanEditItem(c.var.db, c.var.user, existing)
-    await purgeProgram(c.var.db, c.var.user, id)
+    await purgeProgram(c.var.db, id)
     return c.body(null, 204)
   })
   .post('/:id/restore', async (c) => {

@@ -3,6 +3,8 @@ import {
   bodyCheckins,
   type Db,
   enrollments,
+  programs,
+  pushSubscriptions,
   sessions,
   users,
   workoutExercises,
@@ -13,19 +15,27 @@ import {
   buildProgramCalendar,
   choosePasswordInput,
   clientProfileInput,
+  feedbackReadInput,
   heartbeatInput,
+  type PushSetup,
+  pushSubscriptionInput,
+  pushUnsubscribeInput,
+  isoDate,
   type MyPlan,
   todayIn,
   updateProfileInput,
 } from '@project180/shared'
 import { and, asc, count, desc, eq, inArray, ne, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/sqlite-core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { inChunks } from '../batch'
 import type { AppEnv } from '../env'
 import { parseBody } from '../errors'
+import { markFeedbackRead, unreadFeedback } from '../feedback'
 import { requireUser } from '../middleware'
+import { isPushEndpoint, pushConfigured } from '../push'
 import { loadProfile, saveProfile } from '../profiles'
 import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
@@ -34,7 +44,7 @@ import { loadProgramDays } from './programs'
 
 const checkinInput = z.object({
   clientUuid: z.uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: isoDate,
   weightKg: z.number().min(20).max(400),
   notes: z.string().trim().max(500).nullish(),
 })
@@ -72,7 +82,8 @@ export async function buildPlans(
   if (active.length === 0) return result
 
   // Independent reads: run them together (each D1 call is a round trip).
-  const [dayMaps, done] = await Promise.all([
+  const assigner = alias(users, 'assigner')
+  const [dayMaps, done, assignments] = await Promise.all([
     inChunks([...new Set(active.map((e) => e.programId))], async (ids) => [
       await loadProgramDays(db, ids),
     ]),
@@ -95,7 +106,25 @@ export async function buildPlans(
           )
           .orderBy(asc(workoutSessions.startedAt)),
     ),
+    // When each was assigned, by whom, and when their coach last changed their copy.
+    inChunks(
+      active.map((e) => e.id),
+      (ids) =>
+        db
+          .select({
+            id: enrollments.id,
+            assignedAt: enrollments.createdAt,
+            // Saving their copy, or bringing library changes to it, both touch this.
+            changedAt: programs.updatedAt,
+            coachName: assigner.name,
+          })
+          .from(enrollments)
+          .innerJoin(programs, eq(programs.id, enrollments.programId))
+          .leftJoin(assigner, eq(assigner.id, enrollments.assignedBy))
+          .where(inArray(enrollments.id, ids)),
+    ),
   ])
+  const assignedOf = new Map(assignments.map((a) => [a.id, a]))
   const daysOf = new Map(dayMaps.flatMap((m) => [...m]))
   const doneOf = new Map<number, typeof done>()
   for (const d of done) {
@@ -157,8 +186,14 @@ export async function buildPlans(
       const w = d.workoutId === null ? undefined : workoutOf.get(d.workoutId)
       if (w) lookup[w.id] = { ...w, exerciseCount: countOf.get(w.id) ?? 0 }
     }
+    const assignment = assignedOf.get(enrollment.id)
     result.set(person.id, {
       enrollment,
+      assigned: {
+        at: (assignment?.assignedAt ?? new Date(0)).toISOString(),
+        updatedAt: assignment?.changedAt.toISOString() ?? null,
+        coachName: assignment?.coachName ?? null,
+      },
       today,
       workouts: lookup,
       days: calendar.map((d) => ({
@@ -256,14 +291,62 @@ export const meRoutes = new Hono<AppEnv>()
     const weeksBack = Math.min(Math.max(Number(c.req.query('weeks') ?? 8) || 8, 1), 52)
     return c.json({ stats: await buildStats(db, user, weeksBack) })
   })
+  /** Your coach's likes and comments you haven't seen yet, newest first. */
+  .get('/feedback', async (c) =>
+    c.json({ feedback: await unreadFeedback(c.var.db, c.var.user.id) }),
+  )
+  /** You've seen these (opened the workout they're on). */
+  .post('/feedback/read', async (c) => {
+    const { ids } = await parseBody(c.req.raw, feedbackReadInput)
+    return c.json({ read: await markFeedbackRead(c.var.db, c.var.user.id, ids) })
+  })
+  /** Can this site push, and with which key? (The app hides the switch when it can't.) */
+  .get('/push', (c) => {
+    const setup: PushSetup = {
+      configured: pushConfigured(c.env),
+      publicKey: pushConfigured(c.env) ? (c.env.VAPID_PUBLIC_KEY ?? null) : null,
+    }
+    return c.json(setup)
+  })
+  /** This phone turned notifications on. A phone belongs to whoever turned them on last. */
+  .put('/push', async (c) => {
+    const { db, user } = c.var
+    const input = await parseBody(c.req.raw, pushSubscriptionInput)
+    if (!isPushEndpoint(input.endpoint))
+      throw new HTTPException(400, { message: 'Not a push service address' })
+    const values = { userId: user.id, p256dh: input.keys.p256dh, auth: input.keys.auth }
+    await db
+      .insert(pushSubscriptions)
+      .values({ endpoint: input.endpoint, ...values })
+      .onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: values })
+    return c.body(null, 204)
+  })
+  /** This phone turned them off (or is signing out). Only ever your own. */
+  .delete('/push', async (c) => {
+    const { db, user } = c.var
+    const { endpoint } = await parseBody(c.req.raw, pushUnsubscribeInput)
+    await db
+      .delete(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.endpoint, endpoint), eq(pushSubscriptions.userId, user.id)))
+    return c.body(null, 204)
+  })
   /** Log body weight for a day. Logging the same day again replaces it. */
   .put('/checkins', async (c) => {
     const { db, user } = c.var
     const input = await parseBody(c.req.raw, checkinInput)
-    const [active] = await db
-      .select({ id: enrollments.id })
-      .from(enrollments)
-      .where(and(eq(enrollments.userId, user.id), eq(enrollments.status, 'active')))
+    const [[active], [clash]] = await Promise.all([
+      db
+        .select({ id: enrollments.id })
+        .from(enrollments)
+        .where(and(eq(enrollments.userId, user.id), eq(enrollments.status, 'active'))),
+      db
+        .select({ userId: bodyCheckins.userId, date: bodyCheckins.date })
+        .from(bodyCheckins)
+        .where(eq(bodyCheckins.clientUuid, input.clientUuid)),
+    ])
+    // The same id already used (by anyone) for another day: a clear 409, never a 500.
+    if (clash && (clash.userId !== user.id || clash.date !== input.date))
+      throw new HTTPException(409, { message: 'Weigh-in id in use' })
     await db
       .insert(bodyCheckins)
       .values({

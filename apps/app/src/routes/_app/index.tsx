@@ -52,15 +52,7 @@ function TodayPage() {
         overline={dateLabel}
         title={`${greeting(new Date().getHours())}, ${firstName}`}
         action={
-          <NotificationsButton
-            onAction={(n) =>
-              n.kind === 'weigh_in'
-                ? setWeighing(true)
-                : document
-                    .getElementById('today-workout')
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            }
-          />
+          <NotificationsButton />
         }
       />
 

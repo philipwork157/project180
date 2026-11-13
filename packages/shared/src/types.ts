@@ -2,6 +2,7 @@ import type {
   Equipment,
   ExerciseCategory,
   ExperienceLevel,
+  FeedbackKind,
   Goal,
   GroupKind,
   MuscleGroup,
@@ -233,6 +234,8 @@ export interface PlanDay {
 
 export interface MyPlan {
   enrollment: EnrollmentSummary
+  /** When their coach put them on this program, and last changed their copy (for the bell). */
+  assigned: { at: string; updatedAt: string | null; coachName: string | null }
   today: string
   days: PlanDay[]
   workouts: Record<
@@ -319,6 +322,27 @@ export interface SessionDetail {
   sets: LoggedSet[]
   /** Last completed session's sets per exercise, for "last time" hints and pre-filling. */
   previous: Record<number, PreviousSet[]>
+}
+
+/** A coach's like or comment on a workout (exerciseId null) or one exercise in it. */
+export interface SessionFeedback {
+  id: number
+  sessionId: number
+  exerciseId: number | null
+  kind: FeedbackKind
+  body: string | null
+  /** Null when the coach's account was removed. */
+  authorId: number | null
+  authorName: string | null
+  createdAt: string
+  /** When the client saw it; null while it's new. */
+  readAt: string | null
+}
+
+/** Unread feedback for the client's notifications, with what it was on. */
+export interface FeedbackNews extends SessionFeedback {
+  workoutName: string | null
+  exerciseName: string | null
 }
 
 export interface SessionSummary {
@@ -430,7 +454,15 @@ export interface AdminOverview {
   }>
   /** Latest finished workouts. */
   recent: Array<SessionSummary & { userId: number; name: string }>
+  /** Workouts clients are doing right now (started in the last 4 hours, not finished). */
+  live: Array<SessionSummary & { userId: number; name: string }>
   library: { exercises: number; workouts: number; programs: number }
+}
+
+/** Whether this site can push, and the key a phone needs to subscribe. */
+export interface PushSetup {
+  configured: boolean
+  publicKey: string | null
 }
 
 /** One YouTube result for "how to do this exercise". */

@@ -397,7 +397,7 @@ export const workoutRoutes = new Hono<AppEnv>()
     await findVisible(c.var.db, c.var.user, id)
     return c.json({ impact: await workoutImpact(c.var.db, c.var.user, id) })
   })
-  /** Delete for good, with its logged history. Program days using it become rest days. */
+  /** Delete for good, with its logged history. Refused (409) while any program still uses it. */
   .delete('/:id/permanent', async (c) => {
     const id = parseId(c.req.param('id'))
     const existing = await findVisible(c.var.db, c.var.user, id)

@@ -12,6 +12,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   ArrowRight,
   CalendarRange,
+  ChevronRight,
   CircleAlert,
   Dumbbell,
   KeyRound,
@@ -24,6 +25,7 @@ import { type ReactNode, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { PageHeader } from '../../components/page-header'
 import { SwapsLine } from '../../components/swaps-line'
+import { type OpenWorkout, WorkoutReviewDrawer } from '../../components/workout-review'
 
 export const Route = createFileRoute('/_dash/')({
   component: Overview,
@@ -35,7 +37,10 @@ function Overview() {
   const { me } = Route.useRouteContext()
   const overview = useQuery(adminOverviewQuery)
   const [assignOpen, setAssignOpen] = useState(false)
+  const [review, setReview] = useState<OpenWorkout | null>(null)
   const o = overview.data
+  const open = (s: { id: number; userId: number; name: string }) =>
+    setReview({ userId: s.userId, sessionId: s.id, name: s.name })
 
   return (
     <>
@@ -65,6 +70,8 @@ function Overview() {
       ) : (
         <div className="flex flex-col gap-5">
           {o.clients.total === 0 && <GettingStarted library={o.library} />}
+
+          {o.live.length > 0 && <TrainingNow items={o.live} onOpen={open} />}
 
           <section
             aria-label="This week"
@@ -123,13 +130,15 @@ function Overview() {
           </div>
 
           <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
-            <RecentWorkouts items={o.recent} />
+            <RecentWorkouts items={o.recent} onOpen={open} />
             <WhoIsOnWhat />
           </div>
 
           <LibraryStrip library={o.library} />
         </div>
       )}
+
+      <WorkoutReviewDrawer workout={review} onClose={() => setReview(null)} />
 
       <Drawer
         open={assignOpen}
@@ -310,36 +319,106 @@ function Attention({ items }: { items: AdminOverview['attention'] }) {
   )
 }
 
-function RecentWorkouts({ items }: { items: AdminOverview['recent'] }) {
+type OverviewWorkout = AdminOverview['recent'][number]
+
+const liveLine = (s: OverviewWorkout) =>
+  `Started ${timeAgo(s.startedAt).toLowerCase()} · ${s.setCount} ${s.setCount === 1 ? 'set' : 'sets'} so far`
+
+const doneLine = (s: OverviewWorkout) =>
+  [
+    timeAgo(s.startedAt),
+    s.durationSeconds ? durationShort(s.durationSeconds) : null,
+    s.volumeKg ? `${formatNumber(s.volumeKg)} kg` : null,
+    s.feeling ? `felt ${FEELINGS[s.feeling]?.toLowerCase()}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+/** A workout row you can tap to see it set by set. */
+function WorkoutRow({
+  s,
+  onOpen,
+  live = false,
+}: {
+  s: OverviewWorkout
+  onOpen: (s: OverviewWorkout) => void
+  live?: boolean
+}) {
   return (
-    <SectionCard title="Latest workouts" description="What clients finished most recently.">
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(s)}
+        className="-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-3 text-left transition hover:bg-surface-raised active:scale-[0.99]"
+      >
+        <span
+          className={cn(
+            'grid size-9 shrink-0 place-items-center rounded-full font-bold text-[14px]',
+            live ? 'bg-clay/20 text-clay-text' : 'bg-brand-soft text-brand-text',
+          )}
+        >
+          {s.name.charAt(0).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-bold text-[14px]">
+            {s.name}{' '}
+            <span className="font-semibold text-ink-muted">· {s.workoutName ?? 'Workout'}</span>
+          </span>
+          <span className="block truncate text-[13px] text-ink-muted">
+            {live ? liveLine(s) : doneLine(s)}
+          </span>
+          <SwapsLine swaps={s.swaps} className="mt-1" />
+        </span>
+        <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden />
+      </button>
+    </li>
+  )
+}
+
+function TrainingNow({
+  items,
+  onOpen,
+}: {
+  items: OverviewWorkout[]
+  onOpen: (s: OverviewWorkout) => void
+}) {
+  return (
+    <SectionCard
+      title="Training now"
+      description="Tap to follow along: sets show up as they’re ticked."
+      action={
+        <span className="relative mt-1.5 flex size-3" aria-hidden>
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-clay opacity-50" />
+          <span className="relative inline-flex size-3 rounded-full bg-clay" />
+        </span>
+      }
+    >
+      <ul className="-my-3 flex flex-col divide-y divide-border">
+        {items.map((s) => (
+          <WorkoutRow key={s.id} s={s} onOpen={onOpen} live />
+        ))}
+      </ul>
+    </SectionCard>
+  )
+}
+
+function RecentWorkouts({
+  items,
+  onOpen,
+}: {
+  items: OverviewWorkout[]
+  onOpen: (s: OverviewWorkout) => void
+}) {
+  return (
+    <SectionCard title="Latest workouts" description="Tap one to see what they did, set by set.">
       {items.length === 0 ? (
         <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
           Nothing logged yet.
         </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border">
+        <ul className="-my-3 flex flex-col divide-y divide-border">
           {items.map((s) => (
-            <li key={s.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft font-bold text-[14px] text-brand-text">
-                {s.name.charAt(0).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-bold text-[14px]">
-                  {s.name}{' '}
-                  <span className="font-semibold text-ink-muted">
-                    · {s.workoutName ?? 'Workout'}
-                  </span>
-                </span>
-                <span className="block truncate text-[13px] text-ink-muted">
-                  {timeAgo(s.startedAt)}
-                  {s.durationSeconds ? ` · ${durationShort(s.durationSeconds)}` : ''}
-                  {s.volumeKg ? ` · ${formatNumber(s.volumeKg)} kg` : ''}
-                  {s.feeling ? ` · felt ${FEELINGS[s.feeling]?.toLowerCase()}` : ''}
-                </span>
-                <SwapsLine swaps={s.swaps} className="mt-1" />
-              </span>
-            </li>
+            <WorkoutRow key={s.id} s={s} onOpen={onOpen} />
           ))}
         </ul>
       )}

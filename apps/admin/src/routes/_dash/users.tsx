@@ -10,6 +10,7 @@ import {
   ACTIVE_NOW_MS,
   type DeletePersonResult,
   generateTempPassword,
+  isClient,
   isOwner,
   isStaff,
   ROLE_LABELS,
@@ -85,7 +86,7 @@ function UsersPage() {
 
   const all = users.data ?? []
   // Clients only: staff (you included) are on the Team tab, never in a client list.
-  const clients = all.filter((u) => u.role === 'member')
+  const clients = all.filter((u) => isClient(u.role))
   const mine = clients.filter((u) => u.coachId === me.id)
   const team = all.filter((u) => isStaff(u.role))
   const clientCount = (coachId: number) => clients.filter((c) => c.coachId === coachId).length
@@ -192,12 +193,12 @@ function UsersPage() {
                 </p>
                 <p className="truncate font-semibold text-[13px] text-ink-muted">
                   {u.email}
-                  {u.role === 'member' && u.coachId !== me.id && (
+                  {isClient(u.role) && u.coachId !== me.id && (
                     <> · coached by {u.coachName ?? 'nobody yet'}</>
                   )}
                 </p>
               </div>
-              {owner && u.role === 'member' && <CoachPicker user={u} />}
+              {owner && isClient(u.role) && <CoachPicker user={u} />}
               <Link
                 to="/users/$userId"
                 params={{ userId: String(u.id) }}
@@ -219,9 +220,9 @@ function UsersPage() {
                 <DeletePersonButton user={u} clients={clientCount(u.id)} />
               )}
             </div>
-            {u.role === 'member' && <ProfileSummary userId={u.id} name={u.name} />}
+            {isClient(u.role) && <ProfileSummary userId={u.id} name={u.name} />}
             <PersonActivityPanel userId={u.id} name={u.name} isMe={u.id === me.id} />
-            {u.role === 'member' ? (
+            {isClient(u.role) ? (
               <PersonProgressPanel
                 userId={u.id}
                 name={u.name}
@@ -336,9 +337,12 @@ function CoachPicker({ user }: { user: UserSummary }) {
   const change = useMutation({
     mutationFn: (coachId: number) =>
       api(`/admin/users/${user.id}/coach`, { method: 'PATCH', body: { coachId } }),
-    onSuccess: async (_, coachId) => {
-      void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
+    onSuccess: (_, coachId) => {
       const name = coaches.data?.find((c) => c.id === coachId)?.name
+      queryClient.setQueryData(usersQuery.queryKey, (list) =>
+        list?.map((u) => (u.id === user.id ? { ...u, coachId, coachName: name ?? null } : u)),
+      )
+      void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
       toast({ title: 'Coach changed', description: `${user.name} is now coached by ${name}.` })
     },
     onError: (err) =>

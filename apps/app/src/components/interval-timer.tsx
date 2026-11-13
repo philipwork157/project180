@@ -161,7 +161,7 @@ export function IntervalTimer({
 
   const working = step?.phase === 'work'
   const resting = step?.phase === 'rest'
-  const color = done || working ? '#b6e63b' : resting ? '#7aa2c2' : '#f5f3ed'
+  const color = done || working ? 'var(--lime)' : resting ? 'var(--steel)' : '#f5f3ed'
   const r = 120
   const c = 2 * Math.PI * r
   const frac = step && step.seconds > 0 ? left / step.seconds : 0

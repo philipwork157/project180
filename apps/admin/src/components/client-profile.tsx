@@ -411,8 +411,8 @@ function ProfileDrawer({
   const save = useMutation({
     mutationFn: () =>
       api(`/admin/users/${userId}/profile`, { method: 'PUT', body: draftToInput(draft) }),
-    onSuccess: async () => {
-      await Promise.all([
+    onSuccess: () => {
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: clientProfileQuery(userId).queryKey }),
         queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }),
       ])

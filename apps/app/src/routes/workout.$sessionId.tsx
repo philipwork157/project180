@@ -3,18 +3,27 @@ import {
   api,
   meQuery,
   planQuery,
+  rememberLocalOwner,
   sessionQuery,
   swapOptionsQuery,
 } from '@project180/client'
 import {
+  type Board,
+  buildBoard,
   type FinishResult,
+  failedSets,
   formatDuration,
   GROUP_KIND_LABELS,
   hrZone,
   MUSCLE_GROUP_LABELS,
   type PreviousSet,
   repsLabel,
+  reviveBoard,
   type SessionDetail,
+  type SetState,
+  setPayload,
+  toNumber,
+  uniqueExercises,
   WORKOUT_SECTION_LABELS,
   type WorkoutExerciseItem,
   type WorkoutGroup,
@@ -25,6 +34,7 @@ import {
   ConfirmDialog,
   cn,
   IconButton,
+  Input,
   MUSCLE_GROUP_TONE,
   Textarea,
 } from '@project180/ui'
@@ -59,75 +69,20 @@ export const Route = createFileRoute('/workout/$sessionId')({
     const me = await context.queryClient.ensureQueryData(meQuery)
     if (!me) throw redirect({ to: '/login' })
     if (me.mustChangePassword) throw redirect({ to: '/choose-password' })
+    // The sets typed here are kept on this phone for this person only.
+    rememberLocalOwner(me.id)
     return { me }
   },
   component: WorkoutPage,
 })
 
-interface SetState {
-  clientUuid: string
-  setNumber: number
-  weight: string
-  reps: string
-  seconds: string
-  /** Kilometres, for distance + time exercises. */
-  distance?: string
-  done: boolean
-  sync: 'idle' | 'saving' | 'failed'
-}
-
-type Board = Record<number, SetState[]>
-
 const storageKey = (id: number) => `project180-workout-${id}`
-
-function uniqueExercises(items: WorkoutExerciseItem[]) {
-  const seen = new Set<number>()
-  return items.filter((e) => {
-    if (seen.has(e.exerciseId)) return false
-    seen.add(e.exerciseId)
-    return true
-  })
-}
-
-/** Pre-fill every set from what's logged, then last time, then the targets. */
-function buildBoard(session: SessionDetail): Board {
-  const board: Board = {}
-  for (const ex of uniqueExercises(session.exercises)) {
-    // Warm-up exercises log warm-up sets; everything else logs working sets.
-    const warmUp = ex.section === 'warm_up'
-    const logged = session.sets.filter(
-      (s) => s.exerciseId === ex.exerciseId && s.isWarmup === warmUp,
-    )
-    const prev = session.previous[ex.exerciseId] ?? []
-    const count = Math.max(ex.targetSets, logged.length, 1)
-    board[ex.exerciseId] = Array.from({ length: count }, (_, i) => {
-      const n = i + 1
-      const l = logged.find((s) => s.setNumber === n)
-      const p = prev[i] ?? prev.at(-1)
-      // Per-set targets (12, 10, 10, 8) beat last time's reps; a range doesn't.
-      const reps =
-        l?.reps ?? ex.targetRepsPerSet?.[i] ?? p?.reps ?? ex.targetRepsMax ?? ex.targetRepsMin
-      const seconds = l?.durationSeconds ?? p?.durationSeconds ?? ex.targetSeconds
-      const metres = l?.distanceM ?? p?.distanceM ?? ex.targetDistanceM
-      return {
-        clientUuid: l?.clientUuid ?? crypto.randomUUID(),
-        setNumber: n,
-        weight: ex.bodyweight ? '' : ((l?.weightKg ?? p?.weightKg)?.toString() ?? ''),
-        reps: reps?.toString() ?? '',
-        seconds: seconds?.toString() ?? '',
-        distance: metres != null ? String(Math.round(metres) / 1000) : '',
-        done: Boolean(l),
-        sync: 'idle',
-      }
-    })
-  }
-  return board
-}
 
 function loadBoard(session: SessionDetail): Board {
   try {
     const raw = localStorage.getItem(storageKey(session.id))
-    if (raw) return JSON.parse(raw) as Board
+    // A save that was on its way when the app closed never finished: send it again.
+    if (raw) return reviveBoard(JSON.parse(raw) as Board)
   } catch {
     // Storage unavailable: start from the server's copy.
   }
@@ -216,21 +171,11 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
   const sendSet = useCallback(
     async (exerciseId: number, set: SetState) => {
       patchSet(exerciseId, set.clientUuid, { sync: 'saving' })
-      const km = toNumber(set.distance ?? '')
       try {
         await api(`/sessions/${session.id}/sets`, {
           method: 'PUT',
-          body: {
-            clientUuid: set.clientUuid,
-            exerciseId,
-            setNumber: set.setNumber,
-            // Warm-ups don't count towards volume or records.
-            isWarmup: warmUps.current.has(exerciseId),
-            weightKg: toNumber(set.weight),
-            reps: toInt(set.reps),
-            durationSeconds: toInt(set.seconds),
-            distanceM: km !== null ? Math.round(km * 1000) : null,
-          },
+          // Warm-ups don't count towards volume or records.
+          body: setPayload(exerciseId, set, warmUps.current.has(exerciseId)),
         })
         patchSet(exerciseId, set.clientUuid, { sync: 'idle' })
       } catch (err) {
@@ -256,9 +201,7 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
   // Gym signal is patchy: retry anything that failed every few seconds and when back online.
   useEffect(() => {
     const retry = () => {
-      for (const [exerciseId, sets] of Object.entries(boardRef.current)) {
-        for (const s of sets) if (s.done && s.sync === 'failed') void pushSet(Number(exerciseId), s)
-      }
+      for (const { exerciseId, set } of failedSets(boardRef.current)) void pushSet(exerciseId, set)
     }
     const id = setInterval(retry, 8000)
     window.addEventListener('online', retry)
@@ -341,9 +284,7 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
 
   /** Before finishing: retries sets that failed to save and waits for everything still sending. */
   async function flushSets() {
-    for (const [exerciseId, sets] of Object.entries(boardRef.current)) {
-      for (const s of sets) if (s.done && s.sync === 'failed') void pushSet(Number(exerciseId), s)
-    }
+    for (const { exerciseId, set } of failedSets(boardRef.current)) void pushSet(exerciseId, set)
     await Promise.all([...inflight.current])
   }
 
@@ -1131,7 +1072,7 @@ function NumberCell({
   onBlur: () => void
 }) {
   return (
-    <input
+    <Input
       aria-label={label}
       inputMode={decimal ? 'decimal' : 'numeric'}
       value={value}
@@ -1139,7 +1080,7 @@ function NumberCell({
       onFocus={(e) => e.target.select()}
       onChange={(e) => onChange(e.target.value.replace(',', '.').replace(/[^\d.]/g, ''))}
       onBlur={onBlur}
-      className="tabular h-12 w-full rounded-sm bg-surface-raised text-center font-bold font-display text-[22px] text-ink outline-none ring-1 ring-border ring-inset focus:ring-2 focus:ring-brand"
+      className="tabular h-12 px-0 text-center font-bold font-display text-[22px] ring-border"
     />
   )
 }
@@ -1282,14 +1223,4 @@ function useWakeLock() {
       void lock?.release()
     }
   }, [])
-}
-
-function toNumber(v: string): number | null {
-  const n = Number.parseFloat(v)
-  return Number.isFinite(n) ? n : null
-}
-
-function toInt(v: string): number | null {
-  const n = Number.parseInt(v, 10)
-  return Number.isFinite(n) ? n : null
 }

@@ -2,6 +2,7 @@
 // client_uuid is made on the phone so rows logged offline sync without duplicates.
 import {
   ENROLLMENT_STATUS,
+  FEEDBACK_KINDS,
   GROUP_KINDS,
   SESSION_STATUS,
   WORKOUT_SECTIONS,
@@ -145,6 +146,40 @@ export const setLogs = sqliteTable(
   ],
 )
 
+/**
+ * A coach's like or comment on a client's workout (exercise_id null) or one exercise in it.
+ * The client sees it on that workout and in their notifications until they've read it.
+ */
+export const sessionFeedback = sqliteTable(
+  'session_feedback',
+  {
+    id: id(),
+    sessionId: integer('session_id')
+      .notNull()
+      .references(() => workoutSessions.id, { onDelete: 'cascade' }),
+    exerciseId: integer('exercise_id').references(() => exercises.id),
+    // The coach who left it; kept (without a name) if their account is removed.
+    authorId: integer('author_id').references(() => users.id, { onDelete: 'set null' }),
+    kind: text('kind', { enum: FEEDBACK_KINDS }).notNull(),
+    body: text('body'),
+    createdAt: createdAt(),
+    readAt: timestamp('read_at'),
+  },
+  (t) => [
+    // A session's feedback, and the client's unread items (joined from their sessions).
+    index('session_feedback_session_idx').on(t.sessionId, t.readAt),
+    index('session_feedback_exercise_idx').on(t.exerciseId),
+    index('session_feedback_author_idx').on(t.authorId),
+    // One like per coach per exercise, and per whole workout.
+    uniqueIndex('session_feedback_exercise_like_uq')
+      .on(t.sessionId, t.authorId, t.exerciseId)
+      .where(sql`${t.kind} = 'like' and ${t.exerciseId} is not null`),
+    uniqueIndex('session_feedback_workout_like_uq')
+      .on(t.sessionId, t.authorId)
+      .where(sql`${t.kind} = 'like' and ${t.exerciseId} is null`),
+  ],
+)
+
 export const bodyCheckins = sqliteTable(
   'body_checkins',
   {
@@ -189,3 +224,20 @@ export const signInAttempts = sqliteTable('sign_in_attempts', {
   firstAt: timestamp('first_at').notNull(),
   lockedUntil: timestamp('locked_until'),
 })
+
+/**
+ * A phone (or browser) that turned notifications on: where its push service is and the keys to
+ * encrypt for it. One row per device; signing out on it, or the phone refusing a push, removes it.
+ */
+export const pushSubscriptions = sqliteTable(
+  'push_subscriptions',
+  {
+    id: id(),
+    userId: userId(),
+    endpoint: text('endpoint').notNull().unique(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('push_subscriptions_user_idx').on(t.userId)],
+)

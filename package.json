@@ -13,7 +13,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "e2e": "turbo run e2e --filter=@project180/app",
+    "e2e": "turbo run e2e --filter=@project180/app --filter=@project180/admin --concurrency=1",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "biome check . && turbo run typecheck test",

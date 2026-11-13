@@ -3,12 +3,13 @@ import { formatNumber, isStaff, type PersonStats, timeAgo } from '@project180/sh
 import { Card, cn, Field, Select, StatCard } from '@project180/ui'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, redirect } from '@tanstack/react-router'
-import { ArrowLeft, ArrowLeftRight, Trophy } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, ChevronRight, Trophy } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { Segmented } from '../../components/controls'
 import { PageHeader } from '../../components/page-header'
 import { Bars, NumbersTable, shortDay, TrendLine } from '../../components/progress-charts'
 import { SwapsLine } from '../../components/swaps-line'
+import { type OpenWorkout, WorkoutReviewDrawer } from '../../components/workout-review'
 
 export const Route = createFileRoute('/_dash/users_/$userId')({
   beforeLoad: ({ context }) => {
@@ -30,6 +31,7 @@ function PersonProgressPage() {
   const { me } = Route.useRouteContext()
   const userId = Number(Route.useParams().userId)
   const [range, setRange] = useState<Range>('12')
+  const [review, setReview] = useState<OpenWorkout | null>(null)
   const people = useQuery(usersQuery)
   const person = people.data?.find((u) => u.id === userId)
   // Changing the range keeps the last numbers on screen (dimmed) while the new ones load.
@@ -85,10 +87,16 @@ function PersonProgressPage() {
             <BodyWeightCard stats={stats.data} />
             <RecordsCard stats={stats.data} />
             <SwapsCard stats={stats.data} />
-            <RecentCard stats={stats.data} />
+            <RecentCard
+              stats={stats.data}
+              onOpen={(sessionId) =>
+                setReview({ userId, sessionId, name: isMe ? me.name : (person?.name ?? 'Client') })
+              }
+            />
           </div>
         </div>
       )}
+      <WorkoutReviewDrawer workout={review} onClose={() => setReview(null)} />
     </div>
   )
 }
@@ -370,26 +378,41 @@ function SwapsCard({ stats }: { stats: PersonStats }) {
   )
 }
 
-function RecentCard({ stats }: { stats: PersonStats }) {
+function RecentCard({
+  stats,
+  onOpen,
+}: {
+  stats: PersonStats
+  onOpen: (sessionId: number) => void
+}) {
   return (
     <Section title="Latest workouts">
       {stats.recent.length === 0 ? (
         <Empty>No finished workouts yet.</Empty>
       ) : (
-        <ul className="flex flex-col divide-y divide-border rounded-md bg-surface-raised">
+        <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-md bg-surface-raised">
           {stats.recent.map((s) => (
-            <li key={s.id} className="flex flex-col gap-1 px-4 py-3">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
-                  {s.workoutName ?? 'Workout'}
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() => onOpen(s.id)}
+                className="flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-border/40 active:scale-[0.99]"
+              >
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
+                      {s.workoutName ?? 'Workout'}
+                    </span>
+                    <span className="tabular font-semibold text-[13px] text-ink-muted">
+                      {timeAgo(s.startedAt)} · {s.setCount} {s.setCount === 1 ? 'set' : 'sets'}
+                      {s.volumeKg ? ` · ${formatNumber(Math.round(s.volumeKg))} kg` : ''}
+                      {s.feeling ? ` · felt ${FEELINGS[s.feeling]?.toLowerCase()}` : ''}
+                    </span>
+                  </span>
+                  <SwapsLine swaps={s.swaps} />
                 </span>
-                <span className="tabular font-semibold text-[13px] text-ink-muted">
-                  {timeAgo(s.startedAt)} · {s.setCount} {s.setCount === 1 ? 'set' : 'sets'}
-                  {s.volumeKg ? ` · ${formatNumber(Math.round(s.volumeKg))} kg` : ''}
-                  {s.feeling ? ` · felt ${FEELINGS[s.feeling]?.toLowerCase()}` : ''}
-                </span>
-              </div>
-              <SwapsLine swaps={s.swaps} />
+                <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden />
+              </button>
             </li>
           ))}
         </ul>

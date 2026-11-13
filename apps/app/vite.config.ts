@@ -38,6 +38,8 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
+        // Push notifications: the handlers live in public/push-sw.js.
+        importScripts: ['/push-sw.js'],
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         // Fonts: precache the Latin files only; the extra-character sets load if a name needs them.

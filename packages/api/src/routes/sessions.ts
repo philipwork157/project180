@@ -45,6 +45,7 @@ import { HTTPException } from 'hono/http-exception'
 import { insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { conflict, notFound, parseBody, parseId } from '../errors'
+import { loadFeedback } from '../feedback'
 import { iso, visibleTo } from '../library'
 import { requireUser } from '../middleware'
 import { completedBy, sessionSummaries } from '../sessions'
@@ -90,7 +91,38 @@ async function assertCanDoWorkout(db: Db, user: Me, workoutId: number) {
   if (!inPlan) notFound('Workout not found')
 }
 
-async function previousSets(db: Db, user: Me, sessionId: number, exerciseIds: number[]) {
+/**
+ * The enrollment (if given) is yours, and the program day (if given) is a day of that program,
+ * or of your current one. Otherwise a session could mark a day "done" in someone else's plan.
+ */
+async function assertOwnPlanDay(
+  db: Db,
+  user: Me,
+  enrollmentId: number | null,
+  programDayId: number | null,
+) {
+  if (enrollmentId === null && programDayId === null) return
+  const [enrollment] = await db
+    .select({ id: enrollments.id, programId: enrollments.programId })
+    .from(enrollments)
+    .where(
+      and(
+        eq(enrollments.userId, user.id),
+        enrollmentId === null ? eq(enrollments.status, 'active') : eq(enrollments.id, enrollmentId),
+      ),
+    )
+    .limit(1)
+  if (!enrollment)
+    notFound(enrollmentId === null ? 'Program day not found' : 'Enrollment not found')
+  if (programDayId === null) return
+  const [day] = await db
+    .select({ id: programDays.id })
+    .from(programDays)
+    .where(and(eq(programDays.id, programDayId), eq(programDays.programId, enrollment.programId)))
+  if (!day) notFound('Program day not found')
+}
+
+async function previousSets(db: Db, userId: number, sessionId: number, exerciseIds: number[]) {
   const previous: Record<number, PreviousSet[]> = {}
   if (exerciseIds.length === 0) return previous
   const rows = await db
@@ -107,7 +139,7 @@ async function previousSets(db: Db, user: Me, sessionId: number, exerciseIds: nu
     .innerJoin(workoutSessions, eq(workoutSessions.id, setLogs.sessionId))
     .where(
       and(
-        completedBy(user.id),
+        completedBy(userId),
         ne(workoutSessions.id, sessionId),
         eq(setLogs.isWarmup, false),
         inArray(setLogs.exerciseId, exerciseIds),
@@ -245,7 +277,8 @@ async function savedTargets(
   return { items, groups: [...groups.values()] }
 }
 
-async function sessionDetail(db: Db, user: Me, row: SessionRow): Promise<SessionDetail> {
+/** One session in full: what was prescribed, every set logged, and last time's sets. */
+export async function sessionDetail(db: Db, row: SessionRow): Promise<SessionDetail> {
   // Independent reads, run together: this is what the workout screen waits for.
   const [[workout], saved, sets] = await Promise.all([
     row.workoutId
@@ -297,7 +330,7 @@ async function sessionDetail(db: Db, user: Me, row: SessionRow): Promise<Session
     sets,
     previous: await previousSets(
       db,
-      user,
+      row.userId,
       row.id,
       items.map((i) => i.exerciseId),
     ),
@@ -467,16 +500,12 @@ export const sessionRoutes = new Hono<AppEnv>()
     if (existing) {
       if (existing.userId !== user.id)
         throw new HTTPException(409, { message: 'Session id in use' })
-      return c.json({ session: await sessionDetail(db, user, existing) })
+      return c.json({ session: await sessionDetail(db, existing) })
     }
-    await assertCanDoWorkout(db, user, input.workoutId)
-    if (input.enrollmentId) {
-      const [own] = await db
-        .select({ id: enrollments.id })
-        .from(enrollments)
-        .where(and(eq(enrollments.id, input.enrollmentId), eq(enrollments.userId, user.id)))
-      if (!own) notFound('Enrollment not found')
-    }
+    await Promise.all([
+      assertCanDoWorkout(db, user, input.workoutId),
+      assertOwnPlanDay(db, user, input.enrollmentId ?? null, input.programDayId ?? null),
+    ])
     // One workout at a time: an unfinished one is closed when a new one starts.
     await db
       .update(workoutSessions)
@@ -496,7 +525,7 @@ export const sessionRoutes = new Hono<AppEnv>()
       .returning()
     if (!row) throw new Error('Insert returned no row')
     await snapshotTargets(db, row.id, input.workoutId)
-    return c.json({ session: await sessionDetail(db, user, row) }, 201)
+    return c.json({ session: await sessionDetail(db, row) }, 201)
   })
   .get('/active', async (c) => {
     const [row] = await c.var.db
@@ -518,7 +547,12 @@ export const sessionRoutes = new Hono<AppEnv>()
   .get('/swap-options', async (c) => c.json(await swapOptions(c.var.db, c.var.user)))
   .get('/:id', async (c) => {
     const row = await findOwn(c.var.db, c.var.user, parseId(c.req.param('id')))
-    return c.json({ session: await sessionDetail(c.var.db, c.var.user, row) })
+    return c.json({ session: await sessionDetail(c.var.db, row) })
+  })
+  /** Your coach's likes and comments on this workout. */
+  .get('/:id/feedback', async (c) => {
+    const row = await findOwn(c.var.db, c.var.user, parseId(c.req.param('id')))
+    return c.json({ feedback: await loadFeedback(c.var.db, row.id) })
   })
   /** Save one set the moment it's ticked. Same clientUuid = update. */
   .put('/:id/sets', async (c) => {
@@ -576,7 +610,7 @@ export const sessionRoutes = new Hono<AppEnv>()
       .where(eq(workoutSessions.id, session.id))
       .returning()
     if (!row) throw new Error('Update returned no row')
-    return c.json({ session: await sessionDetail(db, user, row) })
+    return c.json({ session: await sessionDetail(db, row) })
   })
   /** Swap an exercise (machine taken, no equipment). Answers the updated session. */
   .post('/:id/swap', async (c) => {
@@ -584,7 +618,7 @@ export const sessionRoutes = new Hono<AppEnv>()
     const session = await findOwn(db, user, parseId(c.req.param('id')))
     const input = await parseBody(c.req.raw, swapExerciseInput)
     await swapExercise(db, session, input)
-    return c.json({ session: await sessionDetail(db, user, session) })
+    return c.json({ session: await sessionDetail(db, session) })
   })
   .post('/:id/finish', async (c) => {
     const { db, user } = c.var

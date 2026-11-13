@@ -219,6 +219,9 @@ describe('personal program copies', () => {
     // Sam can see and do their own workout.
     const samCookie = await signIn(CLIENT.email, CLIENT.password)
     const plan = await call<Json>('/me/plan', { cookie: samCookie })
+    // The bell's "new program" news: who assigned it and when (a moment ago).
+    expect(plan.data.plan.assigned.coachName).toBe(COACH.name)
+    expect(Date.now() - Date.parse(plan.data.plan.assigned.at)).toBeLessThan(60_000)
     expect(plan.data.plan.days[0].workoutId).toBe(copyWorkoutId)
     const s = await call<Json>('/sessions', {
       method: 'POST',

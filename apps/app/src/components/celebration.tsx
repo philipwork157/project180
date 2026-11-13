@@ -5,7 +5,7 @@ import { Check, Trophy } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
-const COLORS = ['#b6e63b', '#b6e63b', '#f5f3ed', '#dcb46a']
+const COLORS = ['var(--lime)', 'var(--lime)', '#f5f3ed', 'var(--sand)']
 
 // Fixed confetti layout, so it looks the same every time.
 const PIECES = Array.from({ length: 18 }, (_, i) => {
@@ -73,7 +73,7 @@ export function Celebration({
               cx="64"
               cy="64"
               r="58"
-              stroke="#b6e63b"
+              stroke="var(--lime)"
               strokeWidth="8"
               strokeLinecap="round"
               transform="rotate(-90 64 64)"

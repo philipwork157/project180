@@ -1,6 +1,7 @@
-import { ApiError, api, exercisesQuery, exerciseVideosQuery } from '@project180/client'
+import { ApiError, api, exercisesQuery, exerciseVideosQuery, putExercise } from '@project180/client'
 import {
   EQUIPMENT_LABELS,
+  type Exercise,
   exercisePhotos,
   exerciseVideoSearchUrl,
   MUSCLE_GROUP_LABELS,
@@ -115,11 +116,12 @@ function QuickLookBody({ exerciseId, onClose }: { exerciseId: number; onClose: (
 
   const save = useMutation({
     mutationFn: (videoId: string) =>
-      api(`/exercises/${exerciseId}`, {
+      api<{ exercise: Exercise }>(`/exercises/${exerciseId}`, {
         method: 'PATCH',
         body: { videoUrl: `https://www.youtube.com/watch?v=${videoId}` },
       }),
-    onSuccess: async () => {
+    onSuccess: ({ exercise: saved }) => {
+      putExercise(queryClient, saved)
       void queryClient.invalidateQueries({ queryKey: ['exercises'] })
       setPlaying(null)
       setBrowsing(false)

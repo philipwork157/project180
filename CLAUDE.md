@@ -7,10 +7,10 @@
 - Styles: use the token utilities from packages/ui/src/tokens.css (`bg-surface`, `text-ink`, `bg-brand`, `text-on-brand`, `bg-lime` …). Never hard-code colours, except the fixed brand charcoal `#202321` / off-white `#f5f3ed` on surfaces that are charcoal in both themes (auth, hero cards, celebration, rest timer). Every screen must work in light and dark.
 - Schema changes: edit packages/db/src/schema, then `bun run db:apply` (generates the migration and applies it to the local database; `db:generate` and `db:migrate` do each step on its own). Never hand-edit generated migrations.
 - API: every route touching personal data uses `requireUser` and filters by `c.var.user.id`. Add a privacy test in packages/api/test for each new resource.
-- Shared logic (dates, stats, validation) lives in packages/shared with unit tests.
+- Shared logic (dates, stats, validation, the workout board in `board.ts`) lives in packages/shared with unit tests.
 - Code style: Biome (single quotes, no semicolons, 2 spaces, 100 cols).
 - Both apps send a Content-Security-Policy (`apps/*/public/_headers`): no inline scripts, and any new outside host (images, frames, fonts, scripts) must be added there or the browser blocks it. The API refuses cross-site form posts (`csrf()` in packages/api/src/index.ts).
-- Forms: always use Field + Input/Select/Textarea from @project180/ui. Never a bare <select>: the Select component removes the browser arrow and draws a chevron 12px inside the right edge (pr-10).
+- Forms: always use Field + Input/Select/Textarea from @project180/ui. Never a bare <select>: the Select component removes the browser arrow and draws a chevron 12px inside the right edge (pr-10). Two deliberate exceptions: the program grid's cells (an invisible native `<select>` laid over each cell, so a tap opens the phone's own picker) and the big inline name field at the top of the workout and program editors.
 - Icon-only actions: always IconButton from @project180/ui (square, tooltip + aria-label built in). Never a padded Button with only an icon.
 - Admin add/edit/assign flows open a Drawer (side panel); assigning always uses AssignForm.
 - cn() uses tailwind-merge, so a className passed to a component overrides its defaults.
@@ -31,8 +31,11 @@ Design and build every screen phone-first, then check it at desktop width. Befor
 ## Speed and fresh data (both apps)
 
 - After a change, update the cache from the server's reply (`setQueryData`) or optimistically, then navigate straight away. Never `await invalidateQueries(...)` before closing a sheet or leaving a screen: it waits for a full reload. Invalidate with `void` in the background.
+- Push notifications (phone app only): `sendPush` / `pushLater` in packages/api/src/push.ts (Web Push encrypted and VAPID-signed by hand with WebCrypto; no Node library in the Worker). Phones subscribe from Profile (`apps/app/src/lib/push.ts`, `PUT /me/push`), the handlers are in `apps/app/public/push-sw.js`, and signing out unsubscribes the phone. Without `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` nothing is sent. Anything pushed must also show in the bell, because many phones never turn push on.
+- Bottom sheets (`apps/app/src/components/sheet.tsx`) always have the round close button in the top-right corner (built in), and also close on a tap outside or Esc. Notifications are the exception to "sheets, not pages": the bell opens the full-screen `/notifications` route with a Back button.
+- The phone's bell (`appNotifications` in packages/shared/src/weigh-in.ts) is worked out from `/me/plan`, with no notifications table: weigh-in due, today's workout, and for a week a new or changed program (`plan.assigned`). Add new kinds there, with a test.
 - "Workout in progress" comes from `planQuery().activeSession`: starting sets it, finishing/discarding clears it in the cache immediately.
-- Signing in clears the whole query cache (shared phones); any 401 clears it and goes to /login (main.tsx).
+- Signing in clears the whole query cache (shared phones); any 401 clears it and goes to /login (main.tsx). In the phone app a 401 keeps an unfinished workout's unsent sets on the device; `claimLocalData` at sign-in keeps them only for the same person and removes them for anyone else.
 - API routes: run independent D1 reads with `Promise.all`, and aggregate in SQL (count, max, group by) instead of loading rows to count them in JS.
 - The workout screen waits for sets still saving (`flushSets`) before finishing; a finished session can't be reopened.
 

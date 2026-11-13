@@ -1,4 +1,4 @@
-import { ApiError, applyTheme, forgetLocalData, getThemePreference } from '@project180/client'
+import { ApiError, applyTheme, getThemePreference } from '@project180/client'
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { StrictMode } from 'react'
@@ -21,12 +21,15 @@ import '@fontsource/plus-jakarta-sans/700.css'
 import '@fontsource/plus-jakarta-sans/800.css'
 import './styles.css'
 
-/** Signed out on the server (expired, or signed out on another device): back to the login screen. */
+/**
+ * Signed out on the server (expired, or signed out on another device): back to the login screen.
+ * An unfinished workout's unsent sets stay on the phone; signing in again as the same person
+ * picks them up, and anyone else signing in removes them (`claimLocalData`).
+ */
 function onApiError(err: unknown) {
   if (!(err instanceof ApiError) || err.status !== 401) return
   if (window.location.pathname === '/login') return
   queryClient.clear()
-  forgetLocalData()
   void router.navigate({ to: '/login', replace: true })
 }
 

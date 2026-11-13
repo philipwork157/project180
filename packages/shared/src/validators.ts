@@ -3,6 +3,7 @@ import {
   EQUIPMENT,
   EXERCISE_CATEGORIES,
   EXPERIENCE_LEVELS,
+  FEEDBACK_KINDS,
   GOALS,
   GROUP_KINDS,
   MUSCLE_GROUPS,
@@ -10,7 +11,6 @@ import {
   SEXES,
   TRACKING_TYPES,
   TRAINING_PLACES,
-  WEIGHT_UNITS,
   WORKOUT_SECTIONS,
 } from './enums'
 import { MAX_ALTERNATIVES } from './swaps'
@@ -20,7 +20,18 @@ const password = z.string().min(8, 'At least 8 characters').max(128)
 // Trim and lower-case first, then check it's an email (Zod checks before a transform runs).
 const email = z.string().trim().toLowerCase().pipe(z.email('Enter a valid email'))
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+/** True for a date that exists ("2026-02-29" is not one). */
+function isRealDate(value: string) {
+  const [y = 0, m = 0, d = 0] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(y, m - 1, d))
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+}
+
+/** A calendar date as YYYY-MM-DD, and a real one (not "2026-13-45"). */
+export const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+  .refine(isRealDate, 'That date doesn’t exist')
 const optionalText = (max: number) =>
   z
     .string()
@@ -75,23 +86,19 @@ export const choosePasswordInput = z.object({ password })
 /** Seconds the app was open on screen since the last beat (the app sends one a minute). */
 export const heartbeatInput = z.object({ seconds: z.number().int().min(1).max(120) })
 
-/** A real IANA time zone ("Africa/Johannesburg"); anything else would break date maths. */
-function isTimeZone(tz: string) {
-  try {
-    new Intl.DateTimeFormat('en', { timeZone: tz })
-    return true
-  } catch {
-    return false
-  }
-}
+/** A phone turning notifications on: what the browser's `PushSubscription.toJSON()` gives. */
+export const pushSubscriptionInput = z.object({
+  endpoint: z.url({ protocol: /^https$/ }).max(1000),
+  keys: z.object({
+    p256dh: z.string().min(80).max(120),
+    auth: z.string().min(16).max(40),
+  }),
+})
+export type PushSubscriptionInput = z.input<typeof pushSubscriptionInput>
+export const pushUnsubscribeInput = z.object({ endpoint: z.string().max(1000) })
 
-export const updateProfileInput = z
-  .object({
-    name,
-    timezone: z.string().min(1).max(64).refine(isTimeZone, 'Unknown time zone'),
-    weightUnit: z.enum(WEIGHT_UNITS),
-  })
-  .partial()
+/** Your own details. Only the name: the time zone (Africa/Johannesburg) and kg never change. */
+export const updateProfileInput = z.object({ name }).partial()
 export type UpdateProfileInput = z.infer<typeof updateProfileInput>
 
 const exerciseFields = {
@@ -103,7 +110,15 @@ const exerciseFields = {
   instructions: z.string().trim().max(2000).nullish(),
   /** Other names and muscles, for search: "hamstring curl, hamstrings". */
   keywords: z.string().trim().max(300).nullish(),
-  videoUrl: z.url().max(500).nullish(),
+  // Coach-chosen video: an https YouTube or Vimeo link only (we link, never re-host).
+  videoUrl: z
+    .url({
+      protocol: /^https$/,
+      hostname: /^((www|m)\.)?(youtube\.com|youtu\.be)$|^((www|player)\.)?vimeo\.com$/,
+      error: 'Use a YouTube or Vimeo link',
+    })
+    .max(500)
+    .nullish(),
 }
 
 export const exerciseInput = z.object({
@@ -120,7 +135,7 @@ export type ExerciseUpdate = z.input<typeof exerciseUpdate>
 
 const id = z.number().int().positive()
 const optionalInt = (max: number) => z.number().int().min(0).max(max).nullish()
-const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+const isoDay = isoDate
 
 export const workoutExerciseInput = z
   .object({
@@ -265,6 +280,25 @@ export const swapExerciseInput = z.object({
   replacementId: z.number().int().positive(),
 })
 export type SwapExerciseInput = z.input<typeof swapExerciseInput>
+
+/** A coach likes or comments on a client's workout, or one exercise in it. */
+export const feedbackInput = z
+  .object({
+    /** Null or left out: the whole workout. */
+    exerciseId: z.number().int().positive().nullish(),
+    kind: z.enum(FEEDBACK_KINDS),
+    body: z.string().trim().max(1000).nullish(),
+  })
+  .refine((f) => f.kind === 'like' || !!f.body, {
+    message: 'Write a comment first',
+    path: ['body'],
+  })
+export type FeedbackInput = z.input<typeof feedbackInput>
+
+/** Mark these feedback items as read (the client opened them). */
+export const feedbackReadInput = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(90),
+})
 
 /** A coach's suggested swaps for one exercise, in order. */
 export const exerciseAlternativesInput = z.object({

@@ -7,6 +7,7 @@ import { managedPerson, managedUsers } from '../access'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { requireAdmin, requireUser } from '../middleware'
+import { pushLater } from '../push'
 import { copyProgramForClient, findVisibleProgram, syncClientCopy } from './programs'
 
 const summaryColumns = {
@@ -107,6 +108,25 @@ export const enrollmentRoutes = new Hono<AppEnv>()
       input.startDate,
       input.mode,
     )
+    // Tell their phone (if they turned notifications on); the bell in the app shows it too.
+    if (row)
+      await pushLater(
+        c,
+        [input.userId],
+        input.mode === 'update'
+          ? {
+              title: 'Your program was updated',
+              body: `${user.name.split(' ')[0]} made changes to ${row.programName}.`,
+              url: '/calendar',
+              tag: 'program',
+            }
+          : {
+              title: `New program: ${row.programName}`,
+              body: `${user.name.split(' ')[0]} set it up for you. Open the app to see your plan.`,
+              url: '/calendar',
+              tag: 'program',
+            },
+      )
     return c.json({ enrollment: row }, input.mode === 'update' ? 200 : 201)
   })
   .delete('/:id', async (c) => {

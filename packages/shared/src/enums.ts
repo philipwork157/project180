@@ -8,6 +8,8 @@ export type Role = (typeof ROLES)[number]
 export const isStaff = (role: Role | string | undefined): boolean =>
   role === 'owner' || role === 'admin'
 export const isOwner = (role: Role | string | undefined): boolean => role === 'owner'
+/** A client (role `member`): sees only themselves and their own program. */
+export const isClient = (role: Role | string | undefined): boolean => role === 'member'
 export const ROLE_LABELS: Record<Role, string> = {
   owner: 'Owner',
   admin: 'Coach',
@@ -123,6 +125,10 @@ export type EnrollmentStatus = (typeof ENROLLMENT_STATUS)[number]
 
 export const SESSION_STATUS = ['in_progress', 'completed', 'abandoned'] as const
 export type SessionStatus = (typeof SESSION_STATUS)[number]
+
+/** A coach's reaction to a client's workout or one exercise in it. */
+export const FEEDBACK_KINDS = ['like', 'comment'] as const
+export type FeedbackKind = (typeof FEEDBACK_KINDS)[number]
 
 export const MUSCLE_GROUP_LABELS: Record<MuscleGroup, string> = {
   legs: 'Legs',

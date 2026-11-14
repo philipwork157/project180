@@ -144,7 +144,7 @@ async function findVisible(db: Db, user: Me, id: number, archived: boolean | 'an
   return row
 }
 
-async function detail(db: Db, row: WorkoutRow): Promise<WorkoutDetail> {
+export async function detail(db: Db, row: WorkoutRow): Promise<WorkoutDetail> {
   const items = (await loadWorkoutExercises(db, [row.id])).get(row.id) ?? []
   const groups = (await loadWorkoutGroups(db, [row.id])).get(row.id) ?? []
   return {
@@ -155,7 +155,7 @@ async function detail(db: Db, row: WorkoutRow): Promise<WorkoutDetail> {
 }
 
 /** Every exercise in the workout must exist and be visible to the person building it. */
-async function assertExercisesUsable(
+export async function assertExercisesUsable(
   db: Db,
   user: Me,
   input: { exercises: Array<{ exerciseId: number }> },
@@ -191,7 +191,7 @@ function exerciseRows(workoutId: number, input: { exercises?: WorkoutExerciseInp
   }))
 }
 
-type WorkoutInputParsed = ReturnType<typeof workoutInput.parse>
+export type WorkoutInputParsed = ReturnType<typeof workoutInput.parse>
 
 function groupRows(workoutId: number, input: { groups: WorkoutInputParsed['groups'] }) {
   return input.groups.map((g) => ({
@@ -258,7 +258,7 @@ export async function copyWorkoutForClient(
   return copy.id
 }
 
-async function createWorkout(db: Db, user: Me, input: WorkoutInputParsed) {
+export async function createWorkout(db: Db, user: Me, input: WorkoutInputParsed) {
   const [row] = await db
     .insert(workouts)
     .values({

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `set_logs_slot_uq` ON `set_logs` (`session_id`,`exercise_id`,`set_number`,`is_warmup`);

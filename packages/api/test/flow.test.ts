@@ -550,6 +550,38 @@ describe('logging a workout', () => {
     expect(detail.data.session.sets[0].reps).toBe(10)
   })
 
+  it('the same set sent again under a new id updates it, so it is never counted twice', async () => {
+    const { admin } = await setupHousehold()
+    const { workout, squat } = await library(admin)
+    const s = await call<Json>('/sessions', {
+      method: 'POST',
+      cookie: admin,
+      body: { clientUuid: crypto.randomUUID(), workoutId: workout.id },
+    })
+    const id = s.data.session.id
+    const put = (clientUuid: string, setNumber: number, reps: number) =>
+      call(`/sessions/${id}/sets`, {
+        method: 'PUT',
+        cookie: admin,
+        body: { clientUuid, exerciseId: squat, setNumber, weightKg: 40, reps },
+      })
+    const sets = async () =>
+      (await call<Json>(`/sessions/${id}`, { cookie: admin })).data.session.sets as Json[]
+
+    // The phone reloaded before set 1 synced and sent it again with a new id.
+    expect((await put(crypto.randomUUID(), 1, 8)).status).toBe(200)
+    const again = crypto.randomUUID()
+    expect((await put(again, 1, 9)).status).toBe(200)
+    expect(await sets()).toMatchObject([{ clientUuid: again, setNumber: 1, reps: 9 }])
+
+    // An id that was set 2 and now claims set 1: it takes set 1, set 2 is gone.
+    const two = crypto.randomUUID()
+    await put(two, 2, 7)
+    expect(await sets()).toHaveLength(2)
+    expect((await put(two, 1, 10)).status).toBe(200)
+    expect(await sets()).toMatchObject([{ clientUuid: two, setNumber: 1, reps: 10 }])
+  })
+
   it('restarts a workout: clears its sets and resets the clock', async () => {
     const { admin, member } = await setupHousehold()
     const { workout, squat } = await library(admin)

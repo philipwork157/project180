@@ -150,6 +150,8 @@ export const setLogs = sqliteTable(
   (t) => [
     // Sets of a session, and of one exercise within it ("last time", records).
     index('set_logs_session_exercise_idx').on(t.sessionId, t.exerciseId),
+    // One row per set: a second copy of the same set (a new id after a reload) updates the first.
+    uniqueIndex('set_logs_slot_uq').on(t.sessionId, t.exerciseId, t.setNumber, t.isWarmup),
     index('set_logs_exercise_idx').on(t.exerciseId),
   ],
 )

@@ -626,6 +626,32 @@ export const sessionRoutes = new Hono<AppEnv>()
       rpe: input.rpe ?? null,
       completedAt: new Date(),
     }
+    // Already saved under another id (the phone reloaded before this set went through): one row
+    // per set, so the newest numbers update that row and it takes this id.
+    const [slot] = await db
+      .select({ id: setLogs.id, clientUuid: setLogs.clientUuid })
+      .from(setLogs)
+      .where(
+        and(
+          eq(setLogs.sessionId, session.id),
+          eq(setLogs.exerciseId, input.exerciseId),
+          eq(setLogs.setNumber, input.setNumber),
+          eq(setLogs.isWarmup, input.isWarmup),
+        ),
+      )
+    if (slot && slot.clientUuid !== input.clientUuid) {
+      await db.batch([
+        // This id elsewhere in the workout (a set it used to be): it moves here.
+        db
+          .delete(setLogs)
+          .where(and(eq(setLogs.clientUuid, input.clientUuid), ne(setLogs.id, slot.id))),
+        db
+          .update(setLogs)
+          .set({ ...values, clientUuid: input.clientUuid })
+          .where(eq(setLogs.id, slot.id)),
+      ])
+      return c.json({ ok: true })
+    }
     await db
       .insert(setLogs)
       .values({ ...values, clientUuid: input.clientUuid, sessionId: session.id })

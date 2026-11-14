@@ -32,6 +32,8 @@ export const users = sqliteTable(
       .default(false),
     // Last time they used the app or admin (updated at most every couple of minutes).
     lastSeenAt: timestamp('last_seen_at'),
+    // Food photo estimates this person may take a day; null = the site default (app_settings).
+    foodPhotosPerDay: integer('food_photos_per_day'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

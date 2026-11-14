@@ -1,12 +1,11 @@
 // Food log routes. meFoodRoutes is mounted inside meRoutes (/me/food) and adminFoodRoutes inside
 // adminUserRoutes (/admin/users/:id/…), so each runs behind its parent's sign-in checks once.
-import { type Db, foodEntries, nutritionTargets } from '@project180/db'
+import { type Db, foodEntries, foodPhotoUses, nutritionTargets, users } from '@project180/db'
 import {
   addDays,
   addFoodInput,
   type BarcodeProduct,
   barcodeInput,
-  FOOD_PHOTOS_PER_DAY,
   type FoodDay,
   type FoodEntry,
   type FoodPhotoDraft,
@@ -16,6 +15,8 @@ import {
   isoDate,
   type NutritionTargets,
   nutritionTargetsInput,
+  type PhotoLimit,
+  photoLimitInput,
   RECENT_FOOD_DAYS,
   type RecentFood,
   roundGrams,
@@ -28,10 +29,10 @@ import { and, asc, count, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
-import { managedPerson } from '../access'
+import { managedPerson, type Person } from '../access'
 import { barcodeProviders, lookupBarcode } from '../barcode'
 import { insertMany, runAll } from '../batch'
-import type { AppEnv } from '../env'
+import type { AppEnv, Bindings } from '../env'
 import { conflict, notFound, parseBody, parseId } from '../errors'
 import {
   claimPhoto,
@@ -41,7 +42,7 @@ import {
   PHOTO_TYPES,
   releasePhoto,
 } from '../food-photo'
-import { foodPhotosAvailable } from '../settings'
+import { foodPhotoSettings, foodPhotosAvailable, photoLimitFor } from '../settings'
 
 /** The longest range one summary may cover (a quarter). */
 const MAX_RANGE_DAYS = 92
@@ -189,14 +190,18 @@ async function recentFoods(db: Db, userId: number, today: string): Promise<Recen
 
 /** The signed-in person's own food log. Only ever their own rows (c.var.user.id). */
 export const meFoodRoutes = new Hono<AppEnv>()
-  /** Can this site estimate food from photos? */
-  .get('/setup', async (c) =>
-    c.json<FoodSetup>({
-      photos: await foodPhotosAvailable(c.var.db, c.env),
-      photosPerDay: FOOD_PHOTOS_PER_DAY,
+  /** Can this person estimate food from photos here, and how many a day? */
+  .get('/setup', async (c) => {
+    const [available, perDay] = await Promise.all([
+      foodPhotosAvailable(c.var.db, c.env),
+      photoLimitFor(c.var.db, c.env, c.var.user),
+    ])
+    return c.json<FoodSetup>({
+      photos: available && perDay > 0,
+      photosPerDay: perDay,
       barcode: barcodeProviders(c.env).length > 0,
-    }),
-  )
+    })
+  })
   /** One day (today when no ?date). */
   .get('/', async (c) => {
     const { db, user } = c.var
@@ -300,8 +305,13 @@ export const meFoodRoutes = new Hono<AppEnv>()
     if (photo.size > PHOTO_MAX_BYTES)
       throw new HTTPException(400, { message: 'That photo is too big. Try again.' })
     const hint = parseQuery(foodPhotoHint, typeof body?.hint === 'string' ? body.hint : '')
+    const perDay = await photoLimitFor(db, c.env, user)
+    if (perDay === 0)
+      throw new HTTPException(403, {
+        message: 'Photo estimates are switched off for you. Type it in instead.',
+      })
     const date = todayIn(user.timezone)
-    const photosLeft = await claimPhoto(db, user.id, date)
+    const photosLeft = await claimPhoto(db, user.id, date, perDay)
     try {
       const draft = await estimateFoodPhoto(
         c.env,
@@ -314,6 +324,31 @@ export const meFoodRoutes = new Hono<AppEnv>()
       throw err
     }
   })
+
+/** One person's photo limit and today's use, for their coach. */
+async function loadPhotoLimit(
+  db: Db,
+  env: Bindings,
+  person: { id: number; role: Person['role']; timezone: string },
+): Promise<PhotoLimit> {
+  const [[row], settings, [used], effective] = await Promise.all([
+    db.select({ perDay: users.foodPhotosPerDay }).from(users).where(eq(users.id, person.id)),
+    foodPhotoSettings(db, env),
+    db
+      .select({ count: foodPhotoUses.count })
+      .from(foodPhotoUses)
+      .where(
+        and(eq(foodPhotoUses.userId, person.id), eq(foodPhotoUses.date, todayIn(person.timezone))),
+      ),
+    photoLimitFor(db, env, person),
+  ])
+  return {
+    perDay: row?.perDay ?? null,
+    defaultPerDay: settings.perDay,
+    effective,
+    usedToday: used?.count ?? 0,
+  }
+}
 
 /** A client's food log and targets, for the staff who manage them (404 for anyone else). */
 export const adminFoodRoutes = new Hono<AppEnv>()
@@ -351,6 +386,18 @@ export const adminFoodRoutes = new Hono<AppEnv>()
         set: { ...values, updatedAt: new Date() },
       })
     return c.json({ targets: await loadTargets(db, person.id) })
+  })
+  /** Their daily photo limit: their own number, or null for the site default. */
+  .get('/:id/food/photo-limit', async (c) => {
+    const person = await managedPerson(c.var.db, c.var.user, parseId(c.req.param('id')))
+    return c.json({ photoLimit: await loadPhotoLimit(c.var.db, c.env, person) })
+  })
+  .put('/:id/food/photo-limit', async (c) => {
+    const { db } = c.var
+    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const { perDay } = await parseBody(c.req.raw, photoLimitInput)
+    await db.update(users).set({ foodPhotosPerDay: perDay }).where(eq(users.id, person.id))
+    return c.json({ photoLimit: await loadPhotoLimit(db, c.env, person) })
   })
   .delete('/:id/nutrition-targets', async (c) => {
     const { db } = c.var

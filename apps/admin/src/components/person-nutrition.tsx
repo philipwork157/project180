@@ -3,15 +3,19 @@ import {
   api,
   personFoodDayQuery,
   personFoodSummaryQuery,
+  personPhotoLimitQuery,
 } from '@project180/client'
 import {
   addDays,
   type FoodDayTotals,
   gramsLabel,
   kcalLabel,
+  MAX_FOOD_PHOTOS_PER_DAY,
   MEAL_LABELS,
   MEALS,
   type NutritionTargets,
+  OWNER_FOOD_PHOTOS_PER_DAY,
+  type PhotoLimit,
   targetShare,
   todayIn,
 } from '@project180/shared'
@@ -107,6 +111,8 @@ export function NutritionCard({ userId, name }: { userId: number; name: string }
           </ul>
         </>
       )}
+
+      <PhotoLimitRow userId={userId} name={name} />
 
       <TargetsDrawer
         open={editing}
@@ -323,6 +329,135 @@ function TargetsForm({
         </Button>
         <Button type="submit" loading={save.isPending}>
           Save targets
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+/** How many food photos this client may take a day, and a way to change it for them. */
+function PhotoLimitRow({ userId, name }: { userId: number; name: string }) {
+  const limit = useQuery(personPhotoLimitQuery(userId))
+  const [open, setOpen] = useState(false)
+  const l = limit.data
+  if (!l) return null
+  const owner = l.effective === OWNER_FOOD_PHOTOS_PER_DAY && l.perDay === null
+  const summary = owner
+    ? 'Owners aren’t held to the photo limit.'
+    : l.effective === 0
+      ? 'Photo estimates are switched off for them.'
+      : l.perDay === null
+        ? `Up to ${l.effective} a day (the default).`
+        : `Up to ${l.effective} a day (their own limit).`
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md bg-surface-raised p-4">
+      <Camera className="size-5 shrink-0 text-ink-muted" aria-hidden />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="font-bold text-[14px]">Food photos</span>
+        <span className="text-[13px] text-ink-muted">
+          {summary} {l.usedToday} used today.
+        </span>
+      </div>
+      {!owner && (
+        <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+          Change
+        </Button>
+      )}
+      <Drawer
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Food photo limit"
+        description={`How many photo estimates ${name.split(' ')[0]} may take a day.`}
+      >
+        {open && (
+          <PhotoLimitForm userId={userId} limit={l} name={name} onDone={() => setOpen(false)} />
+        )}
+      </Drawer>
+    </div>
+  )
+}
+
+function PhotoLimitForm({
+  userId,
+  limit,
+  name,
+  onDone,
+}: {
+  userId: number
+  limit: PhotoLimit
+  name: string
+  onDone: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [value, setValue] = useState(limit.perDay === null ? '' : String(limit.perDay))
+  const perDay = value === '' ? null : Number(value)
+  const valid = perDay === null || perDay <= MAX_FOOD_PHOTOS_PER_DAY
+  const save = useMutation({
+    mutationFn: (next: number | null) =>
+      api<{ photoLimit: PhotoLimit }>(`/admin/users/${userId}/food/photo-limit`, {
+        method: 'PUT',
+        body: { perDay: next },
+      }),
+    onSuccess: ({ photoLimit }) => {
+      queryClient.setQueryData(personPhotoLimitQuery(userId).queryKey, photoLimit)
+      toast({
+        title: 'Photo limit saved',
+        description:
+          photoLimit.perDay === null
+            ? `${name} uses the default (${photoLimit.defaultPerDay} a day).`
+            : photoLimit.perDay === 0
+              ? `Photo estimates are off for ${name}.`
+              : `${name} can take ${photoLimit.perDay} a day.`,
+      })
+      onDone()
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t save it',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  return (
+    <form
+      className="flex flex-col gap-5"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (valid) save.mutate(perDay)
+      }}
+    >
+      <Field
+        label="Photos a day"
+        hint={`Leave it empty for the default (${limit.defaultPerDay}). 0 switches photos off for them. Up to ${MAX_FOOD_PHOTOS_PER_DAY}.`}
+        error={valid ? undefined : `At most ${MAX_FOOD_PHOTOS_PER_DAY}.`}
+      >
+        {(id) => (
+          <Input
+            id={id}
+            inputMode="numeric"
+            placeholder={`Default (${limit.defaultPerDay})`}
+            value={value}
+            onChange={(e) => setValue(e.target.value.replace(/\D/g, '').slice(0, 2))}
+          />
+        )}
+      </Field>
+      <p className="text-[13px] text-ink-muted">{limit.usedToday} used today.</p>
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {limit.perDay !== null && (
+          <Button
+            variant="ghost"
+            className="mr-auto"
+            loading={save.isPending && save.variables === null}
+            onClick={() => save.mutate(null)}
+          >
+            Use the default
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button type="submit" loading={save.isPending && save.variables !== null} disabled={!valid}>
+          Save limit
         </Button>
       </div>
     </form>

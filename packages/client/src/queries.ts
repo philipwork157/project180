@@ -18,6 +18,7 @@ import type {
   PersonActivity,
   PersonPrograms,
   PersonStats,
+  PhotoLimit,
   ProgramCopySummary,
   ProgramDetail,
   ProgramSummary,
@@ -361,6 +362,15 @@ export const personFoodSummaryQuery = (userId: number, from: string, to: string)
   })
 
 /** The owner's switch for food photo estimates, and whether the site has a Claude key (admin). */
+/** A client's daily photo limit and today's use (admin). */
+export const personPhotoLimitQuery = (userId: number) =>
+  queryOptions({
+    queryKey: ['admin', 'users', userId, 'food', 'photo-limit'],
+    queryFn: async () =>
+      (await api<{ photoLimit: PhotoLimit }>(`/admin/users/${userId}/food/photo-limit`))
+        .photoLimit,
+  })
+
 export const foodPhotoSettingsQuery = queryOptions({
   queryKey: ['admin', 'settings', 'food-photos'],
   queryFn: async () =>

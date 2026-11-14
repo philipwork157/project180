@@ -3,7 +3,7 @@
 // before the phone sees it. The photo is never stored or logged.
 import { type Db, foodPhotoUses } from '@project180/db'
 import {
-  FOOD_PHOTOS_PER_DAY,
+  DEFAULT_FOOD_PHOTOS_PER_DAY,
   type FoodPhotoDraft,
   type FoodPhotoItem,
   MAX_FOODS_PER_ADD,
@@ -288,7 +288,7 @@ export async function claimPhoto(
   db: Db,
   userId: number,
   date: string,
-  perDay = FOOD_PHOTOS_PER_DAY,
+  perDay = DEFAULT_FOOD_PHOTOS_PER_DAY,
 ): Promise<number> {
   const [row] = await db
     .insert(foodPhotoUses)

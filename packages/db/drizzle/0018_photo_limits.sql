@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `food_photos_per_day` integer;

@@ -17,8 +17,15 @@ export const MEAL_LABELS: Record<Meal, string> = {
 export const FOOD_SOURCES = ['manual', 'photo', 'barcode'] as const
 export type FoodSource = (typeof FOOD_SOURCES)[number]
 
-/** Photo estimates per person per day: stops a bug or a keen tester running up the bill. */
-export const FOOD_PHOTOS_PER_DAY = 20
+/**
+ * Photo estimates per person per day, so a bug or a keen tester can't run up the Claude bill.
+ * Clients get the site default (the owner changes it in Settings) unless their coach set their
+ * own number. Owners aren't held to it, but still have a safety net.
+ */
+export const DEFAULT_FOOD_PHOTOS_PER_DAY = 10
+export const OWNER_FOOD_PHOTOS_PER_DAY = 100
+/** The highest daily limit anyone can be given. */
+export const MAX_FOOD_PHOTOS_PER_DAY = 50
 /** Most foods one request may add (one photo rarely shows more than a handful). */
 export const MAX_FOODS_PER_ADD = 12
 /** How far back "Recent" looks. */
@@ -260,7 +267,29 @@ export interface FoodPhotoSettings {
   enabled: boolean
   /** ANTHROPIC_API_KEY is set on this site. Photos work only when both are true. */
   configured: boolean
+  /** Photos a day for every client without their own limit. */
+  perDay: number
   updatedAt: string | null
 }
 
-export const foodPhotoSettingsInput = z.object({ enabled: z.boolean() })
+const photosPerDay = z.number().int().min(0).max(MAX_FOOD_PHOTOS_PER_DAY)
+
+/** The owner changes the switch, the default daily limit, or both. */
+export const foodPhotoSettingsInput = z
+  .object({ enabled: z.boolean().optional(), perDay: photosPerDay.optional() })
+  .refine((v) => v.enabled !== undefined || v.perDay !== undefined, 'Nothing to change')
+
+/** One person's photo limit, as their coach sees it. */
+export interface PhotoLimit {
+  /** Their own limit, or null to use the site default. 0 = no photos for them. */
+  perDay: number | null
+  /** The site default. */
+  defaultPerDay: number
+  /** What applies to them now (owners always get OWNER_FOOD_PHOTOS_PER_DAY). */
+  effective: number
+  /** Photos they've taken today. */
+  usedToday: number
+}
+
+/** A coach sets a client's own daily limit, or null to go back to the site default. */
+export const photoLimitInput = z.object({ perDay: photosPerDay.nullable() })

@@ -9,7 +9,7 @@ import {
   parseFoodPhotoReply,
   releasePhoto,
 } from '../src/food-photo'
-import { foodPhotosAvailable } from '../src/settings'
+import { foodPhotosAvailable, photoLimitFor } from '../src/settings'
 import { ADMIN, call, createAdmin, MEMBER, setupHousehold, signIn, signInAsIs } from './helpers'
 
 type Json = Record<string, any>
@@ -188,7 +188,7 @@ describe('food photos', () => {
   it('without a Claude key the app is told photos are off, and the photo route never calls out', async () => {
     const { member } = await setupHousehold()
     const setup = await call<Json>('/me/food/setup', { cookie: member })
-    expect(setup.data).toEqual({ photos: false, photosPerDay: 20, barcode: true })
+    expect(setup.data).toEqual({ photos: false, photosPerDay: 10, barcode: true })
     const spy = vi.spyOn(globalThis, 'fetch')
     const form = new FormData()
     form.set('photo', new File([new Uint8Array([1, 2, 3])], 'meal.jpg', { type: 'image/jpeg' }))
@@ -371,5 +371,53 @@ describe('food photo switch', () => {
   it('is not for clients', async () => {
     const { member } = await setupHousehold()
     expect((await call('/admin/settings/food-photos', { cookie: member })).status).toBe(403)
+  })
+})
+
+describe('food photo limits', () => {
+  it('clients get the default, an owner changes it, a coach sets one client, owners have their own', async () => {
+    await createAdmin()
+    const owner = await signIn(ADMIN.email, ADMIN.password)
+    await call('/admin/users', { method: 'POST', cookie: owner, body: { ...COACH, role: 'admin' } })
+    const created = await call<Json>('/admin/users', { method: 'POST', cookie: owner, body: MEMBER })
+    const clientId = created.data.user.id as number
+    const client = await signIn(MEMBER.email, MEMBER.password)
+    const coach = await signIn(COACH.email, COACH.password)
+    const db = createDb(env.DB)
+    const perDayOf = async (cookie: string) =>
+      (await call<Json>('/me/food/setup', { cookie })).data.photosPerDay
+
+    // The default is 10 for clients; owners have the safety-net number instead.
+    expect(await perDayOf(client)).toBe(10)
+    expect(await perDayOf(owner)).toBe(100)
+
+    // Only an owner changes the default, within 0 to 50.
+    const put = (cookie: string, body: Json) =>
+      call<Json>('/admin/settings/food-photos', { method: 'PUT', cookie, body })
+    expect((await put(coach, { perDay: 3 })).status).toBe(403)
+    expect((await put(owner, { perDay: 51 })).status).toBe(400)
+    expect((await put(owner, {})).status).toBe(400)
+    const changed = await put(owner, { perDay: 5 })
+    expect(changed.data.foodPhotos).toMatchObject({ perDay: 5, enabled: true })
+    expect(await perDayOf(client)).toBe(5)
+
+    // The client's coach (here the owner) sets their own number, 0 switches photos off for them.
+    const limitPath = `/admin/users/${clientId}/food/photo-limit`
+    const set = (cookie: string, perDay: number | null) =>
+      call<Json>(limitPath, { method: 'PUT', cookie, body: { perDay } })
+    const two = await set(owner, 2)
+    expect(two.data.photoLimit).toEqual({ perDay: 2, defaultPerDay: 5, effective: 2, usedToday: 0 })
+    expect(await perDayOf(client)).toBe(2)
+    await set(owner, 0)
+    expect(await photoLimitFor(db, env, { id: clientId, role: 'member' })).toBe(0)
+    expect((await call<Json>('/me/food/setup', { cookie: client })).data.photos).toBe(false)
+    await set(owner, null)
+    expect(await perDayOf(client)).toBe(5)
+
+    // Nobody else changes it: another coach gets 404, the client can't reach admin routes.
+    expect((await set(coach, 40)).status).toBe(404)
+    expect((await call(limitPath, { cookie: coach })).status).toBe(404)
+    expect((await set(client, 40)).status).toBe(403)
+    expect((await set(owner, 51)).status).toBe(400)
   })
 })

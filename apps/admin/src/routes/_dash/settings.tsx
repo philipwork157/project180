@@ -1,5 +1,11 @@
 import { ApiError, api, authClient, foodPhotoSettingsQuery, meQuery } from '@project180/client'
-import { type FoodPhotoSettings, isOwner, type Me, ROLE_LABELS } from '@project180/shared'
+import {
+  type FoodPhotoSettings,
+  isOwner,
+  MAX_FOOD_PHOTOS_PER_DAY,
+  type Me,
+  ROLE_LABELS,
+} from '@project180/shared'
 import { Button, Card, Field, Input, PasswordInput, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
@@ -327,7 +333,7 @@ function foodPhotoStatus(f: FoodPhotoSettings): { label: string; tone: string; t
   return {
     label: 'On',
     tone: 'bg-brand-soft text-brand-text',
-    text: 'Clients can take food photos, up to 20 a day each. Photos are read, then thrown away.',
+    text: `Clients can take food photos, up to ${f.perDay} a day each unless their coach set their own number. Photos are read, then thrown away.`,
   }
 }
 
@@ -374,20 +380,87 @@ function FoodPhotoSwitch({ canChange }: { canChange: boolean }) {
         </div>
       </div>
       {canChange ? (
-        <div className="self-start">
-          <Segmented
-          label="Food photos"
-          value={f.enabled ? 'on' : 'off'}
-          onChange={(v) => v !== (f.enabled ? 'on' : 'off') && save.mutate(v === 'on')}
-          options={[
-            { value: 'on', label: 'On' },
-            { value: 'off', label: 'Off' },
-          ]}
-        />
-        </div>
+        <>
+          <div className="self-start">
+            <Segmented
+              label="Food photos"
+              value={f.enabled ? 'on' : 'off'}
+              onChange={(v) => v !== (f.enabled ? 'on' : 'off') && save.mutate(v === 'on')}
+              options={[
+                { value: 'on', label: 'On' },
+                { value: 'off', label: 'Off' },
+              ]}
+            />
+          </div>
+          <PhotoLimitForm perDay={f.perDay} />
+        </>
       ) : (
-        <p className="text-[13px] text-ink-muted">Only an owner can change this.</p>
+        <p className="text-[13px] text-ink-muted">
+          Up to {f.perDay} photos a day per client. Only an owner can change this.
+        </p>
       )}
     </div>
+  )
+}
+
+/** The owner sets how many photos every client may take a day (a coach can change one client). */
+function PhotoLimitForm({ perDay }: { perDay: number }) {
+  const queryClient = useQueryClient()
+  const [value, setValue] = useState(String(perDay))
+  const n = value === '' ? null : Number(value)
+  const valid = n !== null && n >= 0 && n <= MAX_FOOD_PHOTOS_PER_DAY
+  const save = useMutation({
+    mutationFn: () =>
+      api<{ foodPhotos: FoodPhotoSettings }>('/admin/settings/food-photos', {
+        method: 'PUT',
+        body: { perDay: n },
+      }),
+    onSuccess: ({ foodPhotos }) => {
+      queryClient.setQueryData(foodPhotoSettingsQuery.queryKey, foodPhotos)
+      toast({
+        title: 'Photo limit saved',
+        description: `${foodPhotos.perDay} a day for every client without their own limit.`,
+      })
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t save it',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (valid) save.mutate()
+      }}
+    >
+      <div className="w-full sm:w-64">
+        <Field
+          label="Photos per client per day"
+          hint={`0 to ${MAX_FOOD_PHOTOS_PER_DAY}. Owners aren’t held to it.`}
+        >
+          {(id) => (
+            <Input
+              id={id}
+              inputMode="numeric"
+              value={value}
+              onChange={(e) => setValue(e.target.value.replace(/\D/g, '').slice(0, 2))}
+            />
+          )}
+        </Field>
+      </div>
+      <Button
+        type="submit"
+        variant="secondary"
+        className="self-start"
+        loading={save.isPending}
+        disabled={!valid || n === perDay}
+      >
+        Save limit
+      </Button>
+    </form>
   )
 }

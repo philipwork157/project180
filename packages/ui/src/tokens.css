@@ -51,6 +51,11 @@
   --success: #3d7a1a;
   --scrim: rgba(32, 35, 33, 0.5);
 
+  /* Charts of what someone eats: protein, carbs, fat (checked for colour blindness, 3:1 on surfaces). */
+  --macro-protein: #5e7d10;
+  --macro-carbs: #2c6ca8;
+  --macro-fat: #a8711a;
+
   --shadow-card-value: 0 1px 2px rgba(32, 35, 33, 0.05), 0 6px 20px rgba(32, 35, 33, 0.05);
   --shadow-float-value: 0 16px 48px rgba(32, 35, 33, 0.16);
   --shadow-brand-value: 0 6px 18px rgba(32, 35, 33, 0.18);
@@ -83,6 +88,10 @@
   --on-danger: #202321;
   --success: #9bd65c;
   --scrim: rgba(0, 0, 0, 0.62);
+
+  --macro-protein: #739a17;
+  --macro-carbs: #4a8ad0;
+  --macro-fat: #c27f25;
 
   --shadow-card-value: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-float-value: 0 16px 48px rgba(0, 0, 0, 0.55);
@@ -121,6 +130,9 @@
   --color-on-danger: var(--on-danger);
   --color-success: var(--success);
   --color-scrim: var(--scrim);
+  --color-macro-protein: var(--macro-protein);
+  --color-macro-carbs: var(--macro-carbs);
+  --color-macro-fat: var(--macro-fat);
 
   --shadow-card: var(--shadow-card-value);
   --shadow-float: var(--shadow-float-value);
@@ -180,6 +192,10 @@
     --on-danger: #202321;
     --success: #9bd65c;
     --scrim: rgba(0, 0, 0, 0.62);
+
+    --macro-protein: #739a17;
+    --macro-carbs: #4a8ad0;
+    --macro-fat: #c27f25;
 
     --shadow-card-value: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-float-value: 0 16px 48px rgba(0, 0, 0, 0.55);

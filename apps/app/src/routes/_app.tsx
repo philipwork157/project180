@@ -3,7 +3,15 @@ import { isClient } from '@project180/shared'
 import { cn } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, Outlet, redirect, useLocation } from '@tanstack/react-router'
-import { CalendarDays, ChevronUp, Flame, MessageCircle, TrendingUp, UserRound } from 'lucide-react'
+import {
+  CalendarDays,
+  ChevronUp,
+  Flame,
+  MessageCircle,
+  TrendingUp,
+  UserRound,
+  Utensils,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { Elapsed } from '../components/elapsed'
@@ -25,6 +33,8 @@ export const Route = createFileRoute('/_app')({
 const tabs = [
   { to: '/', label: 'Today', icon: Flame },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+  // What you eat: food log, photo estimates and your coach's targets.
+  { to: '/fuel', label: 'Fuel', icon: Utensils },
   { to: '/progress', label: 'Progress', icon: TrendingUp },
   // Chat with your coach (clients only): opens full screen, Back returns here.
   { to: '/chat', label: 'Coach', icon: MessageCircle },
@@ -77,7 +87,11 @@ function AppLayout() {
   }, [inChat])
   const hideNav = inChat && typing
   return (
-    <div className="flex min-h-dvh w-full flex-col bg-bg">
+    // Chat is exactly one screen tall (the messages scroll inside it); every other tab grows
+    // with its content and the page scrolls.
+    <div
+      className={cn('flex w-full flex-col bg-bg', inChat ? 'h-dvh overflow-hidden' : 'min-h-dvh')}
+    >
       {/* New tab shows at once with a short slide in; no waiting for the old one to leave. */}
       <motion.main
         key={pathname}
@@ -85,8 +99,12 @@ function AppLayout() {
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
         className={cn(
-          'w-full flex-1 px-4 pt-safe md:px-8 lg:px-12',
-          inChat ? 'flex h-dvh flex-col overflow-hidden' : showMini ? 'pb-44' : 'pb-28',
+          'w-full px-4 pt-safe md:px-8 lg:px-12',
+          // Chat: a fixed height, not flex-1, or the column grows to fit every message and
+          // pushes the box to type in under the tab bar.
+          inChat
+            ? 'flex h-dvh min-h-0 flex-none flex-col overflow-hidden'
+            : cn('flex-1', showMini ? 'pb-44' : 'pb-28'),
         )}
         style={inChat ? { paddingBottom: hideNav ? 0 : navHeight } : undefined}
       >
@@ -132,7 +150,12 @@ function AppLayout() {
             </motion.div>
           )}
         </AnimatePresence>
-        <ul className={cn('grid w-full', shown.length === 5 ? 'grid-cols-5' : 'grid-cols-4')}>
+        <ul
+          className={cn(
+            'grid w-full',
+            shown.length === 6 ? 'grid-cols-6' : shown.length === 5 ? 'grid-cols-5' : 'grid-cols-4',
+          )}
+        >
           {shown.map(({ to, label, icon: Icon }) => {
             const active = to === '/' ? pathname === '/' : pathname.startsWith(to)
             return (
@@ -146,7 +169,9 @@ function AppLayout() {
                 >
                   <span
                     className={cn(
-                      'relative grid h-8 w-14 place-items-center rounded-pill transition',
+                      // Six tabs on a 375px phone: a slightly narrower pill keeps a gap between them.
+                      'relative grid h-8 place-items-center rounded-pill transition',
+                      shown.length === 6 ? 'w-12' : 'w-14',
                       active && 'bg-brand-soft text-brand-text',
                     )}
                   >

@@ -302,7 +302,8 @@ export const feedbackReadInput = z.object({
 
 /** The People page: which tab, a search, the order and the page. */
 export const peopleQueryInput = z.object({
-  view: z.enum(['mine', 'clients', 'team']).default('mine'),
+  // me = just yourself (pinned above your clients, so you can manage your own program).
+  view: z.enum(['me', 'mine', 'clients', 'team']).default('mine'),
   // D1 refuses LIKE patterns over 50 bytes.
   q: z.string().trim().max(40).default(''),
   sort: z.enum(['added', 'seen', 'name']).default('added'),

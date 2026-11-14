@@ -11,6 +11,7 @@ import {
   ConfirmDialog,
   cn,
   DatePicker,
+  Drawer,
   Field,
   IconButton,
   Input,
@@ -136,6 +137,7 @@ function CurrentProgram({
   onOpenWorkout: (sessionId: number) => void
 }) {
   const [resetting, setResetting] = useState(false)
+  const [moving, setMoving] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [archiving, setArchiving] = useState(false)
 
@@ -173,6 +175,14 @@ function CurrentProgram({
               Edit {firstNameOf(name)}’s version
             </Link>
           )}
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<CalendarClock className="size-4" aria-hidden />}
+            onClick={() => setMoving(true)}
+          >
+            Change start date
+          </Button>
           <Button
             variant="secondary"
             size="sm"
@@ -335,6 +345,21 @@ function CurrentProgram({
         </Button>
       </div>
 
+      <Drawer
+        open={moving}
+        onClose={() => setMoving(false)}
+        title="Change start date"
+        description={`${plan.enrollment.programName} for ${name}`}
+      >
+        {moving && (
+          <StartDateForm
+            userId={userId}
+            name={name}
+            progress={p}
+            onDone={() => setMoving(false)}
+          />
+        )}
+      </Drawer>
       <ResetProgramDialog
         open={resetting}
         onClose={() => setResetting(false)}
@@ -357,6 +382,70 @@ function CurrentProgram({
         progress={p}
       />
     </div>
+  )
+}
+
+/**
+ * Move the program's start date (day 1). Nothing logged is deleted: the calendar shifts, and
+ * workouts already done stay done. To start over from nothing, use Reset progress.
+ */
+function StartDateForm({
+  userId,
+  name,
+  progress,
+  onDone,
+}: {
+  userId: number
+  name: string
+  progress: PersonProgress
+  onDone: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [startDate, setStartDate] = useState(progress.plan.today)
+  const firstName = name.split(' ')[0] ?? name
+  const move = useMutation({
+    mutationFn: () =>
+      api(`/admin/users/${userId}/program/start-date`, { method: 'POST', body: { startDate } }),
+    onSuccess: () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: personProgressQuery(userId).queryKey }),
+        queryClient.invalidateQueries({ queryKey: ['enrollments'] }),
+      ])
+      toast({
+        title: 'Start date changed',
+        description: `${progress.plan.enrollment.programName} now starts ${shortDate(startDate)}.`,
+      })
+      onDone()
+    },
+  })
+  const unchanged = startDate === progress.plan.enrollment.startDate
+  return (
+    <form
+      className="flex flex-col gap-5"
+      onSubmit={(e) => {
+        e.preventDefault()
+        move.mutate()
+      }}
+    >
+      <p className="text-[15px] text-ink-muted">
+        Day 1 of the program moves to this date and the rest of the calendar follows. Workouts{' '}
+        {firstName} already logged are kept.
+      </p>
+      <Field
+        label="Day 1 of the program"
+        hint={`Now ${shortDate(progress.plan.enrollment.startDate)}`}
+      >
+        {(id) => <DatePicker id={id} value={startDate} onChange={setStartDate} />}
+      </Field>
+      {move.isError && (
+        <p role="alert" className="font-semibold text-danger">
+          {move.error instanceof ApiError ? move.error.message : 'Could not save. Try again.'}
+        </p>
+      )}
+      <Button type="submit" size="lg" loading={move.isPending} disabled={unchanged}>
+        Save start date
+      </Button>
+    </form>
   )
 }
 

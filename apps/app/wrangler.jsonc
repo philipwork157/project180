@@ -37,6 +37,12 @@
     "EMAIL_FROM": "Project 180 <hello@project180.co.za>",
     // Signed out after this many days without use (renewed while in use).
     "SESSION_DAYS": "30",
+    // Which Claude model reads food photos: claude-haiku-5-5 (cheapest), claude-sonnet-5-5 or
+    // claude-opus-5-5 (most careful). The key itself is a secret: ANTHROPIC_API_KEY.
+    "FOOD_MODEL": "claude-sonnet-5-5",
+    // Barcode providers to try, in order (packages/api/src/barcode). "openfoodfacts" needs no
+    // key; add ",usda" with the USDA_API_KEY secret to fall back to USDA FoodData Central.
+    "FOOD_BARCODE_PROVIDERS": "openfoodfacts",
     // Seconds a sign-in is trusted from its cookie before the database is asked again.
     // Signing someone out (or deleting them) takes up to this long to bite.
     "SESSION_CACHE_SECONDS": "60"
@@ -91,6 +97,12 @@
         "AWS_REGION": "af-south-1",
         "EMAIL_FROM": "Project 180 Dev <hello@project180.co.za>",
         "SESSION_DAYS": "30",
+        // Which Claude model reads food photos: claude-haiku-5-5 (cheapest), claude-sonnet-5-5 or
+        // claude-opus-5-5 (most careful). The key itself is a secret: ANTHROPIC_API_KEY.
+        "FOOD_MODEL": "claude-sonnet-5-5",
+        // Barcode providers to try, in order (packages/api/src/barcode). "openfoodfacts" needs no
+        // key; add ",usda" with the USDA_API_KEY secret to fall back to USDA FoodData Central.
+        "FOOD_BARCODE_PROVIDERS": "openfoodfacts",
         "SESSION_CACHE_SECONDS": "60",
         // Every email from dev goes to the developer, never to real people.
         "EMAIL_REDIRECT_TO": "philipwork157@gmail.com"

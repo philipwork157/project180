@@ -7,6 +7,10 @@ import type {
   EnrollmentSummary,
   Exercise,
   FeedbackNews,
+  FoodDay,
+  FoodPhotoSettings,
+  FoodSetup,
+  FoodSummary,
   Me,
   MyPlan,
   MyStats,
@@ -17,6 +21,7 @@ import type {
   ProgramCopySummary,
   ProgramDetail,
   ProgramSummary,
+  RecentFood,
   SessionDetail,
   SessionFeedback,
   SwapOptions,
@@ -235,7 +240,7 @@ export const coachesQuery = queryOptions({
 
 /** One page of the People list (searched, sorted and paged on the server). */
 export const peopleQuery = (params: {
-  view: 'mine' | 'clients' | 'team'
+  view: 'me' | 'mine' | 'clients' | 'team'
   q: string
   sort: 'added' | 'seen' | 'name'
   page: number
@@ -306,3 +311,57 @@ export const exerciseVideosQuery = (exerciseId: number) =>
     queryFn: () => api<VideoSearch>(`/videos?exerciseId=${exerciseId}`),
     staleTime: 60 * 60_000,
   })
+
+/** Can this site estimate food from photos? (Phone app; the button hides when it can't.) */
+export const foodSetupQuery = queryOptions({
+  queryKey: ['food', 'setup'],
+  queryFn: () => api<FoodSetup>('/me/food/setup'),
+  // An owner can switch photos off: notice within a few minutes.
+  staleTime: 5 * 60_000,
+})
+
+/** Your food for one day, with totals and your coach's targets (phone app). */
+export const foodDayQuery = (date: string) =>
+  queryOptions({
+    queryKey: ['food', 'day', date],
+    queryFn: async () => (await api<{ day: FoodDay }>(`/me/food?date=${date}`)).day,
+  })
+
+/** Your totals per day over a range (the Fuel week strip). */
+export const foodSummaryQuery = (from: string, to: string) =>
+  queryOptions({
+    queryKey: ['food', 'summary', from, to],
+    queryFn: async () =>
+      (await api<{ summary: FoodSummary }>(`/me/food/summary?from=${from}&to=${to}`)).summary,
+  })
+
+/** Foods you logged lately, to add again quickly. */
+export const foodRecentQuery = queryOptions({
+  queryKey: ['food', 'recent'],
+  queryFn: async () => (await api<{ foods: RecentFood[] }>('/me/food/recent')).foods,
+})
+
+/** A client's food for one day (admin). */
+export const personFoodDayQuery = (userId: number, date: string) =>
+  queryOptions({
+    queryKey: ['admin', 'users', userId, 'food', 'day', date],
+    queryFn: async () =>
+      (await api<{ day: FoodDay }>(`/admin/users/${userId}/food?date=${date}`)).day,
+  })
+
+/** A client's totals per day over a range, and their today (admin). */
+export const personFoodSummaryQuery = (userId: number, from: string, to: string) =>
+  queryOptions({
+    queryKey: ['admin', 'users', userId, 'food', 'summary', from, to],
+    queryFn: () =>
+      api<{ summary: FoodSummary; today: string }>(
+        `/admin/users/${userId}/food/summary?from=${from}&to=${to}`,
+      ),
+  })
+
+/** The owner's switch for food photo estimates, and whether the site has a Claude key (admin). */
+export const foodPhotoSettingsQuery = queryOptions({
+  queryKey: ['admin', 'settings', 'food-photos'],
+  queryFn: async () =>
+    (await api<{ foodPhotos: FoodPhotoSettings }>('/admin/settings/food-photos')).foodPhotos,
+})

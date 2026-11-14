@@ -20,6 +20,7 @@
     "db:generate": "bun run --filter @project180/db generate",
     "db:migrate": "bun run --filter @project180/app db:migrate:local",
     "db:apply": "bun run db:generate && bun run db:migrate",
+    "db:dev:apply": "bun run db:generate && bun run db:migrate:dev",
     "admin:create": "bun packages/api/scripts/create-admin.ts",
     "admin:create:dev": "bun packages/api/scripts/create-admin.ts --dev",
     "admin:create:live": "bun packages/api/scripts/create-admin.ts --live",

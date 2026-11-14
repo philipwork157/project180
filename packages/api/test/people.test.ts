@@ -59,6 +59,29 @@ describe('the People list', () => {
     expect((await list(kim, 'q=_')).data.total).toBe(0)
   })
 
+  it('the me view is only ever yourself, for coaches and owners', async () => {
+    const { owner, kim } = await team()
+    const coach = (await list(kim, 'view=me')).data
+    expect(coach.people.map((p: Json) => p.email)).toEqual([COACH.email])
+    expect(coach.total).toBe(1)
+    const own = (await list(owner, 'view=me')).data
+    expect(own.people.map((p: Json) => p.email)).toEqual([ADMIN.email])
+    // A search that doesn't match you hides your row.
+    expect((await list(kim, 'view=me&q=client')).data.total).toBe(0)
+  })
+
+  it('a coach can’t move the start date of someone they don’t coach', async () => {
+    const { owner, kim } = await team()
+    const theirs = (await list(owner, `view=mine&q=${encodeURIComponent(MEMBER.email)}`)).data
+    const id = theirs.people[0].id
+    const res = await call(`/admin/users/${id}/program/start-date`, {
+      method: 'POST',
+      cookie: kim,
+      body: { startDate: '2026-11-16' },
+    })
+    expect(res.status).toBe(404)
+  })
+
   it('a coach only ever sees their own clients, whatever they ask for', async () => {
     const { owner, kim } = await team()
     for (const view of ['mine', 'clients', 'team']) {

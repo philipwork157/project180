@@ -10,7 +10,7 @@
 - Shared logic (dates, stats, validation, the workout board in `board.ts`) lives in packages/shared with unit tests.
 - Code style: Biome (single quotes, no semicolons, 2 spaces, 100 cols).
 - Both apps send a Content-Security-Policy (`apps/*/public/_headers`): no inline scripts, and any new outside host (images, frames, fonts, scripts) must be added there or the browser blocks it. The API refuses cross-site form posts (`csrf()` in packages/api/src/index.ts).
-- Forms: always use Field + Input/Select/Textarea from @project180/ui. Never a bare <select>: the Select component removes the browser arrow and draws a chevron 12px inside the right edge (pr-10). Two deliberate exceptions: the program grid's cells (an invisible native `<select>` laid over each cell, so a tap opens the phone's own picker) and the big inline name field at the top of the workout and program editors.
+- Forms: always use Field + Input/Select/Textarea from @project180/ui. Never a bare <select>: the Select component removes the browser arrow and draws a chevron 12px inside the right edge (pr-10). One deliberate exception: the big inline name field at the top of the workout and program editors.
 - Icon-only actions: always IconButton from @project180/ui (square, tooltip + aria-label built in). Never a padded Button with only an icon.
 - Admin add/edit/assign flows open a Drawer (side panel); assigning always uses AssignForm.
 - cn() uses tailwind-merge, so a className passed to a component overrides its defaults.
@@ -20,6 +20,14 @@
 - Deleting: only with ConfirmDialog. Library items in use (workouts, logged history) are archived, never deleted; the API refuses with 409.
 
 ## Phone app (apps/app): every feature must feel native on a phone AND look good in a browser
+
+**Every new feature: obvious, beautiful, and designed twice (phone PWA and web).** Most people use the app installed on their phone as a PWA, but it's also used in a desktop browser, and both must look finished, not just "working". A screen that looks good on a phone but stretched, empty or awkward on a laptop is not done.
+
+- **Obvious:** a new feature must be easy to find and easy to understand without being told. Visible entry point (a tab, a card, a clear button with a label), a one-line hint where an action isn't self-evident (e.g. "Click a day to change it"), hover/press states on everything tappable, and no hidden gestures as the only way to do something.
+- **Designed for both, not just squeezed:** design the phone layout, then design the desktop layout on purpose (columns, side panels, wider cards that fill the row), instead of letting the phone column stretch or leaving half the screen empty.
+- **Fixed bars never cover content:** the bottom tab bar, mini workout bar and sticky buttons must never sit on top of buttons or text at any width. Leave room for them (padding) or move the action somewhere else on desktop.
+- **Balanced on desktop:** columns should end at a similar height; don't stack everything in one tall left column while the right side stays empty. Long secondary blocks (charts, history) go full width under the main grid or into their own column.
+- **Before calling it done:** screenshot it at 375px and 1440px, in light and dark, and look at both like a user would. If either looks unfinished, fix it.
 
 Design and build every screen phone-first, then check it at desktop width. Before calling a feature done:
 
@@ -55,6 +63,10 @@ One spacing scale, so screens never look cramped or doubled up:
 - Check every screen at 375px and 1440px wide, in light and dark, before calling it done.
 
 ## Admin shell
+
+- Program editor: the schedule gets the full width. Clicking a day opens `ProgramDayDrawer` (apps/admin/src/components/program-day.tsx) to pick its workout or rest, toggle the weigh-in, or edit the workout; dragging a day onto another swaps them (`swapCells` in packages/shared/src/program-grid.ts, with Undo in the toast); "Fill days" opens the workout palette in a Drawer and the brush bar shows above the grid.
+
+- The People page (`/users`) lists you first (pinned, with your own program) and then only the clients you coach, for owners too. The All clients and Team tabs are parked until there are other coaches; the API still has those views (`view=clients|team`).
 
 - The sidebar collapses to an icon rail (remembered per device); collapsed items show a `Tooltip side="right"`. The signed-in person sits at the bottom (`UserMenu` in apps/admin/src/components/user-menu.tsx) with Settings, the theme switch, Open the phone app and Sign out. Settings live at `/settings`.
 
@@ -133,7 +145,7 @@ One spacing scale, so screens never look cramped or doubled up:
 
 - Photos are bundled in the phone app: `apps/app/public/exercise-images/<id>/0.webp` (start) and `1.webp` (finish), about 720px, WebP. `exercises.image_key` is `exercise-images/<id>`; build URLs with `exercisePhotos()` from shared (the admin passes `APP_URL`). The phone app's service worker caches them on first view (not precached).
 - The mapping lives in `packages/db/seed/images.ts` (our exercise name -> source id). `bun run db:seed` fills `image_key` only where it is empty, so photos an owner sets are never overwritten.
-- **Only use images whose licence lets us use them in a commercial app, and record the source.** The approved source is **free-exercise-db** (github.com/yuhonas/free-exercise-db, Unlicense = public domain, no credit required). Clone it with `git clone --depth 1 https://github.com/yuhonas/free-exercise-db`, take `exercises/<id>/0.jpg` and `1.jpg`, resize to 720px and save as WebP.
+- **Only use images whose licence lets us use them in a commercial app, and record the source.** The approved source is **free-exercise-db** (github.com/yuhonas/free-exercise-db, Unlicense = public domain, no credit required). Clone it into the repo root with `git clone --depth 1 https://github.com/yuhonas/free-exercise-db .free-exercise-db` (git-ignored), take `exercises/<id>/0.jpg` and `1.jpg`, resize to 720px and save as WebP.
 - When you add new exercises, look for a match in free-exercise-db first. A match must be the **same movement with the same equipment** (a kettlebell photo is not a dumbbell exercise; a partner stretch is not a solo stretch). Check every new photo by eye before adding it (open the images; don't trust names alone). If there is no clear match, add no photo: the form cue is shown instead.
 - Other open sources need credit and share-alike (wger: CC BY-SA 3.0; Everkinetic drawings: CC BY-SA 3.0). Only use them if we also add a visible credits page with each image's author and licence. Never use images from Google, Pinterest, YouTube stills, other apps or paid libraries without a written licence.
 - Pelvic floor, pregnancy and postnatal exercises get no stock photos: only the coach's own photos, because how these are shown matters.

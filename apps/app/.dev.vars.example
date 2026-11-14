@@ -13,6 +13,14 @@ APP_URL=http://localhost:5173
 EMAIL_REDIRECT_TO=philipwork157@gmail.com
 # How-to video search inside the app (YouTube Data API v3). Without it, the app opens YouTube instead.
 # YOUTUBE_API_KEY=
+# Food photo estimates (Claude API key from console.anthropic.com). Without it the photo button hides.
+# ANTHROPIC_API_KEY=
+# FOOD_MODEL=claude-sonnet-5-5
+# Barcode lookups, in order. Open Food Facts needs no key; USDA needs a free key from api.data.gov.
+# FOOD_BARCODE_PROVIDERS=openfoodfacts,usda
+# USDA_API_KEY=
+# Open Food Facts asks apps to test against staging: https://world.openfoodfacts.net
+# OPEN_FOOD_FACTS_URL=https://world.openfoodfacts.net
 # Push notifications to phones. Without the pair nothing is pushed (the bell in the app still works).
 # Make one pair with `bunx web-push generate-vapid-keys` and use the same pair in both apps.
 # VAPID_PUBLIC_KEY=

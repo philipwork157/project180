@@ -1,10 +1,11 @@
-import { ApiError, api, authClient, meQuery } from '@project180/client'
-import { type Me, ROLE_LABELS } from '@project180/shared'
+import { ApiError, api, authClient, foodPhotoSettingsQuery, meQuery } from '@project180/client'
+import { type FoodPhotoSettings, isOwner, type Me, ROLE_LABELS } from '@project180/shared'
 import { Button, Card, Field, Input, PasswordInput, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Mail, Send } from 'lucide-react'
+import { Camera, Mail, Send } from 'lucide-react'
 import { type FormEvent, type ReactNode, useState } from 'react'
+import { Segmented } from '../../components/controls'
 import { PageHeader } from '../../components/page-header'
 import { PersonActivityPanel } from '../../components/person-activity'
 
@@ -64,6 +65,12 @@ function SettingsPage() {
           description="Where the app's emails (new passwords, welcome emails) actually go on this site. On the dev site they all go to one test inbox."
         >
           <EmailSettings />
+        </Section>
+        <Section
+          title="Food photos"
+          description="Lets clients take a photo of a meal or a nutrition label in the app's Fuel tab and get the calories and protein estimated. Typing food in always works."
+        >
+          <FoodPhotoSwitch canChange={isOwner(me.role)} />
         </Section>
       </Card>
     </>
@@ -300,6 +307,87 @@ function EmailSettings() {
       >
         Send a test email
       </Button>
+    </div>
+  )
+}
+
+function foodPhotoStatus(f: FoodPhotoSettings): { label: string; tone: string; text: string } {
+  if (!f.enabled)
+    return {
+      label: 'Off',
+      tone: 'bg-surface-raised text-ink-muted',
+      text: 'Clients don’t see the photo button. They can still type food in.',
+    }
+  if (!f.configured)
+    return {
+      label: 'Not set up',
+      tone: 'bg-surface-raised text-ink-muted',
+      text: 'Switched on, but this site has no Claude API key (ANTHROPIC_API_KEY), so the photo button stays hidden.',
+    }
+  return {
+    label: 'On',
+    tone: 'bg-brand-soft text-brand-text',
+    text: 'Clients can take food photos, up to 20 a day each. Photos are read, then thrown away.',
+  }
+}
+
+/** The owner turns photo estimates on or off for everyone. Coaches see the status only. */
+function FoodPhotoSwitch({ canChange }: { canChange: boolean }) {
+  const queryClient = useQueryClient()
+  const status = useQuery(foodPhotoSettingsQuery)
+  const save = useMutation({
+    mutationFn: (enabled: boolean) =>
+      api<{ foodPhotos: FoodPhotoSettings }>('/admin/settings/food-photos', {
+        method: 'PUT',
+        body: { enabled },
+      }),
+    onSuccess: ({ foodPhotos }) => {
+      queryClient.setQueryData(foodPhotoSettingsQuery.queryKey, foodPhotos)
+      toast({ title: foodPhotos.enabled ? 'Food photos turned on' : 'Food photos turned off' })
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t change it',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  const f = status.data
+  if (status.isError)
+    return (
+      <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
+        Couldn’t load this setting. If the database is behind, run the latest migration and try
+        again.
+      </p>
+    )
+  if (!f) return <div className="h-24 animate-pulse rounded-md bg-surface-raised" />
+  const m = foodPhotoStatus(f)
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start gap-3 rounded-md bg-surface-raised p-4">
+        <Camera className="mt-0.5 size-5 shrink-0 text-ink-muted" aria-hidden />
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className={`self-start rounded-full px-2.5 py-0.5 font-bold text-[12px] ${m.tone}`}>
+            {m.label}
+          </span>
+          <p className="text-[14px]">{m.text}</p>
+        </div>
+      </div>
+      {canChange ? (
+        <div className="self-start">
+          <Segmented
+          label="Food photos"
+          value={f.enabled ? 'on' : 'off'}
+          onChange={(v) => v !== (f.enabled ? 'on' : 'off') && save.mutate(v === 'on')}
+          options={[
+            { value: 'on', label: 'On' },
+            { value: 'off', label: 'Off' },
+          ]}
+        />
+        </div>
+      ) : (
+        <p className="text-[13px] text-ink-muted">Only an owner can change this.</p>
+      )}
     </div>
   )
 }

@@ -12,3 +12,6 @@ routeTree.gen.ts
 packages/db/seed/library.sql
 packages/db/seed/philip.sql
 .vitest
+
+# Photo source, cloned locally to pick exercise photos (see CLAUDE.md > Exercise photos).
+.free-exercise-db/

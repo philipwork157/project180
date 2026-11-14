@@ -1,0 +1,121 @@
+// The phone's food log: saving, editing and deleting foods, and turning a photo into a draft.
+// Every change updates the day from the server's reply at once; the rest refreshes behind it.
+import { api, apiForm, foodDayQuery, foodRecentQuery } from '@project180/client'
+import type {
+  BarcodeProduct,
+  FoodDay,
+  FoodPhotoDraft,
+  FoodSource,
+  Meal,
+} from '@project180/shared'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+
+/** One food as the forms hold it, with the id made on this phone (kept across retries). */
+export interface FoodDraftItem {
+  clientUuid: string
+  name: string
+  grams: number | null
+  kcal: number
+  proteinG: number
+  carbsG: number | null
+  fatG: number | null
+}
+
+function useDayReply() {
+  const queryClient = useQueryClient()
+  return (day: FoodDay) => {
+    queryClient.setQueryData(foodDayQuery(day.date).queryKey, day)
+    void queryClient.invalidateQueries({ queryKey: ['food', 'summary'] })
+    void queryClient.invalidateQueries({ queryKey: foodRecentQuery.queryKey })
+  }
+}
+
+export function useAddFood(onSaved?: () => void) {
+  const putDay = useDayReply()
+  return useMutation({
+    mutationFn: (input: {
+      date: string
+      meal: Meal
+      source: FoodSource
+      entries: FoodDraftItem[]
+    }) => api<{ day: FoodDay }>('/me/food', { method: 'POST', body: input }),
+    onSuccess: ({ day }) => {
+      putDay(day)
+      navigator.vibrate?.(20)
+      onSaved?.()
+    },
+  })
+}
+
+export function useUpdateFood(onSaved?: () => void) {
+  const putDay = useDayReply()
+  return useMutation({
+    mutationFn: ({ id, ...changes }: { id: number } & Partial<Omit<FoodDraftItem, 'clientUuid'>> & {
+        meal?: Meal
+      }) => api<{ day: FoodDay }>(`/me/food/${id}`, { method: 'PATCH', body: changes }),
+    onSuccess: ({ day }) => {
+      putDay(day)
+      onSaved?.()
+    },
+  })
+}
+
+export function useDeleteFood(onDeleted?: () => void) {
+  const putDay = useDayReply()
+  return useMutation({
+    mutationFn: ({ id }: { id: number }) =>
+      api<{ day: FoodDay }>(`/me/food/${id}`, { method: 'DELETE' }),
+    onSuccess: ({ day }) => {
+      putDay(day)
+      onDeleted?.()
+    },
+  })
+}
+
+/**
+ * Shrinks a photo on the phone (longest side 1024 px, JPEG) so it uploads quickly on poor signal
+ * and costs less to read. Falls back to the original if the browser can't decode it.
+ */
+export async function shrinkPhoto(file: File): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.round(bitmap.height * scale)
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close()
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.82))
+    return blob ? new File([blob], 'meal.jpg', { type: 'image/jpeg' }) : file
+  } catch {
+    return file
+  }
+}
+
+/** Sends a photo (and an optional note) to be read. Saves nothing: returns a draft to check. */
+export function usePhotoEstimate() {
+  return useMutation({
+    mutationFn: async ({ file, hint }: { file: File; hint: string }) => {
+      const form = new FormData()
+      form.set('photo', await shrinkPhoto(file))
+      if (hint.trim()) form.set('hint', hint.trim())
+      return (await apiForm<{ draft: FoodPhotoDraft }>('/me/food/photo', form)).draft
+    },
+  })
+}
+
+/** "12.5" or "12,5" → 12.5; empty or not a number → null. */
+export function parseAmount(value: string): number | null {
+  const n = Number.parseFloat(value.replace(',', '.'))
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+export const amountText = (n: number | null | undefined) => (n == null ? '' : String(n))
+
+/** Looks a barcode up (the server tries each provider and keeps a copy). 404 = nobody knows it. */
+export function useBarcodeLookup() {
+  return useMutation({
+    mutationFn: async (code: string) =>
+      (await api<{ product: BarcodeProduct }>(`/me/food/barcode/${code}`)).product,
+  })
+}

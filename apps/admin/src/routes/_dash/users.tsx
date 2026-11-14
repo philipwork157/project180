@@ -53,7 +53,7 @@ import {
 import { useEffect, useId, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { ProfileSummary } from '../../components/client-profile'
-import { Segmented, Toolbar } from '../../components/controls'
+import { Toolbar } from '../../components/controls'
 import { NewClientDrawer } from '../../components/new-client-wizard'
 import { PageHeader } from '../../components/page-header'
 import { ActiveDot, PersonActivityPanel } from '../../components/person-activity'
@@ -67,7 +67,6 @@ export const Route = createFileRoute('/_dash/users')({
 })
 
 type Sort = 'added' | 'seen' | 'name'
-type View = 'mine' | 'clients' | 'team'
 
 type Panel =
   | { kind: 'add' }
@@ -86,14 +85,15 @@ function useSettled<T>(value: T, ms = 250) {
 }
 
 /**
- * The People list: one tab at a time, searched, sorted and paged on the server, one compact
- * row per person. A person's details (profile, devices, program) load only when you open them,
+ * The People list: you first (so you can manage your own program), then the clients you coach,
+ * searched, sorted and paged on the server, one compact row per person. Every coach's clients
+ * and the team (other owners and coaches) aren't listed for now; the API still has those views.
+ * A person's details (profile, devices, program) load only when you open them,
  * so the page costs the same with 10 clients or 1,000.
  */
 function UsersPage() {
   const { me } = Route.useRouteContext()
   const owner = isOwner(me.role)
-  const [view, setView] = useState<View>('mine')
   const [sort, setSort] = useState<Sort>('added')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -103,15 +103,20 @@ function UsersPage() {
   const sortId = useId()
   const searchId = useId()
   const q = useSettled(search.trim())
-  const tab: View = owner ? view : 'mine'
   const people = useQuery({
-    ...peopleQuery({ view: tab, q, sort, page }),
+    ...peopleQuery({ view: 'mine', q, sort, page }),
+    placeholderData: keepPreviousData,
+  })
+  // You, pinned above your clients on the first page (hidden when a search doesn't match you).
+  const you = useQuery({
+    ...peopleQuery({ view: 'me', q, sort: 'added', page: 1 }),
     placeholderData: keepPreviousData,
   })
   const data = people.data
-  const list = data?.people ?? []
+  const clients = data?.people ?? []
+  const list = page === 1 ? [...(you.data?.people ?? []), ...clients] : clients
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
-  // A new tab, search or order starts at page 1 with nothing open.
+  // A new search or order starts at page 1 with nothing open.
   const reset = () => {
     setPage(1)
     setOpen(null)
@@ -123,12 +128,8 @@ function UsersPage() {
   return (
     <>
       <PageHeader
-        title={owner ? 'People' : 'My clients'}
-        subtitle={
-          owner
-            ? 'Your clients, every coach’s clients, and your team.'
-            : 'The people you coach, their programs and how they’re going. Only you see them.'
-        }
+        title="My clients"
+        subtitle="You and the people you coach: programs, progress and how they’re going."
         action={
           <Button
             icon={<Plus className="size-5" aria-hidden />}
@@ -139,21 +140,6 @@ function UsersPage() {
         }
       />
       <Toolbar>
-        {owner && (
-          <Segmented
-            label="Show"
-            value={view}
-            onChange={(v) => {
-              setView(v)
-              reset()
-            }}
-            options={[
-              { value: 'mine', label: 'My clients', count: data?.counts.mine },
-              { value: 'clients', label: 'All clients', count: data?.counts.clients },
-              { value: 'team', label: 'Team', count: data?.counts.team },
-            ]}
-          />
-        )}
         <label htmlFor={searchId} className="relative w-full sm:w-64">
           <span className="sr-only">Search by name or email</span>
           <Search
@@ -204,52 +190,51 @@ function UsersPage() {
           <p className="text-[14px] text-ink-muted">Couldn’t load people. Try again.</p>
         </Card>
       ) : list.length === 0 ? (
-        q ? (
-          <Card>
-            <p className="text-[14px] text-ink-muted">Nobody matches “{q}”.</p>
-          </Card>
-        ) : (
-          <EmptyState
-            icon={<UsersRound className="size-7" aria-hidden />}
-            title={tab === 'team' ? 'No team yet' : 'No clients yet'}
-            action={
-              <Button
-                icon={<Plus className="size-5" aria-hidden />}
-                onClick={() => setPanel({ kind: 'add' })}
-              >
-                Add a client
-              </Button>
-            }
-          >
-            {tab === 'mine'
-              ? 'Clients you add are yours: you build their programs and see how they’re going.'
-              : 'Clients your coaches add show up here too.'}
-          </EmptyState>
-        )
-      ) : (
-        <Card
-          className={cn(
-            // overflow-hidden: a highlighted row keeps the card's rounded corners.
-            'overflow-hidden p-0 transition-opacity md:p-0',
-            people.isPlaceholderData && 'opacity-60',
-          )}
-        >
-          <ul className="flex flex-col divide-y divide-border">
-            {list.map((u) => (
-              <PersonRow
-                key={u.id}
-                person={u}
-                isMe={u.id === me.id}
-                owner={owner}
-                meId={me.id}
-                open={open === u.id}
-                onToggle={() => setOpen((id) => (id === u.id ? null : u.id))}
-                onAssign={() => setPanel({ kind: 'assign', user: u })}
-                onPassword={() => setPanel({ kind: 'password', user: u })}
-              />
-            ))}
-          </ul>
+        <Card>
+          <p className="text-[14px] text-ink-muted">Nobody matches “{q}”.</p>
         </Card>
+      ) : (
+        <div className="flex flex-col gap-5">
+          <Card
+            className={cn(
+              // overflow-hidden: a highlighted row keeps the card's rounded corners.
+              'overflow-hidden p-0 transition-opacity md:p-0',
+              people.isPlaceholderData && 'opacity-60',
+            )}
+          >
+            <ul className="flex flex-col divide-y divide-border">
+              {list.map((u) => (
+                <PersonRow
+                  key={u.id}
+                  person={u}
+                  isMe={u.id === me.id}
+                  owner={owner}
+                  meId={me.id}
+                  open={open === u.id}
+                  onToggle={() => setOpen((id) => (id === u.id ? null : u.id))}
+                  onAssign={() => setPanel({ kind: 'assign', user: u })}
+                  onPassword={() => setPanel({ kind: 'password', user: u })}
+                />
+              ))}
+            </ul>
+          </Card>
+          {clients.length === 0 && !q && (
+            <EmptyState
+              icon={<UsersRound className="size-7" aria-hidden />}
+              title="No clients yet"
+              action={
+                <Button
+                  icon={<Plus className="size-5" aria-hidden />}
+                  onClick={() => setPanel({ kind: 'add' })}
+                >
+                  Add a client
+                </Button>
+              }
+            >
+              Clients you add are yours: you build their programs and see how they’re going.
+            </EmptyState>
+          )}
+        </div>
       )}
 
       {data && data.total > data.pageSize && (
@@ -349,6 +334,8 @@ function PersonRow({
   onPassword: () => void
 }) {
   const client = isClient(u.role)
+  // Your own row shows your program too (staff train themselves in the app).
+  const trains = client || isMe
   const active = !!u.lastSeenAt && Date.now() - new Date(u.lastSeenAt).getTime() < ACTIVE_NOW_MS
   const detailId = `person-${u.id}`
   return (
@@ -385,7 +372,7 @@ function PersonRow({
             </span>
           </span>
           <span className="truncate text-[13px] text-ink-muted md:text-[14px]">
-            {client ? (
+            {trains ? (
               u.programName ? (
                 <span className="font-semibold text-ink">{u.programName}</span>
               ) : (
@@ -398,11 +385,11 @@ function PersonRow({
             )}
           </span>
           <span className="truncate text-[13px] text-ink-muted">
-            {client &&
+            {trains &&
               (u.lastWorkoutAt
                 ? `Trained ${timeAgo(u.lastWorkoutAt).toLowerCase()}`
                 : 'No workouts yet')}
-            {client && ' · '}
+            {trains && ' · '}
             {active ? 'active now' : u.lastSeenAt ? `seen ${timeAgo(u.lastSeenAt).toLowerCase()}` : 'not signed in yet'}
           </span>
         </span>
@@ -455,7 +442,7 @@ function PersonRow({
           </div>
           {client && <ProfileSummary userId={u.id} name={u.name} />}
           <PersonActivityPanel userId={u.id} name={u.name} isMe={isMe} />
-          {client && <PersonProgressPanel userId={u.id} name={u.name} onAssign={onAssign} />}
+          {trains && <PersonProgressPanel userId={u.id} name={u.name} onAssign={onAssign} />}
         </div>
       )}
     </li>

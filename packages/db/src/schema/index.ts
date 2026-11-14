@@ -1,3 +1,5 @@
 export * from './auth'
 export * from './library'
+export * from './nutrition'
+export * from './settings'
 export * from './tracking'

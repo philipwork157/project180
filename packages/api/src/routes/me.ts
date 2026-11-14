@@ -46,6 +46,7 @@ import { isPushEndpoint, pushConfigured } from '../push'
 import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
 import { enrollmentQuery } from './enrollments'
+import { meFoodRoutes } from './food'
 import { loadProgramDays } from './programs'
 
 const checkinInput = z.object({
@@ -409,3 +410,5 @@ export const meRoutes = new Hono<AppEnv>()
       })
     return c.json({ ok: true })
   })
+  /** Your food log: days, totals, targets and photo estimates (routes/food.ts). */
+  .route('/food', meFoodRoutes)

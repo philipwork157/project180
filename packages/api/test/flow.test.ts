@@ -199,6 +199,59 @@ describe('programs and the plan', () => {
     expect((await call(`/sessions/${s.data.session.id}`, { cookie: member })).status).toBe(404)
   })
 
+  it('moves a program’s start date and keeps what they logged', async () => {
+    const { admin, member } = await setupHousehold()
+    const { workout, squat } = await library(admin)
+    const program = await call<Json>('/programs', {
+      method: 'POST',
+      cookie: admin,
+      body: {
+        name: 'P',
+        durationWeeks: 2,
+        days: [{ weekNumber: 1, dayNumber: 1, workoutId: workout.id }],
+      },
+    })
+    const userId = await memberId(admin)
+    const enrol = await call<Json>('/enrollments', {
+      method: 'POST',
+      cookie: admin,
+      body: { userId, programId: program.data.program.id, startDate: '2026-11-02' },
+    })
+    const day = await firstPlanDay(member)
+    const s = await call<Json>('/sessions', {
+      method: 'POST',
+      cookie: member,
+      body: {
+        clientUuid: crypto.randomUUID(),
+        workoutId: day.workoutId,
+        enrollmentId: enrol.data.enrollment.id,
+        programDayId: day.programDayId,
+      },
+    })
+    await call(`/sessions/${s.data.session.id}/sets`, {
+      method: 'PUT',
+      cookie: member,
+      body: {
+        clientUuid: crypto.randomUUID(),
+        exerciseId: squat,
+        setNumber: 1,
+        weightKg: 40,
+        reps: 8,
+      },
+    })
+
+    const path = `/admin/users/${userId}/program/start-date`
+    const body = { startDate: '2026-11-16' }
+    expect((await call(path, { method: 'POST', cookie: member, body })).status).toBe(403)
+    expect((await call(path, { method: 'POST', cookie: admin, body })).status).toBe(204)
+    const after = await call<Json>(`/admin/users/${userId}/progress`, { cookie: admin })
+    expect(after.data.progress.plan.enrollment.startDate).toBe('2026-11-16')
+    expect(after.data.progress.impact).toMatchObject({ sessions: 1, loggedSets: 1 })
+    expect((await call(`/sessions/${s.data.session.id}`, { cookie: member })).status).toBe(200)
+    const bad = await call(path, { method: 'POST', cookie: admin, body: { startDate: 'today' } })
+    expect(bad.status).toBe(400)
+  })
+
   it('removes a program from someone, with everything they logged on it', async () => {
     const { admin, member } = await setupHousehold()
     const { workout, squat } = await library(admin)

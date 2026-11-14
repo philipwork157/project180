@@ -26,3 +26,14 @@ export async function api<T>(
   }
   return data as T
 }
+
+/** Sends a form with files (photos) to the API on the same origin. */
+export async function apiForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: 'POST', credentials: 'same-origin', body: form })
+  const data: unknown = await res.json().catch(() => null)
+  if (!res.ok) {
+    const message = (data as { error?: string } | null)?.error ?? res.statusText
+    throw new ApiError(res.status, message)
+  }
+  return data as T
+}

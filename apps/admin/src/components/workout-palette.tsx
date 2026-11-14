@@ -22,10 +22,13 @@ export function WorkoutPalette({
   workouts,
   brush,
   onBrush,
+  inPanel = false,
 }: {
   workouts: WorkoutSummary[]
   brush: Brush
   onBrush: (brush: Brush) => void
+  /** Inside a side panel: no card of its own, no heading, one long list. */
+  inPanel?: boolean
 }) {
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
@@ -43,9 +46,9 @@ export function WorkoutPalette({
   return (
     <section
       aria-label="Fill days"
-      className="flex flex-col gap-3 rounded-lg bg-surface p-4 shadow-card"
+      className={cn('flex flex-col gap-3', !inPanel && 'rounded-lg bg-surface p-4 shadow-card')}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className={cn('flex items-start justify-between gap-3', inPanel && 'hidden')}>
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="font-bold text-[15px]">Fill days</h2>
           <p aria-live="polite" className="text-[13px] text-ink-muted">
@@ -80,7 +83,13 @@ export function WorkoutPalette({
         </div>
       )}
 
-      <ul className="-mx-1 grid max-h-72 grid-cols-1 gap-1 overflow-y-auto px-1 sm:grid-cols-2 lg:grid-cols-3 xl:max-h-[min(60vh,32rem)] xl:grid-cols-1">
+      <ul
+        className={cn(
+          '-mx-1 grid grid-cols-1 gap-1 px-1',
+          !inPanel &&
+            'max-h-72 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:max-h-[min(60vh,32rem)] xl:grid-cols-1',
+        )}
+      >
         <li>
           <PaletteRow
             on={brush === 'rest'}

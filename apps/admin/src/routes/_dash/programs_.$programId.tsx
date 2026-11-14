@@ -6,8 +6,8 @@ import {
   programQuery,
   workoutsQuery,
 } from '@project180/client'
-import type { ProgramDetail, ProgramInput } from '@project180/shared'
-import { isOwner } from '@project180/shared'
+import type { ProgramCell, ProgramDetail, ProgramInput } from '@project180/shared'
+import { cellKey, EMPTY_CELL, isOwner, swapCells } from '@project180/shared'
 import {
   Button,
   Card,
@@ -25,6 +25,9 @@ import {
   Archive,
   ArrowLeft,
   CopyCheck,
+  GripVertical,
+  ListPlus,
+  Pencil,
   RefreshCw,
   Scale,
   Trash2,
@@ -32,12 +35,12 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { motion } from 'motion/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { Stepper } from '../../components/controls'
 import { DeleteForGood } from '../../components/delete-for-good'
 import { HistoryControls, useDraftBackup, useDraftHistory } from '../../components/draft-history'
+import { ProgramDayDrawer } from '../../components/program-day'
 import { useUnsavedChangesGuard } from '../../components/unsaved-changes'
 import { UpdateClientsDrawer } from '../../components/update-clients'
 import { WorkoutPalette } from '../../components/workout-palette'
@@ -46,10 +49,7 @@ export const Route = createFileRoute('/_dash/programs_/$programId')({
   component: ProgramEditorPage,
 })
 
-interface Cell {
-  workoutId: number | null
-  checkinRequired: boolean
-}
+type Cell = ProgramCell
 
 interface Draft {
   name: string
@@ -58,7 +58,7 @@ interface Draft {
   cells: Record<string, Cell>
 }
 
-const keyOf = (week: number, day: number) => `${week}:${day}`
+const keyOf = cellKey
 const EMPTY: Draft = {
   name: '',
   description: '',
@@ -156,6 +156,11 @@ function Builder({
   const [savedDraft, setSavedDraft] = useState<Draft>(initial)
   const [saved, setSaved] = useState(() => JSON.stringify(toInput(initial)))
   const [brush, setBrush] = useState<number | 'rest' | null>(null)
+  const [fillOpen, setFillOpen] = useState(false)
+  // The day open in the side panel, and the day being dragged / hovered while dragging.
+  const [editing, setEditing] = useState<{ week: number; day: number } | null>(null)
+  const [dragFrom, setDragFrom] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState<string | null>(null)
   const [error, setError] = useState<string>()
   const [assignOpen, setAssignOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
@@ -177,9 +182,35 @@ function Builder({
   const setCell = (week: number, day: number, patch: Partial<Cell>) =>
     setDraft((d) => {
       const k = keyOf(week, day)
-      const cur = d.cells[k] ?? { workoutId: null, checkinRequired: false }
+      const cur = d.cells[k] ?? EMPTY_CELL
       return { ...d, cells: { ...d.cells, [k]: { ...cur, ...patch } } }
     })
+  const cellAt = (week: number, day: number) => draft.cells[keyOf(week, day)] ?? EMPTY_CELL
+  // Drag a day onto another: they swap (workout and weigh-in), with Undo in the toast.
+  const swap = (from: string, to: string) => {
+    const before = draft.cells
+    const after = swapCells(before, from, to)
+    if (after === before) return
+    const label = (k: string) => {
+      const [w, d] = k.split(':')
+      return `week ${w} day ${d}`
+    }
+    setDraft((d) => ({ ...d, cells: after }))
+    toast({
+      title: 'Days swapped',
+      description: `${label(from)} and ${label(to)}. Save to keep it.`,
+      action: { label: 'Undo', onClick: () => setDraft((d) => ({ ...d, cells: before })) },
+    })
+  }
+  // Esc puts the fill brush down, wherever focus is.
+  useEffect(() => {
+    if (brush === null) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setBrush(null)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [brush])
+  const brushName =
+    brush === 'rest' ? 'rest days' : brush !== null ? (names.get(brush) ?? 'this workout') : null
   const copyWeekToAll = (from: number) => {
     const before = draft.cells
     toast({
@@ -192,9 +223,7 @@ function Builder({
       for (let week = 1; week <= d.durationWeeks; week++) {
         if (week === from) continue
         for (let day = 1; day <= 7; day++) {
-          cells[keyOf(week, day)] = {
-            ...(d.cells[keyOf(from, day)] ?? { workoutId: null, checkinRequired: false }),
-          }
+          cells[keyOf(week, day)] = { ...(d.cells[keyOf(from, day)] ?? EMPTY_CELL) }
         }
       }
       return { ...d, cells }
@@ -347,203 +376,272 @@ function Builder({
         </p>
       )}
 
-      {/* Phones: fill-days list, then the schedule, then settings. Desktop: tools on the left. */}
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
+      {/* Tools in one row above the schedule, which gets the whole width. */}
+      <div className="flex flex-wrap items-center gap-3">
         {canEdit && (
-          <div className="flex flex-col gap-2">
-            <WorkoutPalette workouts={workouts.data ?? []} brush={brush} onBrush={setBrush} />
-            {workouts.data?.length === 0 && (
-              <Link
-                to="/workouts/$workoutId"
-                params={{ workoutId: 'new' }}
-                className="px-1 font-bold text-[13px] text-brand-text"
-              >
-                Build a workout first →
-              </Link>
-            )}
-          </div>
+          <Button
+            variant={brush === null ? 'secondary' : 'primary'}
+            icon={<ListPlus className="size-4" aria-hidden />}
+            onClick={() => setFillOpen(true)}
+          >
+            Fill days
+          </Button>
         )}
-
-        <section
-          aria-label="Schedule"
-          className="flex min-w-0 flex-col gap-3 xl:col-start-2 xl:row-span-2 xl:row-start-1"
+        <div className="flex items-center gap-3">
+          <span className="font-bold text-[13px]">Length</span>
+          <Stepper
+            label="weeks"
+            suffix="wks"
+            value={draft.durationWeeks}
+            min={1}
+            max={52}
+            onChange={(v) => update({ durationWeeks: v ?? 1 })}
+          />
+        </div>
+        {canEdit && (
+          <p className="font-semibold text-[13px] text-ink-muted sm:ml-auto">
+            Click a day to change it. Drag a day onto another to swap them.
+          </p>
+        )}
+      </div>
+      {canEdit && workouts.data?.length === 0 && (
+        <Link
+          to="/workouts/$workoutId"
+          params={{ workoutId: 'new' }}
+          className="-mt-3 font-bold text-[13px] text-brand-text"
         >
-          <div className="overflow-x-auto rounded-lg bg-surface p-3 shadow-card">
-            <table className="w-full min-w-[560px] table-fixed border-separate border-spacing-1">
-              <thead>
-                <tr>
-                  <th className="sticky left-0 z-20 w-14 bg-surface" />
-                  {[1, 2, 3, 4, 5, 6, 7].map((day) => (
-                    <th
-                      key={day}
-                      className="pb-1 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]"
-                    >
-                      Day {day}
-                    </th>
-                  ))}
-                  <th className="w-10" />
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: draft.durationWeeks }, (_, i) => i + 1).map((week) => (
-                  <tr key={week}>
-                    <th
-                      scope="row"
-                      // Stays in view while the days scroll sideways on a phone; solid so days
-                      // pass cleanly underneath.
-                      className="sticky left-0 z-20 bg-surface pr-2 text-left align-middle"
-                    >
-                      <span className="flex flex-col">
-                        <span className="font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.08em]">
-                          Week
-                        </span>
-                        <span className="tabular font-display font-extrabold text-[18px] leading-6">
-                          {week}
-                        </span>
+          Build a workout first →
+        </Link>
+      )}
+
+      {brushName && (
+        <div
+          role="status"
+          className="-mt-2 flex flex-wrap items-center gap-3 rounded-md bg-brand-soft px-4 py-2.5 font-semibold text-[14px] text-brand-text"
+        >
+          <ListPlus className="size-4 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">
+            Filling with <b>{brushName}</b>: click days in the schedule.
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setFillOpen(true)}>
+            Change
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setBrush(null)}>
+            Done
+          </Button>
+        </div>
+      )}
+
+      <section aria-label="Schedule" className="flex min-w-0 flex-col gap-3">
+        <div className="overflow-x-auto rounded-lg bg-surface p-3 shadow-card md:p-4">
+          <table className="w-full min-w-[640px] table-fixed border-separate border-spacing-1.5">
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-20 w-14 bg-surface" />
+                {[1, 2, 3, 4, 5, 6, 7].map((day) => (
+                  <th
+                    key={day}
+                    className="pb-1 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]"
+                  >
+                    Day {day}
+                  </th>
+                ))}
+                <th className="w-11" />
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: draft.durationWeeks }, (_, i) => i + 1).map((week) => (
+                <tr key={week}>
+                  <th
+                    scope="row"
+                    // Stays in view while the days scroll sideways on a phone; solid so days
+                    // pass cleanly underneath.
+                    className="sticky left-0 z-20 bg-surface pr-2 text-left align-middle"
+                  >
+                    <span className="flex flex-col">
+                      <span className="font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.08em]">
+                        Week
                       </span>
-                    </th>
-                    {[1, 2, 3, 4, 5, 6, 7].map((day) => {
-                      const cell = draft.cells[keyOf(week, day)] ?? {
-                        workoutId: null,
-                        checkinRequired: false,
-                      }
-                      const hasWorkout = cell.workoutId !== null
-                      const label = hasWorkout
-                        ? (names.get(cell.workoutId ?? 0) ?? 'Archived workout')
-                        : 'Rest'
-                      return (
-                        <td key={day} className="p-0 align-top">
-                          <motion.div
-                            layout
+                      <span className="tabular font-display font-extrabold text-[18px] leading-6">
+                        {week}
+                      </span>
+                    </span>
+                  </th>
+                  {[1, 2, 3, 4, 5, 6, 7].map((day) => {
+                    const k = keyOf(week, day)
+                    const cell = cellAt(week, day)
+                    const hasWorkout = cell.workoutId !== null
+                    const label = hasWorkout
+                      ? (names.get(cell.workoutId ?? 0) ?? 'Archived workout')
+                      : 'Rest'
+                    const canDrag = canEdit && brush === null
+                    return (
+                      <td key={day} className="p-0 align-top">
+                        <div
+                          draggable={canDrag}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'move'
+                            e.dataTransfer.setData('text/plain', k)
+                            setDragFrom(k)
+                          }}
+                          onDragOver={(e) => {
+                            if (dragFrom === null) return
+                            e.preventDefault()
+                            e.dataTransfer.dropEffect = 'move'
+                            if (dragOver !== k) setDragOver(k)
+                          }}
+                          onDragLeave={() => dragOver === k && setDragOver(null)}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            if (dragFrom !== null) swap(dragFrom, k)
+                            setDragFrom(null)
+                            setDragOver(null)
+                          }}
+                          onDragEnd={() => {
+                            setDragFrom(null)
+                            setDragOver(null)
+                          }}
+                          className={cn(
+                            'group relative flex h-[88px] flex-col justify-between gap-1 rounded-md p-2 transition focus-within:ring-2 focus-within:ring-brand',
+                            hasWorkout ? 'bg-surface-raised' : 'border border-border border-dashed',
+                            canEdit && 'hover:ring-2 hover:ring-brand/50',
+                            canDrag && 'cursor-grab active:cursor-grabbing',
+                            dragFrom === k && 'opacity-40',
+                            dragOver === k && dragFrom !== k && 'scale-[1.03] ring-2 ring-brand',
+                          )}
+                        >
+                          <span
+                            aria-hidden
                             className={cn(
-                              'relative flex h-[76px] flex-col justify-between gap-1 rounded-md p-1.5 transition focus-within:ring-2 focus-within:ring-brand',
-                              hasWorkout
-                                ? 'bg-surface-raised'
-                                : 'border border-border border-dashed',
+                              'line-clamp-2 break-words font-semibold text-[13px] leading-4',
+                              hasWorkout ? 'text-ink' : 'text-ink-muted',
                             )}
                           >
-                            <span
-                              aria-hidden
-                              className={cn(
-                                'line-clamp-2 break-words font-semibold text-[12px] leading-4',
-                                hasWorkout ? 'text-ink' : 'text-ink-muted',
-                              )}
-                            >
-                              {label}
-                            </span>
-                            {/* The real control, invisible over the cell: click anywhere to change. */}
-                            <select
-                              aria-label={`Week ${week} day ${day}: ${label}`}
-                              value={cell.workoutId ?? ''}
-                              disabled={!canEdit}
-                              onChange={(e) =>
-                                setCell(week, day, {
-                                  workoutId: e.target.value ? Number(e.target.value) : null,
-                                })
+                            {label}
+                          </span>
+                          {/* Click anywhere on the day: fill it (brush) or open it to change. */}
+                          <button
+                            type="button"
+                            disabled={!canEdit}
+                            aria-label={
+                              brush !== null
+                                ? `Fill week ${week} day ${day}`
+                                : `Week ${week} day ${day}: ${label}. Change`
+                            }
+                            onClick={() =>
+                              brush !== null
+                                ? setCell(week, day, { workoutId: brush === 'rest' ? null : brush })
+                                : setEditing({ week, day })
+                            }
+                            className={cn(
+                              'absolute inset-0 z-10 rounded-md outline-none disabled:cursor-default',
+                              brush !== null ? 'cursor-copy' : 'cursor-[inherit]',
+                            )}
+                          />
+                          <div className="relative z-20 flex items-end justify-between gap-2">
+                            <Tooltip
+                              label={
+                                cell.checkinRequired
+                                  ? 'Weigh-in day (click to remove)'
+                                  : 'Make this a weigh-in day'
                               }
-                              className="absolute inset-0 z-10 cursor-pointer appearance-none rounded-md opacity-0 disabled:cursor-default"
                             >
-                              <option value="">Rest</option>
-                              {(workouts.data ?? []).map((w) => (
-                                <option key={w.id} value={w.id}>
-                                  {w.name}
-                                </option>
-                              ))}
-                              {cell.workoutId !== null && !names.has(cell.workoutId) && (
-                                <option value={cell.workoutId}>Archived workout</option>
-                              )}
-                            </select>
-                            {brush !== null && canEdit ? (
                               <button
                                 type="button"
-                                aria-label={`Fill week ${week} day ${day}`}
+                                disabled={!canEdit}
+                                aria-pressed={cell.checkinRequired}
+                                aria-label={`Weigh-in on week ${week} day ${day}`}
                                 onClick={() =>
-                                  setCell(week, day, { workoutId: brush === 'rest' ? null : brush })
+                                  setCell(week, day, { checkinRequired: !cell.checkinRequired })
                                 }
-                                className="absolute inset-0 z-[15] cursor-copy rounded-md hover:ring-2 hover:ring-brand"
-                              />
-                            ) : null}
-                            <div className="relative z-20 flex">
-                              <Tooltip
-                                label={
+                                className={cn(
+                                  'grid size-7 place-items-center rounded-sm transition',
                                   cell.checkinRequired
-                                    ? 'Weigh-in day (click to remove)'
-                                    : 'Make this a weigh-in day'
-                                }
+                                    ? 'bg-sand/25 text-sand-text'
+                                    : 'text-ink-muted/50 hover:bg-surface hover:text-ink disabled:hidden',
+                                )}
                               >
-                                <button
-                                  type="button"
-                                  disabled={!canEdit}
-                                  aria-pressed={cell.checkinRequired}
-                                  aria-label={`Weigh-in on week ${week} day ${day}`}
-                                  onClick={() =>
-                                    setCell(week, day, { checkinRequired: !cell.checkinRequired })
-                                  }
-                                  className={cn(
-                                    'grid size-6 place-items-center rounded-sm transition',
-                                    cell.checkinRequired
-                                      ? 'bg-sand/25 text-sand-text'
-                                      : 'text-ink-muted/50 hover:bg-surface hover:text-ink disabled:hidden',
-                                  )}
-                                >
-                                  <Scale className="size-3.5" aria-hidden />
-                                </button>
-                              </Tooltip>
-                            </div>
-                          </motion.div>
-                        </td>
-                      )
-                    })}
-                    <td className="align-middle">
-                      {canEdit && draft.durationWeeks > 1 && (
-                        <IconButton
-                          label="Copy this week to every week"
-                          icon={<CopyCheck aria-hidden />}
-                          size="sm"
-                          onClick={() => copyWeekToAll(week)}
-                        />
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-[13px] text-ink-muted">
-            Day 1 is the start date you pick when assigning. {workoutCount} workouts in total;
-            dashed days are rest days. The scale marks a weigh-in day.
-          </p>
-        </section>
-
-        <div className="flex flex-col gap-6 xl:col-start-1">
-          <Card>
-            <h2 className="mb-4 font-bold text-[17px]">Settings</h2>
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-bold text-[13px]">Length</span>
-                <Stepper
-                  label="weeks"
-                  suffix="wks"
-                  value={draft.durationWeeks}
-                  min={1}
-                  max={52}
-                  onChange={(v) => update({ durationWeeks: v ?? 1 })}
-                />
-              </div>
-              <Field label="Description" hint="Optional">
-                {(fid) => (
-                  <Textarea
-                    id={fid}
-                    value={draft.description}
-                    disabled={!canEdit}
-                    onChange={(e) => update({ description: e.target.value })}
-                  />
-                )}
-              </Field>
-            </div>
-          </Card>
+                                <Scale className="size-3.5" aria-hidden />
+                              </button>
+                            </Tooltip>
+                            {canEdit && (
+                              <span
+                                aria-hidden
+                                className="pointer-events-none flex items-center gap-1 text-ink-muted opacity-0 transition group-hover:opacity-100"
+                              >
+                                <GripVertical className="size-3.5" />
+                                <Pencil className="size-3.5" />
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    )
+                  })}
+                  <td className="align-middle">
+                    {canEdit && draft.durationWeeks > 1 && (
+                      <IconButton
+                        label="Copy this week to every week"
+                        icon={<CopyCheck aria-hidden />}
+                        size="sm"
+                        onClick={() => copyWeekToAll(week)}
+                      />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
+        <p className="text-[13px] text-ink-muted">
+          Day 1 is the start date you pick when assigning. {workoutCount} workouts in total; dashed
+          days are rest days. The scale marks a weigh-in day.
+        </p>
+      </section>
+
+      <Card>
+        <Field label="Description" hint="Optional">
+          {(fid) => (
+            <Textarea
+              id={fid}
+              value={draft.description}
+              disabled={!canEdit}
+              onChange={(e) => update({ description: e.target.value })}
+            />
+          )}
+        </Field>
+      </Card>
+
+      <Drawer
+        open={fillOpen}
+        onClose={() => setFillOpen(false)}
+        title="Fill days"
+        description="Pick a workout (or rest), then click days in the schedule to fill them."
+      >
+        <WorkoutPalette
+          inPanel
+          workouts={workouts.data ?? []}
+          brush={brush}
+          onBrush={(b) => {
+            setBrush(b)
+            // Picked: out of the way, so the days can be clicked.
+            if (b !== null) setFillOpen(false)
+          }}
+        />
+      </Drawer>
+      <ProgramDayDrawer
+        day={editing}
+        cell={editing ? cellAt(editing.week, editing.day) : EMPTY_CELL}
+        workouts={workouts.data ?? []}
+        onPick={(workoutId) => editing && setCell(editing.week, editing.day, { workoutId })}
+        onToggleWeighIn={() =>
+          editing &&
+          setCell(editing.week, editing.day, {
+            checkinRequired: !cellAt(editing.week, editing.day).checkinRequired,
+          })
+        }
+        onClose={() => setEditing(null)}
+      />
       {id && <AssignDrawer programId={id} open={assignOpen} onClose={() => setAssignOpen(false)} />}
       {libraryId !== null && (
         <UpdateClientsDrawer

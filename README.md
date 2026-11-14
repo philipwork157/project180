@@ -116,6 +116,22 @@ Clients can tap **Show how-to videos** on any exercise and watch YouTube results
 
 Results are cached per exercise for 30 days and shared by everyone, so the free quota (about 100 searches a day) is plenty.
 
+### Food log and photo estimates
+
+Clients log what they eat on the **Fuel** tab: typed in, re-added from Recent, or from a photo of a meal or a nutrition label. Coaches set daily calories and protein (carbs and fat optional) on a client's progress page, where they also see the last 7 days.
+
+Photos are read by the Claude API and never stored: the phone shrinks the photo, the Worker sends it to Claude, and the person checks the estimate before anything is saved. Each person gets 20 photos a day. Without a key the photo button is hidden and typing still works.
+
+1. Create an API key at [console.anthropic.com](https://console.anthropic.com/), add some credit and set a monthly spend limit.
+2. Add it to both apps (and `--env dev` for the dev site): `bunx wrangler secret put ANTHROPIC_API_KEY`, run in `apps/app` and again in `apps/admin`. The phone app reads photos with it; the admin only uses it to show Settings > Food photos as set up. Locally, put `ANTHROPIC_API_KEY=…` in `apps/app/.dev.vars`.
+3. Optional: `FOOD_MODEL` picks the model (default `claude-sonnet-5-5`, in `packages/api/src/food-photo.ts`).
+
+**Barcodes.** Clients can also scan a product's barcode (or type its number). The phone reads it with `barcode-detector` (ZXing in WebAssembly, served from our own site, so it works on iPhones too), and the server looks it up and keeps a copy in `food_products`, so each barcode is fetched once.
+
+- Providers live in `packages/api/src/barcode/`, one file each. `FOOD_BARCODE_PROVIDERS` (wrangler vars) lists which to try, in order: `openfoodfacts` (default, free, no key) and `usda` (needs `USDA_API_KEY`, mostly American products). To add another source, write a `BarcodeProvider` like `open-food-facts.ts` and add it to `PROVIDERS` in `barcode/index.ts`.
+- Open Food Facts data is under the ODbL: the app shows the credit under the numbers, and their products stay in their own table. They ask apps to send a contact (`FOOD_LOOKUP_CONTACT`, default hello@project180.co.za) and to test against their staging server (`OPEN_FOOD_FACTS_URL`).
+- Keep `zxing-wasm` pinned to the exact version `barcode-detector` depends on (both in `apps/app/package.json`).
+
 ## Cloudflare dev environment
 
 A full copy of the app on Cloudflare for testing, with its own Workers and its own database, so nothing you try there touches real data:
@@ -185,6 +201,7 @@ Before the first real client:
    - `bunx wrangler secret put AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (Amazon SES, sending from a verified `hello@project180.co.za`)
    - `bunx wrangler secret put VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (see Push notifications; the same pair as you'll keep for good)
    - Optional, phone app only: `YOUTUBE_API_KEY`
+   - Optional: `ANTHROPIC_API_KEY` (food photo estimates; both apps, so the admin shows it as set up)
 5. **Deploy:** `bun run build && bun run deploy` from the root.
 6. **First owner:** `bun run admin:create:live`.
 7. **Check:** in the live admin, Settings > Email shows "live" and sends a test; open both sites with the browser console open and look for Content-Security-Policy errors.

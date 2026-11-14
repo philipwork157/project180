@@ -21,6 +21,21 @@ export interface Bindings {
   EMAIL_REDIRECT_TO?: string
   /** YouTube Data API v3 key, for "how to" video search inside the app. Optional. */
   YOUTUBE_API_KEY?: string
+  /** Claude API key, for food photo estimates (phone app only). Without it the photo button hides. */
+  ANTHROPIC_API_KEY?: string
+  /** Which Claude model reads food photos (default in food-photo.ts). */
+  FOOD_MODEL?: string
+  /**
+   * Barcode providers to try, in order, comma-separated (barcode/index.ts). Default
+   * "openfoodfacts"; e.g. "openfoodfacts,usda" to fall back to USDA.
+   */
+  FOOD_BARCODE_PROVIDERS?: string
+  /** USDA FoodData Central key (free from api.data.gov), for the "usda" barcode provider. */
+  USDA_API_KEY?: string
+  /** Open Food Facts address; their staging server for testing. Default world.openfoodfacts.org. */
+  OPEN_FOOD_FACTS_URL?: string
+  /** Contact sent to food-data providers with every lookup (they ask apps to identify themselves). */
+  FOOD_LOOKUP_CONTACT?: string
   /**
    * Push notifications (Web Push "VAPID" key pair, from `bunx web-push generate-vapid-keys`).
    * Without both, nothing is pushed and the app hides the switch.

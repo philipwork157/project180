@@ -70,6 +70,7 @@ import { cancelWorkout, sessionSummaries } from '../sessions'
 import { buildPersonStats } from '../stats'
 import { createUserWithPassword, setPassword } from '../users'
 import { assignProgram } from './enrollments'
+import { adminFoodRoutes } from './food'
 import { buildPlan } from './me'
 import { deleteClientProgram, findVisibleProgram } from './programs'
 import { sessionDetail } from './sessions'
@@ -280,11 +281,13 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const parsed = peopleQueryInput.safeParse(c.req.query())
     if (!parsed.success) throw new HTTPException(400, { message: 'Bad search' })
     const input = parsed.data
-    // Coaches only ever see their own clients.
-    const view = isOwner(me.role) ? input.view : 'mine'
+    // Coaches only ever see their own clients (and themselves).
+    const view = isOwner(me.role) || input.view === 'me' ? input.view : 'mine'
     const isMember = eq(users.role, 'member')
     const tab =
-      view === 'team'
+      view === 'me'
+        ? eq(users.id, me.id)
+        : view === 'team'
         ? ne(users.role, 'member')
         : view === 'clients'
           ? isMember
@@ -713,6 +716,18 @@ export const adminUserRoutes = new Hono<AppEnv>()
     ])
     return c.body(null, 204)
   })
+  /**
+   * Move their current program's start date. Unlike a reset, nothing they logged is deleted:
+   * the calendar just shifts (a program you assigned last week can start today).
+   */
+  .post('/:id/program/start-date', async (c) => {
+    const { db } = c.var
+    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const { startDate } = await parseBody(c.req.raw, resetProgramInput)
+    const enrollment = await activeEnrollment(db, person.id)
+    await db.update(enrollments).set({ startDate }).where(eq(enrollments.id, enrollment.id))
+    return c.body(null, 204)
+  })
   /** Take their current program away, with everything they logged on it. */
   .delete('/:id/program', async (c) => {
     const { db } = c.var
@@ -765,3 +780,5 @@ export const adminUserRoutes = new Hono<AppEnv>()
     await deleteClientProgram(db, row.programId)
     return c.body(null, 204)
   })
+  /** Their food log and the daily targets you set (routes/food.ts). */
+  .route('/', adminFoodRoutes)

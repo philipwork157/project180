@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowLeftRight, ChevronRight, Trophy } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { Segmented } from '../../components/controls'
 import { PageHeader } from '../../components/page-header'
+import { NutritionCard } from '../../components/person-nutrition'
 import { Bars, NumbersTable, shortDay, TrendLine } from '../../components/progress-charts'
 import { SessionStatusTag } from '../../components/session-status'
 import { SwapsLine } from '../../components/swaps-line'
@@ -86,6 +87,7 @@ function PersonProgressPage() {
             <VolumeCard stats={stats.data} />
             <StrengthCard stats={stats.data} />
             <BodyWeightCard stats={stats.data} />
+            <NutritionCard userId={userId} name={isMe ? me.name : (person?.name ?? 'Client')} />
             <RecordsCard stats={stats.data} />
             <SwapsCard stats={stats.data} />
             <RecentCard

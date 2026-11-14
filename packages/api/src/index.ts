@@ -9,6 +9,7 @@ import { mountMedia } from './media'
 import { adminChatRoutes } from './routes/admin-chat'
 import { adminEmailRoutes } from './routes/admin-email'
 import { adminOverviewRoutes } from './routes/admin-overview'
+import { adminSettingsRoutes } from './routes/admin-settings'
 import { adminUserRoutes } from './routes/admin-users'
 import { enrollmentRoutes } from './routes/enrollments'
 import { exerciseRoutes } from './routes/exercises'
@@ -153,6 +154,7 @@ export function createApp() {
   app.route('/admin/overview', adminOverviewRoutes)
   app.route('/admin/email', adminEmailRoutes)
   app.route('/admin/chat', adminChatRoutes)
+  app.route('/admin/settings', adminSettingsRoutes)
   app.route('/videos', videoRoutes)
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404))

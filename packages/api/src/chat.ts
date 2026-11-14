@@ -12,7 +12,7 @@ import type {
 } from '@project180/shared'
 import { and, asc, count, desc, eq, gt, inArray, isNull, lt, max, ne, or, sql } from 'drizzle-orm'
 import type { Context } from 'hono'
-import { managedUsers } from './access'
+import { myClients } from './access'
 import { inChunks } from './batch'
 import type { AppEnv } from './env'
 import { conflict } from './errors'
@@ -183,8 +183,7 @@ export async function unreadForStaff(db: Db, me: Me): Promise<number> {
     )
     .where(
       and(
-        eq(users.role, 'member'),
-        managedUsers(me),
+        myClients(me),
         gt(messages.id, sql`coalesce(${messageReads.lastReadId}, 0)`),
         fromOthers(me.id),
       ),
@@ -200,7 +199,7 @@ export async function inbox(db: Db, me: Me): Promise<ChatSummary[]> {
   const clients = await db
     .select({ id: users.id, name: users.name })
     .from(users)
-    .where(and(eq(users.role, 'member'), managedUsers(me)))
+    .where(myClients(me))
     .orderBy(asc(users.name))
   const ids = clients.map((u) => u.id)
   const [unread, lastIds] = await Promise.all([

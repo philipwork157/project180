@@ -110,14 +110,15 @@ export const programCopiesQuery = (programId: number) =>
       (await api<{ copies: ProgramCopySummary[] }>(`/programs/${programId}/copies`)).copies,
   })
 
-export const enrollmentsQuery = (programId?: number) =>
+/** Current programs; `mine` keeps only you and the clients you coach yourself. */
+export const enrollmentsQuery = (programId?: number, mine = false) =>
   queryOptions({
-    queryKey: ['enrollments', { programId }],
+    queryKey: ['enrollments', { programId, mine }],
     queryFn: async () =>
       (
         await api<{ enrollments: EnrollmentSummary[] }>(
           // Current programs only: no screen lists past ones from here.
-          `/enrollments?status=active${programId ? `&programId=${programId}` : ''}`,
+          `/enrollments?status=active${programId ? `&programId=${programId}` : ''}${mine ? '&mine=1' : ''}`,
         )
       ).enrollments,
   })

@@ -1,5 +1,5 @@
-import { Button, Input, Spinner } from '@project180/ui'
-import { CameraOff, Search } from 'lucide-react'
+import { Button, IconButton, Input, Spinner } from '@project180/ui'
+import { CameraOff, Search, SwitchCamera } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
 const PRODUCT_CODE = /^(\d{8}|\d{12,14})$/
@@ -8,14 +8,41 @@ const SCAN_EVERY_MS = 200
 
 type CameraState = 'starting' | 'scanning' | 'denied' | 'unavailable'
 
+/** The camera used last on this phone (switched to, or that read a barcode), kept for next time. */
+const CAMERA_KEY = 'project180.scanner.camera'
+
+function savedCamera(): string | null {
+  try {
+    return localStorage.getItem(CAMERA_KEY)
+  } catch {
+    return null
+  }
+}
+
+function saveCamera(deviceId: string | undefined) {
+  if (!deviceId) return
+  try {
+    localStorage.setItem(CAMERA_KEY, deviceId)
+  } catch {
+    // Private mode or storage full: it just won't be remembered.
+  }
+}
+
 /**
  * The live camera with a frame to aim at. Finds a product barcode on its own, then stops the
  * camera and hands back the number. The number can always be typed instead.
+ *
+ * Phones with several back cameras (wide, ultra-wide, zoom) often open one that can't focus up
+ * close, so a button switches between cameras, and the one last used is opened next time.
  */
 export function BarcodeScanner({ onCode }: { onCode: (code: string) => void }) {
   const video = useRef<HTMLVideoElement>(null)
   const [state, setState] = useState<CameraState>('starting')
   const [typed, setTyped] = useState('')
+  // null = let the browser pick a back camera.
+  const [deviceId, setDeviceId] = useState<string | null>(savedCamera)
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
   const inputId = useId()
   const found = useRef(onCode)
   found.current = onCode
@@ -32,15 +59,36 @@ export function BarcodeScanner({ onCode }: { onCode: (code: string) => void }) {
 
     async function start() {
       if (!navigator.mediaDevices?.getUserMedia) return setState('unavailable')
+      setState('starting')
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+          video: deviceId
+            ? { deviceId: { exact: deviceId }, width: { ideal: 1280 } }
+            : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
           audio: false,
         })
       } catch (err) {
         const name = err instanceof DOMException ? err.name : ''
-        return setState(name === 'NotAllowedError' ? 'denied' : 'unavailable')
+        if (name === 'NotAllowedError') return setState('denied')
+        // The remembered camera is gone (another phone, or unplugged): let the browser pick.
+        if (deviceId) return setDeviceId(null)
+        return setState('unavailable')
       }
+      if (stopped) return stop()
+      const track = stream.getVideoTracks()[0]
+      setActiveId(track?.getSettings().deviceId ?? null)
+      // Ask for continuous focus where the phone supports it (Android Chrome does); others ignore it.
+      track
+        ?.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] })
+        .catch(() => undefined)
+      // Camera names are only shown once the camera is allowed, so list them now.
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((all) => {
+          if (!stopped) setCameras(all.filter((d) => d.kind === 'videoinput' && d.deviceId))
+        })
+        .catch(() => undefined)
+
       const el = video.current
       if (stopped || !el) return stop()
       el.srcObject = stream
@@ -57,6 +105,8 @@ export function BarcodeScanner({ onCode }: { onCode: (code: string) => void }) {
             const [hit] = await detector.detect(el)
             const code = hit?.rawValue.trim()
             if (code && PRODUCT_CODE.test(code)) {
+              // This camera worked: open it first next time.
+              saveCamera(track?.getSettings().deviceId)
               stop()
               navigator.vibrate?.(30)
               found.current(code)
@@ -73,7 +123,15 @@ export function BarcodeScanner({ onCode }: { onCode: (code: string) => void }) {
 
     void start()
     return stop
-  }, [])
+  }, [deviceId])
+
+  const activeIndex = cameras.findIndex((c) => c.deviceId === activeId)
+  const switchCamera = () => {
+    const next = cameras[(activeIndex + 1) % cameras.length]
+    if (!next) return
+    saveCamera(next.deviceId)
+    setDeviceId(next.deviceId)
+  }
 
   const typedValid = PRODUCT_CODE.test(typed)
 
@@ -97,6 +155,14 @@ export function BarcodeScanner({ onCode }: { onCode: (code: string) => void }) {
             aria-label="Camera"
             className="size-full object-cover"
           />
+          {cameras.length > 1 && (
+            <IconButton
+              label={`Switch camera (${activeIndex + 1} of ${cameras.length})`}
+              icon={<SwitchCamera aria-hidden />}
+              onClick={switchCamera}
+              className="absolute top-3 right-3 z-10 size-11 rounded-full bg-[#202321]/70 text-[#f5f3ed] hover:bg-[#202321]/85 hover:text-[#f5f3ed] [&_svg]:size-5"
+            />
+          )}
           {/* Where to hold the barcode. */}
           <div
             aria-hidden
@@ -111,6 +177,8 @@ export function BarcodeScanner({ onCode }: { onCode: (code: string) => void }) {
                 <Spinner className="size-3.5" />
                 Starting the camera…
               </>
+            ) : cameras.length > 1 && activeIndex >= 0 ? (
+              `Hold the barcode inside the frame · Camera ${activeIndex + 1} of ${cameras.length}`
             ) : (
               'Hold the barcode inside the frame'
             )}

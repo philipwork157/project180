@@ -54,7 +54,12 @@ export function AssignForm({
   const [done, setDone] = useState<'assigned' | 'updated' | null>(null)
   const [mode, setMode] = useState<'update' | 'restart'>('update')
 
-  const people = isAdmin ? (users.data ?? []) : me ? [{ id: me.id, name: me.name }] : []
+  // You and the clients you coach yourself (owners too), like the People list.
+  const people = isAdmin
+    ? (users.data ?? []).filter((u) => u.id === me?.id || u.coachId === me?.id)
+    : me
+      ? [{ id: me.id, name: me.name }]
+      : []
   const current = enrollments.data?.find((e) => e.userId === uid && e.status === 'active')
   // Already on this program (their own copy of it): update it or start over.
   const already = Boolean(current && pid && current.sourceProgramId === pid)

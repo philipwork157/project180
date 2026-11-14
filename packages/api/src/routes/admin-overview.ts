@@ -18,7 +18,7 @@ import {
 } from '@project180/shared'
 import { and, count, desc, eq, gte, inArray, sum } from 'drizzle-orm'
 import { Hono } from 'hono'
-import { managedUsers } from '../access'
+import { myClients } from '../access'
 import { inChunks } from '../batch'
 import type { AppEnv } from '../env'
 import { libraryOnly, visibleTo } from '../library'
@@ -56,7 +56,7 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
       })
       .from(users)
       .leftJoin(accounts, and(eq(accounts.userId, users.id), eq(accounts.providerId, 'credential')))
-      .where(and(eq(users.role, 'member'), managedUsers(me)))
+      .where(myClients(me))
     const ids = clients.map((u) => u.id)
     const byId = new Map(clients.map((u) => [u.id, u]))
     const mine = <T>(query: (slice: number[]) => Promise<T[]>) => inChunks(ids, query)

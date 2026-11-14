@@ -1,11 +1,5 @@
 import { adminOverviewQuery, enrollmentsQuery } from '@project180/client'
-import {
-  type AdminOverview,
-  durationShort,
-  formatNumber,
-  isOwner,
-  timeAgo,
-} from '@project180/shared'
+import { type AdminOverview, durationShort, formatNumber, timeAgo } from '@project180/shared'
 import { Button, buttonClasses, Card, cn, Drawer, StatCard, Tooltip } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -46,11 +40,7 @@ function Overview() {
     <>
       <PageHeader
         title={`Hi, ${me.name.split(' ')[0]}`}
-        subtitle={
-          isOwner(me.role)
-            ? 'How every client is doing over the last 7 days.'
-            : 'How your clients are doing over the last 7 days.'
-        }
+        subtitle="How your clients are doing over the last 7 days."
         action={
           <Button
             icon={<UserPlus className="size-5" aria-hidden />}
@@ -427,10 +417,10 @@ function RecentWorkouts({
 }
 
 function WhoIsOnWhat() {
-  const enrollments = useQuery(enrollmentsQuery())
+  const enrollments = useQuery(enrollmentsQuery(undefined, true))
   const active = (enrollments.data ?? []).filter((e) => e.status === 'active')
   return (
-    <SectionCard title="Who’s on what" description="Everyone's current program.">
+    <SectionCard title="Who’s on what" description="You and your clients’ current programs.">
       {active.length === 0 ? (
         <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
           Nobody is on a program yet.

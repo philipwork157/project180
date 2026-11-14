@@ -128,6 +128,10 @@ describe('chat', () => {
     // The owner sees every client, Sam included.
     const ownerView = await call<Json>(`/admin/chat/${samId}`, { cookie: owner })
     expect(ownerView.data.thread.messages[0].body).toBe('Private to Sam and Kim')
+    // …but the owner's inbox and badge only cover the clients they coach themselves.
+    const ownerInbox = (await call<Json>('/admin/chat', { cookie: owner })).data.chats as Json[]
+    expect(ownerInbox.map((c) => c.clientId)).toEqual([wifeId])
+    expect((await call<Json>('/admin/chat/unread', { cookie: owner })).data.unread).toBe(0)
   })
 
   it('pages back through older messages', async () => {

@@ -2,7 +2,7 @@
 // themselves and the clients they coach; a client sees only themselves.
 import { type Db, users } from '@project180/db'
 import { isOwner, isStaff, type Me, type Role } from '@project180/shared'
-import { eq, or } from 'drizzle-orm'
+import { and, eq, or } from 'drizzle-orm'
 import { notFound } from './errors'
 
 export interface Person {
@@ -24,6 +24,15 @@ export function managedUsers(me: Me) {
   if (isOwner(me.role)) return undefined
   if (isStaff(me.role)) return or(eq(users.id, me.id), eq(users.coachId, me.id))
   return eq(users.id, me.id)
+}
+
+/**
+ * The clients `me` coaches themselves: what the People list, the Overview and the Messages inbox
+ * show, for owners too. An owner can still open any client directly (managedPerson); the lists
+ * just stay about their own clients until there are other coaches to oversee.
+ */
+export function myClients(me: Me) {
+  return and(eq(users.role, 'member'), eq(users.coachId, me.id))
 }
 
 /** The person, if `me` may manage them; otherwise 404 (so nobody learns who else exists). */

@@ -2,6 +2,7 @@
 import {
   createDb,
   type Db,
+  foodPhotoUses,
   pushSubscriptions,
   sessions,
   signInAttempts,
@@ -19,11 +20,12 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * - wrong-password counters older than a day that aren't locking anyone out now;
  * - workouts left "in progress" with nothing logged for 4 hours: stopped early if any set was
  *   logged (the sets stay), otherwise cancelled. The app also checks this as it opens;
- * - phones' notifications whose sign-in has ended (they're no longer sent anyway).
+ * - phones' notifications whose sign-in has ended (they're no longer sent anyway);
+ * - photo-estimate counters from before yesterday (only today's count is ever read).
  */
 export async function dailyCleanup(db: Db, now = Date.now()) {
   const at = new Date(now)
-  const [expired, , attempts, stopped, cancelled, pushes] = await db.batch([
+  const [expired, , attempts, stopped, cancelled, pushes, photoDays] = await db.batch([
     db.delete(sessions).where(lt(sessions.expiresAt, at)).returning({ id: sessions.id }),
     db.delete(verifications).where(lt(verifications.expiresAt, at)),
     db
@@ -52,12 +54,17 @@ export async function dailyCleanup(db: Db, now = Date.now()) {
         ),
       )
       .returning({ id: pushSubscriptions.id }),
+    db
+      .delete(foodPhotoUses)
+      .where(lt(foodPhotoUses.date, new Date(now - 2 * DAY_MS).toISOString().slice(0, 10)))
+      .returning({ userId: foodPhotoUses.userId }),
   ])
   return {
     sessions: expired.length,
     attempts: attempts.length,
     workouts: stopped.length + cancelled.length,
     pushes: pushes.length,
+    photoDays: photoDays.length,
   }
 }
 

@@ -80,10 +80,24 @@ describe('daily cleanup', () => {
     )
       .bind('email:old@example.com', Date.now() - 2 * DAY_MS)
       .run()
+    // Photo counters: last week's goes, today's stays.
+    const day = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+    await env.DB.prepare(
+      'INSERT INTO food_photo_uses (user_id, date, count) SELECT id, ?, 3 FROM users LIMIT 1',
+    )
+      .bind(day(Date.now() - 7 * DAY_MS))
+      .run()
+    await env.DB.prepare(
+      'INSERT INTO food_photo_uses (user_id, date, count) SELECT id, ?, 1 FROM users LIMIT 1',
+    )
+      .bind(day(Date.now()))
+      .run()
     const before = await env.DB.prepare('SELECT count(*) AS n FROM sessions').first<Json>()
 
     const done = await dailyCleanup(createDb(env.DB))
-    expect(done).toMatchObject({ sessions: 1, attempts: 1, workouts: 1 })
+    expect(done).toMatchObject({ sessions: 1, attempts: 1, workouts: 1, photoDays: 1 })
+    const photoRows = await env.DB.prepare('SELECT date FROM food_photo_uses').all<Json>()
+    expect(photoRows.results.map((r) => r.date)).toEqual([day(Date.now())])
     // Nothing logged in it: cancelled.
     expect(await statusOf(forgotten)).toBe('cancelled')
     const after = await env.DB.prepare('SELECT count(*) AS n FROM sessions').first<Json>()

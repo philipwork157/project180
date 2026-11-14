@@ -84,6 +84,10 @@ export const enrollmentRoutes = new Hono<AppEnv>()
     const status = c.req.query('status')
     const filters = [
       managedUsers(user),
+      // ?mine=1: only you and the clients you coach yourself (the overview), owners included.
+      c.req.query('mine') === '1'
+        ? or(eq(users.id, user.id), eq(users.coachId, user.id))
+        : undefined,
       status === 'active' || status === 'completed' || status === 'cancelled'
         ? eq(enrollments.status, status)
         : undefined,

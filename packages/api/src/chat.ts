@@ -2,7 +2,14 @@
 // Who may open which conversation is decided by the routes (the client: only their own;
 // staff: only clients they manage). Everything here is scoped by that client id.
 import { type Db, messageReads, messages, users } from '@project180/db'
-import type { ChatMessage, ChatSummary, ChatThread, Me, MessageInput } from '@project180/shared'
+import type {
+  ChatMessage,
+  ChatSummary,
+  ChatThread,
+  ChatUnread,
+  Me,
+  MessageInput,
+} from '@project180/shared'
 import { and, asc, count, desc, eq, gt, inArray, isNull, lt, max, ne, or, sql } from 'drizzle-orm'
 import type { Context } from 'hono'
 import { managedUsers } from './access'
@@ -103,6 +110,8 @@ export async function postMessage(
         url: '/chat',
         // One notification for the chat: a newer message replaces it.
         tag: 'chat',
+        // The number on the app icon, where the phone shows one.
+        badge: () => unreadForClient(db, clientId),
       })
     }
   }
@@ -132,17 +141,34 @@ export async function markRead(db: Db, clientId: number, userId: number, upTo: n
 
 /** Messages in the client's own conversation they haven't read yet. */
 export async function unreadForClient(db: Db, clientId: number): Promise<number> {
+  return (await chatNewsForClient(db, clientId)).unread
+}
+
+/**
+ * How many messages the client hasn't read, and the newest of them (for the bell and the
+ * in-app banner). Two small reads after the read position, both on the (client_id, id) index.
+ */
+export async function chatNewsForClient(db: Db, clientId: number): Promise<ChatUnread> {
   const [read] = await db
     .select({ id: messageReads.lastReadId })
     .from(messageReads)
     .where(and(eq(messageReads.clientId, clientId), eq(messageReads.userId, clientId)))
-  const [row] = await db
-    .select({ n: count() })
-    .from(messages)
-    .where(
-      and(eq(messages.clientId, clientId), gt(messages.id, read?.id ?? 0), fromOthers(clientId)),
-    )
-  return row?.n ?? 0
+  const unreadOnly = and(
+    eq(messages.clientId, clientId),
+    gt(messages.id, read?.id ?? 0),
+    fromOthers(clientId),
+  )
+  const [[row], [latest]] = await Promise.all([
+    db.select({ n: count() }).from(messages).where(unreadOnly),
+    db
+      .select(columns)
+      .from(messages)
+      .leftJoin(users, eq(users.id, messages.senderId))
+      .where(unreadOnly)
+      .orderBy(desc(messages.id))
+      .limit(1),
+  ])
+  return { unread: row?.n ?? 0, latest: latest ? toJson(latest) : null }
 }
 
 /** Unread client messages across everyone `me` manages, in one query (the sidebar badge). */

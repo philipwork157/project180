@@ -13,6 +13,7 @@ import {
 } from '@project180/db'
 import {
   buildProgramCalendar,
+  type ChatUnread,
   choosePasswordInput,
   clientProfileInput,
   feedbackReadInput,
@@ -34,10 +35,11 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { inChunks } from '../batch'
-import { loadThread, markRead, postMessage, unreadForClient } from '../chat'
+import { chatNewsForClient, loadThread, markRead, postMessage } from '../chat'
 import type { AppEnv } from '../env'
 import { notFound, parseBody } from '../errors'
 import { markFeedbackRead, unreadFeedback } from '../feedback'
+import { closeIdleWorkout } from '../sessions'
 import { requireUser } from '../middleware'
 import { loadProfile, saveProfile } from '../profiles'
 import { isPushEndpoint, pushConfigured } from '../push'
@@ -276,6 +278,8 @@ export const meRoutes = new Hono<AppEnv>()
   /** Your active program laid out day by day, plus any unfinished workout. */
   .get('/plan', async (c) => {
     const { db, user } = c.var
+    // A workout left idle for hours is closed first, so "Resume" never shows a stale one.
+    await closeIdleWorkout(db, user.id)
     const [[active], plan] = await Promise.all([
       db
         .select({
@@ -312,10 +316,11 @@ export const meRoutes = new Hono<AppEnv>()
     ])
     return c.json({ thread, coach: coach ?? null })
   })
-  /** Messages from your coach you haven't read (the badge on the Coach tab). */
+  /** Messages from your coach you haven't read and the newest of them (badge, bell, banner). */
   .get('/chat/unread', async (c) => {
     const { db, user } = c.var
-    return c.json({ unread: isClient(user.role) ? await unreadForClient(db, user.id) : 0 })
+    const none: ChatUnread = { unread: 0, latest: null }
+    return c.json(isClient(user.role) ? await chatNewsForClient(db, user.id) : none)
   })
   .post('/chat', async (c) => {
     if (!isClient(c.var.user.role)) notFound()
@@ -351,7 +356,13 @@ export const meRoutes = new Hono<AppEnv>()
     const input = await parseBody(c.req.raw, pushSubscriptionInput)
     if (!isPushEndpoint(input.endpoint))
       throw new HTTPException(400, { message: 'Not a push service address' })
-    const values = { userId: user.id, p256dh: input.keys.p256dh, auth: input.keys.auth }
+    // Tied to this sign-in: once it ends (signed out, expired, signed out by a coach), no more pushes.
+    const values = {
+      userId: user.id,
+      sessionId: c.var.sessionId,
+      p256dh: input.keys.p256dh,
+      auth: input.keys.auth,
+    }
     await db
       .insert(pushSubscriptions)
       .values({ endpoint: input.endpoint, ...values })

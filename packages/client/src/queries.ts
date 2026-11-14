@@ -2,6 +2,7 @@ import type {
   AdminOverview,
   ChatSummary,
   ChatThread,
+  ChatUnread,
   ClientProfile,
   EnrollmentSummary,
   Exercise,
@@ -148,11 +149,15 @@ export const myChatQuery = queryOptions({
   queryFn: () => api<{ thread: ChatThread; coach: { name: string } | null }>('/me/chat'),
 })
 
-/** Unread messages from your coach (the badge on the Coach tab). */
+/**
+ * Unread messages from your coach and the newest of them: the Coach tab badge, the bell and the
+ * in-app banner. Checked often while the app is on screen (never in the background); a push
+ * arriving while it's open refreshes it at once.
+ */
 export const myChatUnreadQuery = queryOptions({
   queryKey: ['me', 'chat', 'unread'],
-  queryFn: async () => (await api<{ unread: number }>('/me/chat/unread')).unread,
-  refetchInterval: 60_000,
+  queryFn: () => api<ChatUnread>('/me/chat/unread'),
+  refetchInterval: 15_000,
 })
 
 /** Every client conversation a coach can open, with unread counts (admin). */

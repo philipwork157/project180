@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { csrf } from 'hono/csrf'
 import { HTTPException } from 'hono/http-exception'
 import { secureHeaders } from 'hono/secure-headers'
-import { createAuth } from './auth'
+import { appKindOf, createAuth } from './auth'
 import type { AppEnv, Bindings } from './env'
 import { mountMedia } from './media'
 import { adminChatRoutes } from './routes/admin-chat'
@@ -18,7 +18,12 @@ import { sessionRoutes } from './routes/sessions'
 import { videoRoutes } from './routes/videos'
 import { workoutRoutes } from './routes/workouts'
 import { clearFailures, minutesLocked, recordFailure } from './sign-in-limit'
-import { refuseExpiredTempPassword, TEMP_PASSWORD_EXPIRED_MESSAGE } from './temp-password'
+import {
+  refuseExpiredTempPassword,
+  refuseNonStaff,
+  STAFF_ONLY_MESSAGE,
+  TEMP_PASSWORD_EXPIRED_MESSAGE,
+} from './temp-password'
 
 export { dailyCleanup, runDailyCleanup } from './cleanup'
 export type { Bindings } from './env'
@@ -45,7 +50,9 @@ export function createApp() {
 
   app.use('*', async (c, next) => {
     c.set('db', createDb(c.env.DB))
-    c.set('auth', createAuth(c.env))
+    const kind = appKindOf(c.env, c.req.raw.headers)
+    c.set('appKind', kind)
+    c.set('auth', createAuth(c.env, kind))
     await next()
   })
 
@@ -94,10 +101,37 @@ export function createApp() {
         const message = TEMP_PASSWORD_EXPIRED_MESSAGE
         return c.json({ code: 'TEMP_PASSWORD_EXPIRED', message, error: message }, 403)
       }
+      // The admin lets only staff in: a client's right password gets no session there.
+      if (c.var.appKind === 'admin' && keys.email) {
+        const signedIn = (await res
+          .clone()
+          .json()
+          .catch(() => null)) as { token?: unknown } | null
+        const token = typeof signedIn?.token === 'string' ? signedIn.token : null
+        if (await refuseNonStaff(db, keys.email, token)) {
+          const message = STAFF_ONLY_MESSAGE
+          return c.json({ code: 'STAFF_ONLY', message, error: message }, 403)
+        }
+      }
     }
     return res
   })
-  app.on(['GET', 'POST'], '/auth/*', (c) => c.var.auth.handler(c.req.raw))
+  // Only the Better Auth endpoints the apps use. Everything else it offers (update-user,
+  // list-sessions, password-reset links …) would go around our validators and guards.
+  app.post('/auth/sign-out', (c) => c.var.auth.handler(c.req.raw))
+  app.get('/auth/get-session', (c) => c.var.auth.handler(c.req.raw))
+  // Changing your own password (Profile / Settings), never while a temporary one must be replaced.
+  app.post('/auth/change-password', async (c) => {
+    const session = await c.var.auth.api.getSession({
+      headers: c.req.raw.headers,
+      query: { disableCookieCache: true },
+    })
+    if (!session) return c.json({ error: 'Not signed in' }, 401)
+    if (session.user.mustChangePassword)
+      return c.json({ error: 'Choose your own password first', code: 'CHOOSE_PASSWORD' }, 403)
+    return c.var.auth.handler(c.req.raw)
+  })
+  app.all('/auth/*', (c) => c.json({ error: 'Not found' }, 404))
   // For an uptime monitor: 200 only when the Worker and the database both answer.
   app.get('/health', async (c) => {
     try {

@@ -88,6 +88,11 @@ One spacing scale, so screens never look cramped or doubled up:
 
 - Passwords set by staff are temporary: `users.must_change_password` is set on create and on reset (a reset also deletes their sessions). While it's set, `requireUser` only allows `GET /me` and `POST /me/first-password`; both apps redirect to `/choose-password`. Keep that guard on every new signed-in route tree.
 - Sessions are sliding, `SESSION_DAYS` per Worker (app 30, admin 7). Sign-in goes through the limiter in packages/api/src/sign-in-limit.ts (5 per email, 20 per IP, 15 minutes); don't add another sign-in path around it.
+- The app and the admin have **separate sign-ins**: the admin uses its own cookie (`project180-admin.*`, `appKindOf` in packages/api/src/auth.ts) and lets only staff in (`STAFF_ONLY` on the admin Worker; locally the admin dev proxy sends `x-project180-app: admin`). Signing in to one must never sign you in to the other.
+- Coaches and owners may also sign in to the phone app, to do workouts they assign to themselves (only the Coach chat tab is hidden for them). Don't make the app clients-only; only the admin is restricted (staff only).
+- Only the Better Auth endpoints the apps use are open (`sign-in/email`, `sign-out`, `get-session`, `change-password`; packages/api/src/index.ts). Everything else under /api/auth answers 404, because it would skip our validators and the temporary-password guard. Add one there only if an app needs it.
+- A phone's notifications belong to one sign-in (`push_subscriptions.session_id`): `sendPush` only sends while that sign-in is live, so signing a phone out (even just that device, or by expiry) stops them. The app re-ties them at sign-in, at app start and after a password change (`claimPushForMe`), so a shared phone never shows the last person's.
+- `sessions.app` says which app a sign-in is for (set by Better Auth's session hook); the admin shows it with each device.
 - Activity: `users.last_seen_at` (written by `requireUser`, at most every 2 minutes), `app_activity` (seconds per day from `POST /me/heartbeat`, sent by `useHeartbeat` in the app) and the sessions table (devices). Only staff who manage the person can see it (`/admin/users/:id/activity`). Clients are told in the welcome email; keep that line if you change the template.
 
 ## Programs, copies and history

@@ -48,7 +48,13 @@ import { conflict, notFound, parseBody, parseId } from '../errors'
 import { loadFeedback } from '../feedback'
 import { iso, visibleTo } from '../library'
 import { requireUser } from '../middleware'
-import { completedBy, sessionSummaries } from '../sessions'
+import {
+  cancelWorkout,
+  closeIdleWorkout,
+  closeOpenWorkouts,
+  completedBy,
+  sessionSummaries,
+} from '../sessions'
 import { loadWorkoutExercises, loadWorkoutGroups } from './workouts'
 
 type SessionRow = typeof workoutSessions.$inferSelect
@@ -527,13 +533,15 @@ export const sessionRoutes = new Hono<AppEnv>()
     // batch (all or nothing), and the database allows only one in progress per person.
     let row: SessionRow | undefined
     try {
-      const [, inserted] = await db.batch([
-        db
-          .update(workoutSessions)
-          .set({ status: 'abandoned', endedAt: new Date() })
-          .where(
-            and(eq(workoutSessions.userId, user.id), eq(workoutSessions.status, 'in_progress')),
-          ),
+      // The open one is stopped early if anything was logged in it, otherwise cancelled.
+      const [closeStopped, closeCancelled] = closeOpenWorkouts(
+        db,
+        eq(workoutSessions.userId, user.id),
+        new Date(),
+      )
+      const [, , inserted] = await db.batch([
+        closeStopped,
+        closeCancelled,
         db
           .insert(workoutSessions)
           .values({
@@ -562,6 +570,8 @@ export const sessionRoutes = new Hono<AppEnv>()
     return c.json({ session: await sessionDetail(db, row) }, 201)
   })
   .get('/active', async (c) => {
+    // A workout left idle for hours is closed first, so "Resume" never shows a stale one.
+    await closeIdleWorkout(c.var.db, c.var.user.id)
     const [row] = await c.var.db
       .select({
         id: workoutSessions.id,
@@ -653,6 +663,12 @@ export const sessionRoutes = new Hono<AppEnv>()
     const input = await parseBody(c.req.raw, swapExerciseInput)
     await swapExercise(db, session, input)
     return c.json({ session: await sessionDetail(db, session) })
+  })
+  /** Started by accident: close it without counting it. The coach still sees it, as cancelled. */
+  .post('/:id/cancel', async (c) => {
+    const session = await findOwn(c.var.db, c.var.user, parseId(c.req.param('id')))
+    await cancelWorkout(c.var.db, session)
+    return c.body(null, 204)
   })
   .post('/:id/finish', async (c) => {
     const { db, user } = c.var

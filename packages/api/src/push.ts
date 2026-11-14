@@ -4,8 +4,8 @@
 //
 // - No VAPID key pair configured (local dev, tests): nothing is sent.
 // - A phone that has turned notifications off (404 / 410): its subscription is removed.
-import { type Db, pushSubscriptions } from '@project180/db'
-import { inArray } from 'drizzle-orm'
+import { type Db, pushSubscriptions, sessions } from '@project180/db'
+import { and, eq, getTableColumns, gt, inArray, isNull, or } from 'drizzle-orm'
 import type { Context } from 'hono'
 import { chunk, inChunks, runAll } from './batch'
 import type { AppEnv, Bindings } from './env'
@@ -18,6 +18,13 @@ export interface PushMessage {
   body: string
   url?: string
   tag?: string
+  /** The number on the app icon (installed apps that show one); 0 clears it. */
+  badge?: number
+}
+
+/** A push whose badge is worked out only when there's somewhere to send it. */
+export type LaterPushMessage = Omit<PushMessage, 'badge'> & {
+  badge?: number | (() => Promise<number>)
 }
 
 export interface PushTarget {
@@ -202,8 +209,19 @@ export async function sendPush(
   if (!pushConfigured(env) || userIds.length === 0) return { sent: 0 }
   try {
     // Everyone, in slices (D1 allows 100 bound values per statement).
+    // Only phones still signed in with the sign-in that turned them on (null: older rows).
+    const now = new Date()
     const targets = await inChunks([...new Set(userIds)], (slice) =>
-      db.select().from(pushSubscriptions).where(inArray(pushSubscriptions.userId, slice)),
+      db
+        .select(getTableColumns(pushSubscriptions))
+        .from(pushSubscriptions)
+        .leftJoin(sessions, eq(sessions.id, pushSubscriptions.sessionId))
+        .where(
+          and(
+            inArray(pushSubscriptions.userId, slice),
+            or(isNull(pushSubscriptions.sessionId), gt(sessions.expiresAt, now)),
+          ),
+        ),
     )
     const results = await Promise.all(
       targets.map((t) =>
@@ -232,10 +250,19 @@ export async function sendPush(
 export async function pushLater(
   c: Context<AppEnv>,
   userIds: number[],
-  message: PushMessage,
+  message: LaterPushMessage,
 ): Promise<void> {
   if (!pushConfigured(c.env) || userIds.length === 0) return
-  const work = sendPush(c.env, c.var.db, userIds, message)
+  const work = (async () => {
+    const { badge, ...rest } = message
+    const count = typeof badge === 'function' ? await badge().catch(() => undefined) : badge
+    return sendPush(
+      c.env,
+      c.var.db,
+      userIds,
+      count === undefined ? rest : { ...rest, badge: count },
+    )
+  })()
   try {
     c.executionCtx.waitUntil(work)
   } catch {

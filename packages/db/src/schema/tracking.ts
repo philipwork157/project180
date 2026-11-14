@@ -290,7 +290,14 @@ export const pushSubscriptions = sqliteTable(
     endpoint: text('endpoint').notNull().unique(),
     p256dh: text('p256dh').notNull(),
     auth: text('auth').notNull(),
+    // The sign-in that turned them on. Pushes go only while it's still signed in, so a phone
+    // signed out (expired, or by a coach) stops getting them. Null: from before this column.
+    // A plain number, not a foreign key: adding a key would rebuild the table on D1.
+    sessionId: integer('session_id'),
     createdAt: createdAt(),
   },
-  (t) => [index('push_subscriptions_user_idx').on(t.userId)],
+  (t) => [
+    index('push_subscriptions_user_idx').on(t.userId),
+    index('push_subscriptions_session_idx').on(t.sessionId),
+  ],
 )

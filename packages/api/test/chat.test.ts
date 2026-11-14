@@ -52,8 +52,13 @@ describe('chat', () => {
     // Replying means Kim has read the conversation.
     expect((await call<Json>('/admin/chat/unread', { cookie: kim })).data.unread).toBe(0)
 
-    // Sam has one unread; the thread shows both, and that Kim has seen Sam's message.
-    expect((await call<Json>('/me/chat/unread', { cookie: sam })).data.unread).toBe(1)
+    // Sam has one unread, and sees which (the bell and the banner); never their own message.
+    const news = (await call<Json>('/me/chat/unread', { cookie: sam })).data
+    expect(news).toMatchObject({
+      unread: 1,
+      latest: { id: reply.data.message.id, senderName: COACH.name, body: reply.data.message.body },
+    })
+    // The thread shows both, and that Kim has seen Sam's message.
     const thread = (await call<Json>('/me/chat', { cookie: sam })).data
     expect(thread.coach).toEqual({ name: COACH.name })
     expect(thread.thread.messages.map((m: Json) => m.body)).toEqual([
@@ -67,7 +72,10 @@ describe('chat', () => {
       cookie: sam,
       body: { upTo: reply.data.message.id },
     })
-    expect((await call<Json>('/me/chat/unread', { cookie: sam })).data.unread).toBe(0)
+    expect((await call<Json>('/me/chat/unread', { cookie: sam })).data).toEqual({
+      unread: 0,
+      latest: null,
+    })
     const kimView = (await call<Json>(`/admin/chat/${samId}`, { cookie: kim })).data.thread
     expect(kimView.seenUpTo).toBe(reply.data.message.id)
   })

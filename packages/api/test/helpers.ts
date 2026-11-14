@@ -13,9 +13,11 @@ export interface TestResponse<T = unknown> {
 /** Calls the API and always reads the body (required for isolated storage). */
 export async function call<T = Record<string, unknown>>(
   path: string,
-  opts: { method?: string; body?: unknown; cookie?: string } = {},
+  opts: { method?: string; body?: unknown; cookie?: string; asAdminApp?: boolean } = {},
 ): Promise<TestResponse<T>> {
   const headers = new Headers({ origin: ORIGIN })
+  // As the admin dev server sends it: the admin's own sign-in (see appKindOf).
+  if (opts.asAdminApp) headers.set('x-project180-app', 'admin')
   if (opts.body !== undefined) headers.set('content-type', 'application/json')
   if (opts.cookie) headers.set('cookie', opts.cookie)
   const res = await SELF.fetch(`${ORIGIN}/api${path}`, {

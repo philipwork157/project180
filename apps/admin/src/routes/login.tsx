@@ -1,4 +1,5 @@
 import { authClient, forgetLocalData, meQuery } from '@project180/client'
+import { isStaff } from '@project180/shared'
 import { AuthShell, Button, Field, Input, PasswordInput } from '@project180/ui'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
@@ -6,7 +7,8 @@ import { type FormEvent, useState } from 'react'
 
 export const Route = createFileRoute('/login')({
   beforeLoad: async ({ context }) => {
-    if (await context.queryClient.ensureQueryData(meQuery)) throw redirect({ to: '/' })
+    const me = await context.queryClient.ensureQueryData(meQuery)
+    if (me && isStaff(me.role)) throw redirect({ to: '/' })
   },
   component: LoginPage,
 })
@@ -29,6 +31,14 @@ function LoginPage() {
     setPending(false)
     if (error) {
       setError(error.status === 401 ? 'That email and password don’t match.' : error.message)
+      return
+    }
+    // The server already refuses clients here; this is a second check.
+    const me = await queryClient.fetchQuery({ ...meQuery, staleTime: 0 })
+    if (!me || !isStaff(me.role)) {
+      await authClient.signOut()
+      queryClient.clear()
+      setError('This sign-in is for coaches and owners. Clients sign in on the Project 180 app.')
       return
     }
     // Start clean: nothing cached from whoever used this computer before.

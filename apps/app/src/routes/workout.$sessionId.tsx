@@ -48,6 +48,7 @@ import {
   CloudOff,
   Plus,
   RotateCcw,
+  Square,
   StickyNote,
   Timer,
   TrendingUp,
@@ -119,6 +120,7 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
   const [result, setResult] = useState<FinishResult | null>(null)
   const [intervals, setIntervals] = useState<number | null>(null)
   const [confirmRestart, setConfirmRestart] = useState(false)
+  const [stopping, setStopping] = useState(false)
   const restart = useMutation({
     mutationFn: () =>
       api<{ session: SessionDetail }>(`/sessions/${session.id}/restart`, { method: 'POST' }),
@@ -384,6 +386,14 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
             <RotateCcw className="size-[18px]" aria-hidden />
             <span className="max-sm:sr-only">Start over</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setStopping(true)}
+            className="inline-flex h-11 items-center gap-1.5 rounded-pill px-3 font-bold text-[15px] text-ink-muted transition hover:bg-danger/10 hover:text-danger active:scale-95 sm:px-4"
+          >
+            <Square className="size-[16px]" aria-hidden />
+            <span className="max-sm:sr-only">Stop</span>
+          </button>
           <Button
             variant="lime"
             onClick={() => setFinishing(true)}
@@ -605,6 +615,18 @@ function ActiveWorkout({ session }: { session: SessionDetail }) {
         }
         onSwap={(to) => swapping && swap.mutate({ from: swapping.exerciseId, to })}
         onClose={() => !swap.isPending && setSwapping(null)}
+      />
+
+      <StopSheet
+        open={stopping}
+        onClose={() => setStopping(false)}
+        sessionId={session.id}
+        doneCount={doneCount}
+        onFinish={() => {
+          setStopping(false)
+          setFinishing(true)
+        }}
+        onCancelled={done}
       />
 
       <FinishSheet
@@ -1085,6 +1107,88 @@ function NumberCell({
   )
 }
 
+/**
+ * Stop: finish with what's been logged, or cancel a workout started by accident. A cancelled
+ * workout leaves the client's history and calendar alone; their coach still sees it.
+ */
+function StopSheet({
+  open,
+  onClose,
+  sessionId,
+  doneCount,
+  onFinish,
+  onCancelled,
+}: {
+  open: boolean
+  onClose: () => void
+  sessionId: number
+  doneCount: number
+  onFinish: () => void
+  onCancelled: () => void
+}) {
+  const [sure, setSure] = useState(false)
+  const cancel = useMutation({
+    mutationFn: () => api(`/sessions/${sessionId}/cancel`, { method: 'POST' }),
+    onSuccess: onCancelled,
+  })
+  const close = () => {
+    setSure(false)
+    cancel.reset()
+    onClose()
+  }
+  return (
+    <Sheet open={open} onClose={close} label="Stop workout">
+      <div className="flex flex-col gap-4 pb-4">
+        <h2 className="font-display font-extrabold text-[26px]">Stop this workout?</h2>
+        {doneCount > 0 && (
+          <Button variant="lime" size="lg" block onClick={onFinish}>
+            Finish with what I did ({doneCount} {doneCount === 1 ? 'set' : 'sets'})
+          </Button>
+        )}
+        {sure ? (
+          <div className="flex flex-col gap-3 rounded-lg bg-danger/10 p-4">
+            <p className="font-semibold text-[15px]">
+              It won’t count and won’t show in your history.
+              {doneCount > 0 &&
+                ` The ${doneCount} ${doneCount === 1 ? 'set' : 'sets'} you logged won’t count either.`}{' '}
+              Your coach can still see you started it.
+            </p>
+            {cancel.isError && (
+              <p role="alert" className="font-semibold text-[14px] text-danger">
+                {cancel.error instanceof ApiError
+                  ? cancel.error.message
+                  : 'No connection. Try again in a moment.'}
+              </p>
+            )}
+            <Button
+              variant="danger"
+              size="lg"
+              block
+              loading={cancel.isPending}
+              onClick={() => cancel.mutate()}
+            >
+              Yes, cancel it
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant={doneCount > 0 ? 'ghost' : 'danger'}
+            size="lg"
+            block
+            className={doneCount > 0 ? 'text-danger hover:bg-danger/10 hover:text-danger' : undefined}
+            onClick={() => setSure(true)}
+          >
+            Cancel this workout
+          </Button>
+        )}
+        <Button variant="ghost" block onClick={close}>
+          Keep going
+        </Button>
+      </div>
+    </Sheet>
+  )
+}
+
 function FinishSheet({
   open,
   onClose,
@@ -1112,16 +1216,22 @@ function FinishSheet({
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string>()
   const finish = useMutation({
-    mutationFn: (status: 'completed' | 'abandoned') =>
+    mutationFn: (status: 'completed') =>
       api<FinishResult>(`/sessions/${sessionId}/finish`, {
         method: 'POST',
         body: { status, feeling, notes: notes.trim() || null },
       }),
   })
+  const cancel = useMutation({
+    mutationFn: () => api(`/sessions/${sessionId}/cancel`, { method: 'POST' }),
+    onSuccess: onDiscarded,
+    onError: (err) =>
+      setError(err instanceof ApiError ? err.message : 'No connection. Try again in a moment.'),
+  })
 
   const [loggingAll, setLoggingAll] = useState(false)
 
-  async function submit(status: 'completed' | 'abandoned') {
+  async function submit(status: 'completed') {
     setError(undefined)
     try {
       // Nothing ticked yet: log the sets as filled in, then finish.
@@ -1135,9 +1245,7 @@ function FinishSheet({
         await onFlush()
       }
       setLoggingAll(false)
-      const result = await finish.mutateAsync(status)
-      if (status === 'completed') onFinished(result)
-      else onDiscarded()
+      onFinished(await finish.mutateAsync(status))
     } catch (err) {
       setLoggingAll(false)
       setError(err instanceof ApiError ? err.message : 'No connection. Try again in a moment.')
@@ -1171,7 +1279,7 @@ function FinishSheet({
           size="lg"
           block
           disabled={totalCount === 0}
-          loading={loggingAll || (finish.isPending && finish.variables === 'completed')}
+          loading={loggingAll || finish.isPending}
           onClick={() => submit('completed')}
         >
           {doneCount === 0 ? 'Log all sets and finish' : 'Finish workout'}
@@ -1191,10 +1299,10 @@ function FinishSheet({
           variant="ghost"
           block
           className="text-danger hover:bg-danger/10 hover:text-danger"
-          loading={finish.isPending && finish.variables === 'abandoned'}
-          onClick={() => submit('abandoned')}
+          loading={cancel.isPending}
+          onClick={() => cancel.mutate()}
         >
-          Discard this workout
+          Cancel this workout
         </Button>
       </div>
     </Sheet>

@@ -3,6 +3,7 @@ import { AuthShell, Button, Field, Input, PasswordInput } from '@project180/ui'
 import { useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
+import { claimPushForMe } from '../lib/push'
 
 export const Route = createFileRoute('/login')({
   beforeLoad: async ({ context }) => {
@@ -35,6 +36,7 @@ function LoginPage() {
     // Sets they hadn't sent yet are kept only if it's the same person signing back in.
     queryClient.clear()
     claimLocalData(data?.user.id)
+    await claimPushForMe()
     await navigate({ to: '/' })
   }
 

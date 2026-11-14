@@ -8,6 +8,7 @@ import { type ReactNode, useState } from 'react'
 import { Segmented } from '../../components/controls'
 import { PageHeader } from '../../components/page-header'
 import { Bars, NumbersTable, shortDay, TrendLine } from '../../components/progress-charts'
+import { SessionStatusTag } from '../../components/session-status'
 import { SwapsLine } from '../../components/swaps-line'
 import { type OpenWorkout, WorkoutReviewDrawer } from '../../components/workout-review'
 
@@ -402,6 +403,7 @@ function RecentCard({
                   <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
                       {s.workoutName ?? 'Workout'}
+<SessionStatusTag status={s.status} />
                     </span>
                     <span className="tabular font-semibold text-[13px] text-ink-muted">
                       {timeAgo(s.startedAt)} · {s.setCount} {s.setCount === 1 ? 'set' : 'sets'}

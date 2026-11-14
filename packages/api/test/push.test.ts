@@ -237,6 +237,28 @@ describe('push: sending', () => {
     expect(left?.n).toBe(0)
   })
 
+  it('stops when that phone is signed out, even on just that device', async () => {
+    const { admin, member } = await setupHousehold()
+    const { subscription } = await phone()
+    await call('/me/push', { method: 'PUT', cookie: member, body: subscription })
+    const me = await call<Json>('/me', { cookie: member })
+    const keys = await vapidKeys()
+    const db = createDb(env.DB)
+    const message = { title: 'Hi', body: 'There' }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 201 }))
+    expect(await sendPush({ ...env, ...keys }, db, [me.data.user.id], message)).toEqual({ sent: 1 })
+
+    // The coach signs them out on that one phone (lost phone).
+    const activity = await call<Json>(`/admin/users/${me.data.user.id}/activity`, { cookie: admin })
+    const device = activity.data.activity.devices[0]
+    expect(device.app).toBe('app')
+    await call(`/admin/users/${me.data.user.id}/sessions/${device.id}`, {
+      method: 'DELETE',
+      cookie: admin,
+    })
+    expect(await sendPush({ ...env, ...keys }, db, [me.data.user.id], message)).toEqual({ sent: 0 })
+  })
+
   it('without VAPID keys nothing is sent (local dev, tests)', async () => {
     const { member } = await setupHousehold()
     const { subscription } = await phone()

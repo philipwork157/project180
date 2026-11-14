@@ -66,7 +66,7 @@ import { forbidden, notFound, parseBody, parseId } from '../errors'
 import { addFeedback, loadFeedback, removeFeedback } from '../feedback'
 import { requireAdmin, requireUser } from '../middleware'
 import { loadProfile, logWeight, saveProfile } from '../profiles'
-import { sessionSummaries } from '../sessions'
+import { cancelWorkout, sessionSummaries } from '../sessions'
 import { buildPersonStats } from '../stats'
 import { createUserWithPassword, setPassword } from '../users'
 import { assignProgram } from './enrollments'
@@ -529,7 +529,8 @@ export const adminUserRoutes = new Hono<AppEnv>()
   })
   /**
    * Set a temporary password; optionally email it to them. They're signed out everywhere and
-   * choose their own password when they next sign in. (Your own: it's simply your new password.)
+   * choose their own password when they next sign in. (Your own: it's simply your new password,
+   * and your other devices are signed out.)
    */
   .post('/:id/password', async (c) => {
     const { db, user: me } = c.var
@@ -545,6 +546,11 @@ export const adminUserRoutes = new Hono<AppEnv>()
         // Signed out everywhere, so no phone keeps getting their notifications either.
         db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id)),
       ])
+    } else {
+      // Your own: a new password signs you out on your other devices, as in Settings.
+      await db
+        .delete(sessions)
+        .where(and(eq(sessions.userId, me.id), ne(sessions.id, c.var.sessionId)))
     }
     if (!notify) return c.body(null, 204)
     const [row] = await c.var.db
@@ -594,6 +600,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
       devices: live.map((s) => ({
         id: s.id,
         label: deviceLabel(s.userAgent),
+        app: s.app === 'app' || s.app === 'admin' ? s.app : null,
         signedInAt: s.createdAt.toISOString(),
         lastActiveAt: s.updatedAt.toISOString(),
         expiresAt: s.expiresAt.toISOString(),
@@ -614,6 +621,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
       loadFeedback(db, row.id),
     ])
     return c.json({ session, feedback })
+  })
+  /** Cancel a workout they started by accident (or left open). It shows as cancelled. */
+  .post('/:id/workouts/:sessionId/cancel', async (c) => {
+    const row = await managedSession(c)
+    await cancelWorkout(c.var.db, row)
+    return c.body(null, 204)
   })
   /** Like or comment on their workout, or one exercise in it. They get a push on their phone. */
   .post('/:id/workouts/:sessionId/feedback', async (c) => {
@@ -664,11 +677,11 @@ export const adminUserRoutes = new Hono<AppEnv>()
       eq(workoutSessions.userId, person.id),
       eq(workoutSessions.enrollmentId, plan.enrollment.id),
     )
-    const finished = await sessionSummaries(
-      db,
-      and(inEnrollment, eq(workoutSessions.status, 'completed')),
-      500,
-    )
+    const [finished, latest] = await Promise.all([
+      sessionSummaries(db, and(inEnrollment, eq(workoutSessions.status, 'completed')), 500),
+      // The coach's list also shows workouts stopped early or cancelled (labelled as such).
+      sessionSummaries(db, and(inEnrollment, ne(workoutSessions.status, 'in_progress')), 5),
+    ])
     const workoutDays = plan.days.filter((d) => d.workoutId !== null)
     const todayDay = plan.days.find((d) => d.isToday)
     const progress: PersonProgress = {
@@ -683,7 +696,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
       minutes: Math.round(finished.reduce((a, s) => a + (s.durationSeconds ?? 0), 0) / 60),
       avgFeeling: average(finished.map((s) => s.feeling)),
       lastWorkoutAt: finished[0]?.startedAt ?? null,
-      recent: finished.slice(0, 5),
+      recent: latest,
       impact: await enrollmentImpact(db, plan.enrollment.id),
     }
     return c.json({ progress, past })

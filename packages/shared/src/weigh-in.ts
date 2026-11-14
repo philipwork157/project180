@@ -1,6 +1,6 @@
 // When to ask for a weigh-in, and what the app's notifications list shows.
 import { addDays, daysBetween } from './dates'
-import type { PlanDay } from './types'
+import type { ChatUnread, PlanDay } from './types'
 
 /** A missed weigh-in day still asks for a few days, then waits for the next one. */
 export const OVERDUE_DAYS = 3
@@ -64,7 +64,7 @@ export function weightChange(fromKg: number, toKg: number): string {
 export interface AppNotification {
   /** Stable per thing and day, so "seen" can be remembered. */
   id: string
-  kind: 'weigh_in' | 'workout' | 'program' | 'feedback'
+  kind: 'weigh_in' | 'workout' | 'program' | 'feedback' | 'chat'
   title: string
   body: string
   /** Feedback: the workout it's on. */
@@ -163,4 +163,21 @@ export function appNotifications(input: {
     })
   }
   return list
+}
+
+/**
+ * Unread messages from your coach, as one notification. Its id follows the newest message, so a
+ * new message shows as "new" again even when the earlier ones were never read.
+ */
+export function chatNotification(chat: ChatUnread | null | undefined): AppNotification | null {
+  if (!chat?.latest || chat.unread <= 0) return null
+  const from = chat.latest.senderName?.split(' ')[0] || 'Your coach'
+  const preview = chat.latest.body.replace(/\s+/g, ' ').trim()
+  return {
+    id: `chat:${chat.latest.id}`,
+    kind: 'chat',
+    title:
+      chat.unread === 1 ? `New message from ${from}` : `${chat.unread} new messages from ${from}`,
+    body: preview.length > 120 ? `${preview.slice(0, 119)}…` : preview,
+  }
 }

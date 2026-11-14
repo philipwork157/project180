@@ -18,7 +18,7 @@ import {
 import { and, asc, count, desc, eq, gt, gte, isNotNull, max, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { buildPlan } from './routes/me'
-import { completedBy, sessionSummaries } from './sessions'
+import { completedBy, endedBy, sessionSummaries } from './sessions'
 
 interface Person {
   id: number
@@ -120,7 +120,7 @@ export async function buildPersonStats(
   const { firstWeek, since } = statsWindow(person, weeksBack)
   const original = alias(exercises, 'original')
   const inWindow = and(completedBy(person.id), gte(workoutSessions.startedAt, since))
-  const [base, plan, lifts, swapRows] = await Promise.all([
+  const [base, plan, lifts, swapRows, latest] = await Promise.all([
     buildStats(db, person, weeksBack),
     buildPlan(db, person),
     // One row per workout per exercise: the heaviest set and the best estimated max.
@@ -153,6 +153,8 @@ export async function buildPersonStats(
       .groupBy(sessionExercises.originalExerciseId, sessionExercises.exerciseId)
       .orderBy(desc(count()), desc(max(workoutSessions.startedAt)))
       .limit(10),
+    // The coach's list also shows workouts stopped early or cancelled (labelled as such).
+    sessionSummaries(db, endedBy(person.id), 10),
   ])
 
   const byExercise = new Map<number, PersonStats['strength'][number]>()
@@ -185,6 +187,7 @@ export async function buildPersonStats(
 
   return {
     ...base,
+    recent: latest,
     planned: plan ? { done: due.filter((d) => d.state === 'done').length, due: due.length } : null,
     strength,
     swaps: swapRows.map((s) => ({

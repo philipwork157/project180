@@ -15,7 +15,10 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 5174,
     strictPort: true,
-    proxy: { '/api': 'http://localhost:5173' },
+    // Tagged as the admin so the API uses the admin's own sign-in cookie, not the app's.
+    proxy: {
+      '/api': { target: 'http://localhost:5173', headers: { 'x-project180-app': 'admin' } },
+    },
   },
   plugins: [
     tanstackRouter({ target: 'react', autoCodeSplitting: true }),

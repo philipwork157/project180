@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appNotifications, weighInStatus, weightChange } from './weigh-in'
+import { appNotifications, chatNotification, weighInStatus, weightChange } from './weigh-in'
 
 const day = (date: string, checkinRequired = false) => ({ date, checkinRequired })
 const week = [
@@ -145,5 +145,47 @@ describe('program news in the notifications', () => {
     const todayWorkout = { date: '2026-11-13', workoutName: 'Legs', state: 'planned' as const }
     const list = appNotifications({ ...base, todayWorkout, program })
     expect(list.map((n) => n.kind)).toEqual(['program', 'workout'])
+  })
+})
+
+describe('chatNotification', () => {
+  const message = (id: number, body = 'Swap lunges for step-ups this week') => ({
+    id,
+    clientUuid: `uuid-${id}`,
+    senderId: 2,
+    senderName: 'Kim Botha',
+    body,
+    createdAt: '2026-11-13T10:00:00.000Z',
+  })
+
+  it('says nothing when everything is read', () => {
+    expect(chatNotification(null)).toBeNull()
+    expect(chatNotification({ unread: 0, latest: null })).toBeNull()
+    expect(chatNotification({ unread: 0, latest: message(5) })).toBeNull()
+  })
+
+  it('names the coach and shows the newest message', () => {
+    expect(chatNotification({ unread: 1, latest: message(5) })).toEqual({
+      id: 'chat:5',
+      kind: 'chat',
+      title: 'New message from Kim',
+      body: 'Swap lunges for step-ups this week',
+    })
+    expect(chatNotification({ unread: 3, latest: message(7) })?.title).toBe(
+      '3 new messages from Kim',
+    )
+  })
+
+  it('is new again with every new message, and keeps long ones short', () => {
+    const first = chatNotification({ unread: 1, latest: message(5) })
+    const next = chatNotification({ unread: 2, latest: message(6, 'x'.repeat(300)) })
+    expect(next?.id).not.toBe(first?.id)
+    expect(next?.body.length).toBe(120)
+    expect(next?.body.endsWith('…')).toBe(true)
+  })
+
+  it('falls back to "Your coach" when the sender was removed', () => {
+    const latest = { ...message(5), senderId: null, senderName: null }
+    expect(chatNotification({ unread: 1, latest })?.title).toBe('New message from Your coach')
   })
 })

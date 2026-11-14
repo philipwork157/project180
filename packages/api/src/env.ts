@@ -1,6 +1,6 @@
 import type { Db } from '@project180/db'
 import type { Me } from '@project180/shared'
-import type { Auth } from './auth'
+import type { AppKind, Auth } from './auth'
 
 /** Worker bindings: see apps/app/wrangler.jsonc, apps/admin/wrangler.jsonc and .dev.vars. */
 export interface Bindings {
@@ -31,6 +31,8 @@ export interface Bindings {
   VAPID_SUBJECT?: string
   /** Uploaded photos (R2). Without it, uploading answers 503. */
   MEDIA?: R2Bucket
+  /** "1" on the admin Worker: its own sign-in cookie, and only owners and coaches may sign in. */
+  STAFF_ONLY?: string
   /** Days without use before a sign-in expires (renewed while in use). App 30, admin 7. */
   SESSION_DAYS?: string
   /**
@@ -46,6 +48,8 @@ export interface Bindings {
 
 export interface Variables {
   auth: Auth
+  /** Which app this call is for: the admin has its own sign-in and lets only staff in. */
+  appKind: AppKind
   db: Db
   user: Me
   /** The current Better Auth session's id. */

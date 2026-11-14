@@ -10,4 +10,5 @@ test-results
 playwright-report
 routeTree.gen.ts
 packages/db/seed/library.sql
+packages/db/seed/philip.sql
 .vitest

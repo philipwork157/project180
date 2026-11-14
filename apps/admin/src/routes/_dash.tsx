@@ -30,7 +30,8 @@ import { Avatar, UserMenu } from '../components/user-menu'
 export const Route = createFileRoute('/_dash')({
   beforeLoad: async ({ context }) => {
     const me = await context.queryClient.ensureQueryData(meQuery)
-    if (!me) throw redirect({ to: '/login' })
+    // Clients can't use the admin, even with a valid sign-in (locally the two apps share one).
+    if (!me || !isStaff(me.role)) throw redirect({ to: '/login' })
     if (me.mustChangePassword) throw redirect({ to: '/choose-password' })
     return { me }
   },

@@ -228,7 +228,11 @@ function UsersPage() {
         )
       ) : (
         <Card
-          className={cn('p-0 transition-opacity md:p-0', people.isPlaceholderData && 'opacity-60')}
+          className={cn(
+            // overflow-hidden: a highlighted row keeps the card's rounded corners.
+            'overflow-hidden p-0 transition-opacity md:p-0',
+            people.isPlaceholderData && 'opacity-60',
+          )}
         >
           <ul className="flex flex-col divide-y divide-border">
             {list.map((u) => (
@@ -356,7 +360,8 @@ function PersonRow({
         aria-controls={detailId}
         className={cn(
           'flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition md:px-5',
-          open ? 'bg-surface-raised' : 'hover:bg-surface-raised',
+          // A light touch on hover; the stronger tint marks the person that's open.
+          open ? 'bg-surface-raised' : 'hover:bg-surface-raised/40',
         )}
       >
         <span className="relative grid size-10 shrink-0 place-items-center rounded-full bg-brand-soft font-display font-extrabold text-[17px] text-brand-text">

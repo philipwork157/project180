@@ -45,7 +45,8 @@ describe('one workout in progress', () => {
     const workoutId = await aWorkout(admin)
     const first = (await start(admin, workoutId)).data.session.id as number
     const second = (await start(admin, workoutId)).data.session.id as number
-    expect(await statusOf(first)).toBe('abandoned')
+    // Nothing was logged in the first one, so it's cancelled rather than stopped early.
+    expect(await statusOf(first)).toBe('cancelled')
     expect(await statusOf(second)).toBe('in_progress')
     const userId = (
       await env.DB.prepare('SELECT id FROM users WHERE email = ?')
@@ -83,7 +84,8 @@ describe('daily cleanup', () => {
 
     const done = await dailyCleanup(createDb(env.DB))
     expect(done).toMatchObject({ sessions: 1, attempts: 1, workouts: 1 })
-    expect(await statusOf(forgotten)).toBe('abandoned')
+    // Nothing logged in it: cancelled.
+    expect(await statusOf(forgotten)).toBe('cancelled')
     const after = await env.DB.prepare('SELECT count(*) AS n FROM sessions').first<Json>()
     expect(after?.n).toBe((before?.n as number) - 1)
 

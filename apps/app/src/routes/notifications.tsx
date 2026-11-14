@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Dumbbell,
   Heart,
+  MessageCircle,
   Scale,
 } from 'lucide-react'
 import { motion } from 'motion/react'
@@ -38,6 +39,7 @@ const LOOK: Record<AppNotification['kind'], { icon: typeof Scale; tint: string }
   workout: { icon: Dumbbell, tint: 'bg-brand-soft text-brand-text' },
   program: { icon: CalendarDays, tint: 'bg-steel/20 text-steel-text' },
   feedback: { icon: Heart, tint: 'bg-brand-soft text-brand-text' },
+  chat: { icon: MessageCircle, tint: 'bg-brand-soft text-brand-text' },
 }
 
 function NotificationsPage() {
@@ -60,6 +62,8 @@ function NotificationsPage() {
 
   function open(n: AppNotification) {
     if (n.kind === 'weigh_in') return setWeighing(true)
+    // A message from your coach: open the chat.
+    if (n.kind === 'chat') return void navigate({ to: '/chat' })
     // A new or updated program: the calendar shows the whole plan.
     if (n.kind === 'program') return void navigate({ to: '/calendar' })
     // A like or comment from your coach: open that workout.
@@ -89,8 +93,8 @@ function NotificationsPage() {
           </span>
           <p className="mt-2 font-bold text-[17px]">You’re all caught up</p>
           <p className="max-w-xs text-[14px] text-ink-muted">
-            Weigh-in days, today’s workout, news about your program and your coach’s feedback show
-            up here.
+            Messages from your coach, weigh-in days, today’s workout, news about your program and
+            your coach’s feedback show up here.
           </p>
         </div>
       ) : (

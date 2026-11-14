@@ -37,6 +37,7 @@ import {
 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
+import { SessionStatusTag } from './session-status'
 import { SwapsLine } from './swaps-line'
 import { type OpenWorkout, WorkoutReviewDrawer } from './workout-review'
 
@@ -285,6 +286,7 @@ function CurrentProgram({
                     <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
                         {s.workoutName ?? 'Workout'}
+<SessionStatusTag status={s.status} />
                       </span>
                       <span className="tabular font-semibold text-[13px] text-ink-muted">
                         {relativeDay(s.startedAt)} · {s.setCount}{' '}
@@ -632,6 +634,7 @@ function PastPrograms({
                             </span>
                             <span className="min-w-0 flex-1 truncate font-bold">
                               {s.workoutName ?? 'Workout'}
+<SessionStatusTag status={s.status} />
                             </span>
                             <span className="tabular text-ink-muted">
                               {s.setCount} {s.setCount === 1 ? 'set' : 'sets'} ·{' '}

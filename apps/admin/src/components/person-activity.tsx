@@ -182,6 +182,9 @@ export function PersonActivityPanel({
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-2 font-semibold text-[14px]">
                     <span className="truncate">{d.label}</span>
+                    {d.app && (
+                      <Chip className="h-5 text-[11px]">{d.app === 'admin' ? 'Admin' : 'App'}</Chip>
+                    )}
                     {d.current && (
                       <Chip tone="brand" className="h-5 text-[11px]">
                         This device

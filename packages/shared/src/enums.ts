@@ -123,7 +123,12 @@ export type TrackingType = (typeof TRACKING_TYPES)[number]
 export const ENROLLMENT_STATUS = ['active', 'completed', 'cancelled'] as const
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUS)[number]
 
-export const SESSION_STATUS = ['in_progress', 'completed', 'abandoned'] as const
+/**
+ * abandoned = stopped early (sets were logged; they stay, but it doesn't count as done);
+ * cancelled = started by accident or closed with nothing logged: hidden from the client's
+ * history, still shown to their coach.
+ */
+export const SESSION_STATUS = ['in_progress', 'completed', 'abandoned', 'cancelled'] as const
 export type SessionStatus = (typeof SESSION_STATUS)[number]
 
 /** A coach's reaction to a client's workout or one exercise in it. */

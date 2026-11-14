@@ -1,5 +1,5 @@
 // Turning push notifications on and off for this phone.
-import { api } from '@project180/client'
+import { ApiError, api } from '@project180/client'
 import type { PushSetup } from '@project180/shared'
 import { queryOptions } from '@tanstack/react-query'
 
@@ -81,6 +81,27 @@ export async function turnPushOn(): Promise<PushState> {
 }
 
 /**
+ * Right after signing in: if this phone already has notifications on (maybe from the last person
+ * on it, who was signed out by the server and never got to turn them off), they now go to whoever
+ * just signed in. That's also what their Profile switch shows, so it matches.
+ */
+export async function claimPushForMe(): Promise<void> {
+  try {
+    const reg = await registration()
+    const subscription = await reg?.pushManager.getSubscription()
+    if (!subscription) return
+    await api('/me/push', { method: 'PUT', body: subscription.toJSON() }).catch(async (err) => {
+      // The server refused it (not just offline): don't leave this phone getting someone
+      // else's notifications.
+      if (err instanceof ApiError && err.status < 500 && err.status !== 429)
+        await subscription.unsubscribe()
+    })
+  } catch {
+    // No service worker or no push here: nothing to claim.
+  }
+}
+
+/**
  * Turns them off on this phone, and tells the server (while still signed in). Also called when
  * signing out, so the next person on this phone never gets the last person's notifications.
  */
@@ -96,4 +117,27 @@ export async function turnPushOff(): Promise<void> {
   } catch {
     // Nothing to turn off.
   }
+}
+
+/**
+ * Clears the chat's notification from the phone's notification list: the message has been read
+ * in the app, or it's already showing in the app's own banner.
+ */
+export async function closeChatNotifications(): Promise<void> {
+  try {
+    const reg = await registration()
+    for (const n of (await reg?.getNotifications({ tag: 'chat' })) ?? []) n.close()
+  } catch {
+    // No service worker here: nothing to clear.
+  }
+}
+
+/** The number on the app's icon (installed apps on phones that show one); 0 clears it. */
+export function setIconBadge(count: number): void {
+  const nav = navigator as Navigator & {
+    setAppBadge?: (n?: number) => Promise<void>
+    clearAppBadge?: () => Promise<void>
+  }
+  const done = count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.()
+  void done?.catch(() => undefined)
 }

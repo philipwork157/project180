@@ -49,6 +49,8 @@ export const sessions = sqliteTable(
     expiresAt: timestamp('expires_at').notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
+    // Which app this sign-in is for: 'app' or 'admin' (null: from before this column).
+    app: text('app'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

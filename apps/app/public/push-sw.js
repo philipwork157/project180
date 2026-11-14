@@ -9,14 +9,26 @@ self.addEventListener('push', (event) => {
     // Not ours, or unreadable: still show something (phones require a visible notification).
   }
   event.waitUntil(
-    self.registration.showNotification(message.title || 'Project 180', {
-      body: message.body || 'Something new is waiting in the app.',
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      // The same tag replaces the earlier notification instead of stacking up.
-      tag: message.tag,
-      data: { url: message.url || '/' },
-    }),
+    (async () => {
+      await self.registration.showNotification(message.title || 'Project 180', {
+        body: message.body || 'Something new is waiting in the app.',
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        // The same tag replaces the earlier notification instead of stacking up.
+        tag: message.tag,
+        data: { url: message.url || '/' },
+      })
+      // The number on the app icon, where the phone shows one (installed apps).
+      if (typeof message.badge === 'number' && 'setAppBadge' in self.navigator) {
+        await (message.badge > 0
+          ? self.navigator.setAppBadge(message.badge)
+          : self.navigator.clearAppBadge()
+        ).catch(() => undefined)
+      }
+      // The app, if it's open, refreshes at once (and shows its own banner for chat messages).
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const w of windows) w.postMessage({ type: 'push', tag: message.tag })
+    })(),
   )
 })
 

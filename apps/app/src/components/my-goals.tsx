@@ -21,6 +21,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Pencil, Target } from 'lucide-react'
 import { useState } from 'react'
+import { claimPushForMe } from '../lib/push'
 import { Sheet } from './sheet'
 
 const goalOptions = GOALS.map((g) => ({ value: g, label: GOAL_LABELS[g] }))
@@ -223,6 +224,8 @@ export function ChangePassword() {
           : { repeat: err.message ?? 'Could not change it.' },
       )
     }
+    // Changing it signs in again (new sign-in): this phone's notifications move to it.
+    await claimPushForMe()
     toast({ title: 'Password changed', description: 'Other devices were signed out.' })
     close()
   }

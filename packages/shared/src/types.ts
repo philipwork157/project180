@@ -7,6 +7,7 @@ import type {
   GroupKind,
   MuscleGroup,
   Role,
+  SessionStatus,
   Sex,
   TrackingType,
   TrainingPlace,
@@ -99,6 +100,8 @@ export interface SignedInDevice {
   id: number
   /** "iPhone · Safari", "Windows · Chrome", … */
   label: string
+  /** Signed in to the phone app or the admin (null: from before this was recorded). */
+  app: 'app' | 'admin' | null
   signedInAt: string
   /** When the sign-in was last renewed (roughly the last day it was used). */
   lastActiveAt: string
@@ -324,7 +327,7 @@ export interface PreviousSet {
 export interface SessionDetail {
   id: number
   clientUuid: string
-  status: 'in_progress' | 'completed' | 'abandoned'
+  status: SessionStatus
   workoutId: number | null
   workoutName: string | null
   programDayId: number | null
@@ -385,6 +388,12 @@ export interface ChatThread {
   readUpTo: number
 }
 
+/** Messages from your coach you haven't read, and the newest of them (the bell and the banner). */
+export interface ChatUnread {
+  unread: number
+  latest: ChatMessage | null
+}
+
 /** A client's conversation in the coach's inbox. */
 export interface ChatSummary {
   clientId: number
@@ -395,6 +404,8 @@ export interface ChatSummary {
 
 export interface SessionSummary {
   id: number
+  /** Coaches' lists also show workouts stopped early or cancelled; clients see completed only. */
+  status: SessionStatus
   workoutName: string | null
   startedAt: string
   durationSeconds: number | null

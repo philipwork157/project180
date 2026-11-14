@@ -1,9 +1,9 @@
-import { clientWorkoutQuery } from '@project180/client'
+import { ApiError, api, clientWorkoutQuery } from '@project180/client'
 import { durationShort, type ExerciseReview, reviewSession } from '@project180/shared'
-import { Chip, cn, Drawer } from '@project180/ui'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowLeftRight, Check, TrendingUp } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { Button, Chip, ConfirmDialog, cn, Drawer, toast } from '@project180/ui'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeftRight, Ban, Check, Square, TrendingUp } from 'lucide-react'
+import { type ReactNode, useState } from 'react'
 import { FeedbackBar } from './workout-feedback'
 
 const LABEL = 'font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]'
@@ -105,7 +105,15 @@ function WorkoutReview({
               Training now
             </Chip>
           ) : s.status === 'abandoned' ? (
-            <Chip>Stopped early</Chip>
+            <Chip tone="sand">
+              <Square className="size-3" aria-hidden />
+              Stopped early
+            </Chip>
+          ) : s.status === 'cancelled' ? (
+            <Chip>
+              <Ban className="size-3.5" aria-hidden />
+              Cancelled
+            </Chip>
           ) : (
             <Chip tone="brand">
               <Check className="size-3.5" aria-hidden />
@@ -143,6 +151,7 @@ function WorkoutReview({
             <p className="mt-1 whitespace-pre-line text-[14px]">{s.notes}</p>
           </div>
         )}
+        {live && <CancelWorkout userId={userId} sessionId={s.id} clientName={clientName} />}
         <div className="border-border border-t pt-3">
           <FeedbackBar
             userId={userId}
@@ -258,5 +267,59 @@ function ExerciseBlock({ review: r, feedback }: { review: ExerciseReview; feedba
 
       <div className="border-border border-t pt-3">{feedback}</div>
     </li>
+  )
+}
+
+/** Cancel a client's workout that was started by accident or left open. */
+function CancelWorkout({
+  userId,
+  sessionId,
+  clientName,
+}: {
+  userId: number
+  sessionId: number
+  clientName: string
+}) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const first = clientName.split(' ')[0] ?? clientName
+  const cancel = useMutation({
+    mutationFn: () =>
+      api(`/admin/users/${userId}/workouts/${sessionId}/cancel`, { method: 'POST' }),
+    onSuccess: () => {
+      setOpen(false)
+      void queryClient.invalidateQueries({ queryKey: ['admin'] })
+      toast({ title: 'Workout cancelled', description: `It no longer counts for ${first}.` })
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t cancel the workout',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-11 self-start text-danger hover:bg-danger/10 hover:text-danger sm:h-9"
+        icon={<Ban className="size-4" aria-hidden />}
+        onClick={() => setOpen(true)}
+      >
+        Cancel this workout
+      </Button>
+      <ConfirmDialog
+        open={open}
+        title={`Cancel ${first}’s workout?`}
+        confirmLabel="Cancel workout"
+        loading={cancel.isPending}
+        onConfirm={() => cancel.mutate()}
+        onClose={() => setOpen(false)}
+      >
+        For a workout started by accident or left open. It won’t count or show in {first}’s
+        history; you’ll still see it here as cancelled.
+      </ConfirmDialog>
+    </>
   )
 }

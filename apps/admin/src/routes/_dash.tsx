@@ -278,6 +278,11 @@ function AdminLayout() {
               animate={{ x: 0 }}
               exit={{ x: -300 }}
               transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+              // Tapping a link closes the drawer, even the page you're already on (no route
+              // change, so the effect above wouldn't).
+              onClickCapture={(e) => {
+                if ((e.target as HTMLElement).closest('a')) setOpen(false)
+              }}
             >
               <button
                 type="button"

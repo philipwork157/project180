@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test'
 
+// Signed out: what a stranger sees.
+test.use({ storageState: { cookies: [], origins: [] } })
+
 test('opens on sign-in', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveURL(/\/login$/)
@@ -20,7 +23,7 @@ test('signed-out visitors get nothing from the API', async ({ request }) => {
 test('a wrong password says so and stays on sign-in', async ({ page }) => {
   await page.goto('/login')
   // A fresh address each run: the sign-in limit counts wrong passwords per email.
-  await page.getByLabel('Email').fill(`nobody-${Date.now()}@example.com`)
+  await page.getByLabel('Email').fill(`nobody-${Date.now()}@project180.test`)
   await page.getByLabel('Password', { exact: true }).fill('not-the-password')
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.getByText('That email and password don’t match.')).toBeVisible()

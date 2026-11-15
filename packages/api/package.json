@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./e2e": "./scripts/e2e-staff.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

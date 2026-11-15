@@ -17,7 +17,8 @@
       "outputs": []
     },
     "e2e": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["CI", "PLAYWRIGHT_*"]
     },
     "deploy": {
       "dependsOn": ["build"],

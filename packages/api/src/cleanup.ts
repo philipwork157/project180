@@ -10,6 +10,7 @@ import {
 } from '@project180/db'
 import { and, eq, isNotNull, isNull, lt, notExists, or } from 'drizzle-orm'
 import type { Bindings } from './env'
+import { startDuePrograms } from './schedule'
 import { closeOpenWorkouts, idleSince } from './sessions'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -22,6 +23,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
  *   logged (the sets stay), otherwise cancelled. The app also checks this as it opens;
  * - phones' notifications whose sign-in has ended (they're no longer sent anyway);
  * - photo-estimate counters from before yesterday (only today's count is ever read).
+ * Then queued programs whose start date has come take over from the current ones.
  */
 export async function dailyCleanup(db: Db, now = Date.now()) {
   const at = new Date(now)
@@ -59,8 +61,11 @@ export async function dailyCleanup(db: Db, now = Date.now()) {
       .where(lt(foodPhotoUses.date, new Date(now - 2 * DAY_MS).toISOString().slice(0, 10)))
       .returning({ userId: foodPhotoUses.userId }),
   ])
+  // Queued programs whose start date has come take over (the plan also does this when read).
+  const programsStarted = await startDuePrograms(db, 'everyone', at)
   return {
     sessions: expired.length,
+    programsStarted,
     attempts: attempts.length,
     workouts: stopped.length + cancelled.length,
     pushes: pushes.length,

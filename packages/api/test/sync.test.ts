@@ -145,14 +145,14 @@ describe('updating many clients’ copies', () => {
   })
 
   it('refuses the whole update if one of the clients isn’t yours', async () => {
-    const { owner, squat, clients } = await setup()
+    const { owner, squat } = await setup()
     await call('/admin/users', {
       method: 'POST',
       cookie: owner,
       body: { ...COACH, role: 'admin' },
     })
     const kim = await signIn(COACH.email, COACH.password)
-    // Kim's own program, on Kim's client Sam and on one of the owner's clients.
+    // Kim's own program, on her clients Sam and Lee.
     const kimWorkout = (
       await call<Json>('/workouts', {
         method: 'POST',
@@ -176,19 +176,31 @@ describe('updating many clients’ copies', () => {
       cookie: kim,
       body: { name: 'Sam', email: 'sam@example.com', password: 'client-password-1' },
     })
+    await call('/admin/users', {
+      method: 'POST',
+      cookie: kim,
+      body: { name: 'Lee', email: 'lee@example.com', password: 'client-password-2' },
+    })
     const people = (await call<Json>('/admin/users', { cookie: owner })).data.users as Json[]
-    const sam = people.find((u) => u.email === 'sam@example.com')?.id as number
-    const theirs = clients[0] as number
-    for (const [cookie, userId] of [
-      [kim, sam],
-      [owner, theirs],
-    ] as const) {
+    const idOf = (email: string) => people.find((u) => u.email === email)?.id as number
+    const sam = idOf('sam@example.com')
+    const lee = idOf('lee@example.com')
+    for (const userId of [sam, lee]) {
       await call('/enrollments', {
         method: 'POST',
-        cookie,
+        cookie: kim,
         body: { userId, programId: kimProgram, startDate: '2026-11-09' },
       })
     }
+    const both = (await call<Json>(`/programs/${kimProgram}/copies`, { cookie: kim })).data
+      .copies as Json[]
+    expect(both).toHaveLength(2)
+    // The owner takes Lee over: Lee keeps the copy of Kim's program, but isn't Kim's any more.
+    await call(`/admin/users/${lee}/coach`, {
+      method: 'PATCH',
+      cookie: owner,
+      body: { coachId: (await call<Json>('/me', { cookie: owner })).data.user.id },
+    })
     await call(`/programs/${kimProgram}`, {
       method: 'PUT',
       cookie: kim,
@@ -198,18 +210,15 @@ describe('updating many clients’ copies', () => {
         days: [{ weekNumber: 1, dayNumber: 1, workoutId: kimWorkout }],
       },
     })
-    // The owner sees both copies; Kim sends both ids, one of them not her client's.
-    const copies = (await call<Json>(`/programs/${kimProgram}/copies`, { cookie: owner })).data
-      .copies as Json[]
-    expect(copies).toHaveLength(2)
+    // Kim sends both ids, one of them no longer her client's.
     const res = await call(`/programs/${kimProgram}/sync`, {
       method: 'POST',
       cookie: kim,
-      body: { enrollmentIds: copies.map((c) => c.enrollmentId) },
+      body: { enrollmentIds: both.map((c) => c.enrollmentId) },
     })
     expect(res.status).toBe(404)
     // Nothing changed for either of them.
-    expect((await planOf(owner, sam)).enrollment.programName).toBe('Kim base')
-    expect((await planOf(owner, theirs)).enrollment.programName).toBe('Kim base')
+    expect((await planOf(kim, sam)).enrollment.programName).toBe('Kim base')
+    expect((await planOf(owner, lee)).enrollment.programName).toBe('Kim base')
   })
 })

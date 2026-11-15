@@ -1,5 +1,14 @@
-import { ApiError, api, authClient, foodPhotoSettingsQuery, meQuery } from '@project180/client'
 import {
+  ApiError,
+  api,
+  authClient,
+  foodPhotoSettingsQuery,
+  meQuery,
+  workoutBuilderQuery,
+  workoutBuilderSettingsQuery,
+} from '@project180/client'
+import {
+  type ClaudeFeatureSettings,
   type FoodPhotoSettings,
   isOwner,
   MAX_FOOD_PHOTOS_PER_DAY,
@@ -9,7 +18,7 @@ import {
 import { Button, Card, Field, Input, PasswordInput, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Camera, Mail, Send } from 'lucide-react'
+import { Camera, Mail, Send, Sparkles } from 'lucide-react'
 import { type FormEvent, type ReactNode, useState } from 'react'
 import { Segmented } from '../../components/controls'
 import { PageHeader } from '../../components/page-header'
@@ -77,6 +86,12 @@ function SettingsPage() {
           description="Lets clients take a photo of a meal or a nutrition label in the app's Fuel tab and get the calories and protein estimated. Typing food in always works."
         >
           <FoodPhotoSwitch canChange={isOwner(me.role)} />
+        </Section>
+        <Section
+          title="Build with Claude"
+          description="Lets coaches describe a workout or a program in words and get a new one built from your library. It only ever creates new workouts and programs; nothing existing is changed."
+        >
+          <WorkoutBuilderSwitch canChange={isOwner(me.role)} />
         </Section>
       </Card>
     </>
@@ -462,5 +477,86 @@ function PhotoLimitForm({ perDay }: { perDay: number }) {
         Save limit
       </Button>
     </form>
+  )
+}
+
+/** The owner turns "Build with Claude" on or off for every coach. Coaches see the status only. */
+function WorkoutBuilderSwitch({ canChange }: { canChange: boolean }) {
+  const queryClient = useQueryClient()
+  const status = useQuery(workoutBuilderSettingsQuery)
+  const save = useMutation({
+    mutationFn: (enabled: boolean) =>
+      api<{ workoutBuilder: ClaudeFeatureSettings }>('/admin/settings/workout-builder', {
+        method: 'PUT',
+        body: { enabled },
+      }),
+    onSuccess: ({ workoutBuilder }) => {
+      queryClient.setQueryData(workoutBuilderSettingsQuery.queryKey, workoutBuilder)
+      void queryClient.invalidateQueries({ queryKey: workoutBuilderQuery.queryKey })
+      toast({
+        title: workoutBuilder.enabled
+          ? 'Build with Claude turned on'
+          : 'Build with Claude turned off',
+      })
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: 'Couldn’t change it',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  const f = status.data
+  if (status.isError)
+    return (
+      <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
+        Couldn’t load this setting. Try again.
+      </p>
+    )
+  if (!f) return <div className="h-24 animate-pulse rounded-md bg-surface-raised" />
+  const m = !f.enabled
+    ? {
+        label: 'Off',
+        tone: 'bg-surface-raised text-ink-muted',
+        text: 'Coaches don’t see the Build with Claude button on Workouts and Programs.',
+      }
+    : !f.configured
+      ? {
+          label: 'Not set up',
+          tone: 'bg-surface-raised text-ink-muted',
+          text: 'Switched on, but this site has no Claude API key (ANTHROPIC_API_KEY), so the button stays hidden.',
+        }
+      : {
+          label: 'On',
+          tone: 'bg-brand-soft text-brand-text',
+          text: 'Coaches can build new workouts and programs with Claude on the Workouts and Programs pages.',
+        }
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start gap-3 rounded-md bg-surface-raised p-4">
+        <Sparkles className="mt-0.5 size-5 shrink-0 text-ink-muted" aria-hidden />
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className={`self-start rounded-full px-2.5 py-0.5 font-bold text-[12px] ${m.tone}`}>
+            {m.label}
+          </span>
+          <p className="text-[14px]">{m.text}</p>
+        </div>
+      </div>
+      {canChange ? (
+        <div className="self-start">
+          <Segmented
+            label="Build with Claude"
+            value={f.enabled ? 'on' : 'off'}
+            onChange={(v) => v !== (f.enabled ? 'on' : 'off') && save.mutate(v === 'on')}
+            options={[
+              { value: 'on', label: 'On' },
+              { value: 'off', label: 'Off' },
+            ]}
+          />
+        </div>
+      ) : (
+        <p className="text-[13px] text-ink-muted">Only an owner can change this.</p>
+      )}
+    </div>
   )
 }

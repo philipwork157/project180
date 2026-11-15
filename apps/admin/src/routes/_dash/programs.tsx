@@ -10,6 +10,7 @@ import { AssignForm } from '../../components/assign-form'
 import { SearchInput, Segmented, Toolbar } from '../../components/controls'
 import { DeleteForGood } from '../../components/delete-for-good'
 import { PageHeader } from '../../components/page-header'
+import { BuildProgramWithClaude } from '../../components/program-builder'
 
 export const Route = createFileRoute('/_dash/programs')({
   component: ProgramsPage,
@@ -51,7 +52,12 @@ function ProgramsPage() {
       <PageHeader
         title="Programs"
         subtitle="Multi-week plans that fill the calendar. Clients only see the one you assign them."
-        action={newButton}
+        action={
+          <div className="flex flex-wrap gap-3">
+            <BuildProgramWithClaude />
+            {newButton}
+          </div>
+        }
       />
       <Toolbar>
         <Segmented

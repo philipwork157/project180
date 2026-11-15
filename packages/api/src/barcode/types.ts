@@ -24,6 +24,19 @@ export interface BarcodeProvider {
   lookup: (env: Bindings, barcode: string) => Promise<ProviderProduct | null>
   /** A page about the product, for the credit link, if the provider has one. */
   productUrl?: (env: Bindings, barcode: string) => string
+  /**
+   * Foods whose name matches what was typed, best first (at most `limit`). Providers without a
+   * name search leave it out. Throws on a failure.
+   */
+  search?: (env: Bindings, query: string, limit: number) => Promise<ProviderSearchHit[]>
+}
+
+/** A food found by name. `code` is the barcode, or the provider's own id for foods without one. */
+export interface ProviderSearchHit extends ProviderProduct {
+  code: string
+  barcode: string | null
+  /** A page about this food, for the credit link. */
+  url: string | null
 }
 
 /** A number from a provider's JSON (they send numbers or strings), or null. */

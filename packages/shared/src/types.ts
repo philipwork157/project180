@@ -1,4 +1,5 @@
 import type {
+  EnrollmentStatus,
   Equipment,
   ExerciseCategory,
   ExperienceLevel,
@@ -75,6 +76,10 @@ export interface UserSummary {
   createdAt: string
   /** Last time they used the app (or the admin), or null if never. */
   lastSeenAt: string | null
+  /** Has a sign-in that hasn't ended (any device). With lastSeenAt it makes "active now". */
+  signedIn: boolean
+  /** Staff blocked their access: they can't sign in until unblocked. */
+  blocked: boolean
 }
 
 /** One person on the People page: the summary row, before their details are opened. */
@@ -113,8 +118,10 @@ export interface SignedInDevice {
 /** How much someone uses the app: for their coach. */
 export interface PersonActivity {
   lastSeenAt: string | null
-  /** Seen in the last few minutes. */
+  /** Seen in the last few minutes and still signed in. */
   activeNow: boolean
+  /** Staff blocked their access. */
+  blocked: boolean
   /** The last 7 days, oldest first, in their time zone: seconds with the app open each day. */
   days: { date: string; seconds: number }[]
   /** Still waiting to choose their own password. */
@@ -222,7 +229,7 @@ export interface EnrollmentSummary {
   sourceProgramId: number | null
   durationWeeks: number
   startDate: string
-  status: 'active' | 'completed' | 'cancelled'
+  status: EnrollmentStatus
 }
 
 /** Someone on their own copy of a library program, and whether that copy has fallen behind. */
@@ -256,7 +263,21 @@ export interface PlanDay {
 export interface MyPlan {
   enrollment: EnrollmentSummary
   /** When their coach put them on this program, and last changed their copy (for the bell). */
-  assigned: { at: string; updatedAt: string | null; coachName: string | null }
+  assigned: {
+    at: string
+    updatedAt: string | null
+    coachName: string | null
+    /** When it took over from the previous program, if it was queued. */
+    startedAt: string | null
+  }
+  /** The program their coach queued to take over after this one, if any. */
+  next: {
+    enrollmentId: number
+    programName: string
+    startDate: string
+    durationWeeks: number
+    coachName: string | null
+  } | null
   today: string
   days: PlanDay[]
   workouts: Record<
@@ -288,18 +309,32 @@ export interface PastProgram {
   programName: string
   durationWeeks: number
   startDate: string
+  /** completed = ran its course and the next program took over; cancelled = archived or replaced. */
+  status: 'completed' | 'cancelled'
   /** When it was archived or replaced. */
   endedAt: string
   workouts: number
   volumeKg: number
   lastWorkoutAt: string | null
+  /** Their finished workouts on it, newest first (at most 100). */
   recent: SessionSummary[]
   /** What deleting it wipes. */
   impact: { sessions: number; loggedSets: number; checkins: number }
 }
 
+/** A program queued to take over on its start date. */
+export interface UpcomingProgram {
+  enrollmentId: number
+  /** Their own copy (edit it before it starts). */
+  programId: number
+  programName: string
+  durationWeeks: number
+  startDate: string
+}
+
 export interface PersonPrograms {
   progress: PersonProgress | null
+  upcoming: UpcomingProgram[]
   past: PastProgram[]
 }
 

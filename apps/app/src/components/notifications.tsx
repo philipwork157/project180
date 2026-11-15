@@ -61,7 +61,9 @@ export function useAppNotifications(): AppNotification[] {
       assignedAt: plan.plan.assigned.at,
       updatedAt: plan.plan.assigned.updatedAt,
       coachName: plan.plan.assigned.coachName,
+      startedAt: plan.plan.assigned.startedAt,
     },
+    next: plan.plan.next,
   })
   return [...fromCoach, ...planned]
 }

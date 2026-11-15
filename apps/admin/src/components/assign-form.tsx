@@ -4,12 +4,22 @@ import {
   enrollmentsQuery,
   meQuery,
   programsQuery,
+  queuedEnrollmentsQuery,
   usersQuery,
 } from '@project180/client'
-import { addDays, isStaff, todayIn, weekdayIndex } from '@project180/shared'
+import {
+  addDays,
+  type EnrollmentSummary,
+  formatDay,
+  isStaff,
+  nextProgramStart,
+  queuesBehind,
+  todayIn,
+  weekdayIndex,
+} from '@project180/shared'
 import { Button, ChoiceChips, DatePicker, Field, Select, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarCheck, RefreshCw, UserPlus } from 'lucide-react'
+import { CalendarCheck, CalendarClock, ListPlus, RefreshCw, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
 const UPDATE_NOTE =
@@ -45,14 +55,16 @@ export function AssignForm({
   const programs = useQuery({ ...programsQuery(), enabled: programId === undefined })
   const users = useQuery({ ...usersQuery, enabled: isAdmin && userId === undefined })
   const enrollments = useQuery(enrollmentsQuery())
+  const queued = useQuery({ ...queuedEnrollmentsQuery, enabled: isAdmin })
   const [pid, setPid] = useState<number | undefined>(programId)
   const [uid, setUid] = useState<number | undefined>(userId ?? me?.id)
-  const [startDate, setStartDate] = useState(() =>
-    nextMonday(me?.timezone ?? 'Africa/Johannesburg'),
-  )
+  // Picked by hand; until then it follows the person (the day after their current program).
+  const [pickedDate, setPickedDate] = useState<string>()
   const [error, setError] = useState<string>()
-  const [done, setDone] = useState<'assigned' | 'updated' | null>(null)
+  const [done, setDone] = useState<'assigned' | 'updated' | 'queued' | null>(null)
   const [mode, setMode] = useState<'update' | 'restart'>('update')
+  const timezone = me?.timezone ?? 'Africa/Johannesburg'
+  const today = todayIn(timezone)
 
   // You and the clients you coach yourself (owners too), like the People list.
   const people = isAdmin
@@ -61,9 +73,17 @@ export function AssignForm({
       ? [{ id: me.id, name: me.name }]
       : []
   const current = enrollments.data?.find((e) => e.userId === uid && e.status === 'active')
+  const lined = (queued.data ?? []).filter((e) => e.userId === uid)
+  const startDate =
+    pickedDate ??
+    nextProgramStart(today, [...(current ? [current] : []), ...lined]) ??
+    nextMonday(timezone)
+  const setStartDate = setPickedDate
   // Already on this program (their own copy of it): update it or start over.
   const already = Boolean(current && pid && current.sourceProgramId === pid)
   const updating = already && mode === 'update'
+  // Starts after today while they're on a program: it waits and takes over on its start date.
+  const queues = !updating && queuesBehind(current, startDate, today)
   const name = people.find((p) => p.id === uid)?.name ?? 'They'
   const who = uid === me?.id ? 'You' : name
 
@@ -73,16 +93,22 @@ export function AssignForm({
         method: 'POST',
         body: { userId: uid, programId: pid, startDate, mode: updating ? 'update' : 'restart' },
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['enrollments'] })
       void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })
       void queryClient.invalidateQueries({ queryKey: ['programs'] })
+      const lineUp = (res as { enrollment?: EnrollmentSummary }).enrollment?.status === 'scheduled'
       toast(
         updating
           ? { title: 'Program updated', description: 'Start date and finished workouts are kept.' }
-          : { title: 'Program assigned', description: 'It’s on their calendar now.' },
+          : lineUp
+            ? {
+                title: 'Program lined up',
+                description: `It takes over on ${formatDay(startDate)}.`,
+              }
+            : { title: 'Program assigned', description: 'It’s on their calendar now.' },
       )
-      setDone(updating ? 'updated' : 'assigned')
+      setDone(updating ? 'updated' : lineUp ? 'queued' : 'assigned')
       onDone?.()
     },
   })
@@ -96,6 +122,26 @@ export function AssignForm({
         <p className="font-bold text-[17px]">Up to date</p>
         <p className="text-[14px] text-ink-muted">
           Their program has your latest changes. Their start date and finished workouts are kept.
+        </p>
+        <Button variant="secondary" size="sm" onClick={() => setDone(null)}>
+          Assign another
+        </Button>
+      </div>
+    )
+  }
+
+  if (done === 'queued') {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-lg bg-brand-soft p-6 text-center">
+        <span className="grid size-14 place-items-center rounded-full bg-lime text-on-lime">
+          <CalendarClock className="size-7" aria-hidden />
+        </span>
+        <p className="font-bold text-[17px]">Lined up</p>
+        <p className="text-[14px] text-ink-muted">
+          It takes over on {formatDay(startDate)}.{' '}
+          {current &&
+            `Until then ${uid === me?.id ? 'you keep' : 'they keep'} ${current.programName}. `}
+          Everything logged stays in the history.
         </p>
         <Button variant="secondary" size="sm" onClick={() => setDone(null)}>
           Assign another
@@ -205,10 +251,30 @@ export function AssignForm({
         </Field>
       )}
       {current && !already && current.programId !== pid && (
-        <p className="rounded-md bg-sand/20 p-3 font-semibold text-[14px]">
-          {who} {uid === me?.id ? 'are' : 'is'} on <b>{current.programName}</b> now. Assigning
-          replaces it; finished workouts stay in their history.
-        </p>
+        <div className="flex flex-col gap-2 rounded-md bg-surface-raised p-4 text-[14px]">
+          {queues ? (
+            <p className="font-semibold">
+              {who} {uid === me?.id ? 'keep' : 'keeps'} <b>{current.programName}</b> until{' '}
+              {formatDay(addDays(startDate, -1))}. On {formatDay(startDate)} this program takes over
+              by itself.
+            </p>
+          ) : (
+            <p className="font-semibold">
+              {who} {uid === me?.id ? 'are' : 'is'} on <b>{current.programName}</b> now. Starting
+              today or earlier replaces it straight away.
+            </p>
+          )}
+          <p className="text-[13px] text-ink-muted">
+            Finished workouts stay in their history either way. Pick a later start date to line it
+            up instead.
+          </p>
+          {lined.length > 0 && (
+            <p className="text-[13px] text-ink-muted">
+              Already lined up:{' '}
+              {lined.map((e) => `${e.programName} (${formatDay(e.startDate)})`).join(', ')}
+            </p>
+          )}
+        </div>
       )}
       <Button
         type="submit"
@@ -218,12 +284,20 @@ export function AssignForm({
         icon={
           updating ? (
             <RefreshCw className="size-5" aria-hidden />
+          ) : queues ? (
+            <ListPlus className="size-5" aria-hidden />
           ) : (
             <UserPlus className="size-5" aria-hidden />
           )
         }
       >
-        {updating ? 'Update their program' : isAdmin ? 'Assign program' : 'Start this program'}
+        {updating
+          ? 'Update their program'
+          : queues
+            ? `Line up for ${formatDay(startDate)}`
+            : isAdmin
+              ? 'Assign program'
+              : 'Start this program'}
       </Button>
     </form>
   )

@@ -26,9 +26,9 @@ function copiesFor(table: LibraryColumns, user: Me) {
 
 /**
  * Library rows a user may see. The library is for staff only:
- * - owners see everything;
- * - coaches see every exercise, and the workouts and programs they made themselves, plus
- *   their clients' personal copies;
+ * - everyone on staff sees every exercise;
+ * - workouts and programs are private, owners included: staff see the ones they made, plus
+ *   the personal copies of the clients they coach themselves (never another coach's clients');
  * - clients see only the personal copies made for them (through their plan), never the library.
  * `archived` picks active rows, archived rows, or both.
  */
@@ -39,7 +39,6 @@ export function visibleTo(table: LibraryColumns, user: Me, archived: boolean | '
       : archived
         ? isNotNull(table.archivedAt)
         : isNull(table.archivedAt)
-  if (isOwner(user.role)) return state
   if (!table.clientId) return isStaff(user.role) ? state : and(state, sql`0`)
   return and(
     state,
@@ -64,15 +63,15 @@ export function assertCanEdit(user: Me, row: { createdBy: number }) {
 }
 
 /**
- * Workouts and programs: like assertCanEdit, but a client's personal copy can also be
- * changed by whoever coaches that client.
+ * Workouts and programs: only their creator, or (a client's personal copy) whoever coaches
+ * that client. Owners get no exception here: other coaches' plans stay private.
  */
 export async function assertCanEditItem(
   db: Db,
   user: Me,
   row: { createdBy: number; clientId: number | null },
 ) {
-  if (row.createdBy === user.id || isOwner(user.role)) return
+  if (row.createdBy === user.id) return
   if (row.clientId !== null && isStaff(user.role)) {
     const [client] = await db
       .select({ coachId: users.coachId })

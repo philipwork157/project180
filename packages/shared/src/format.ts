@@ -97,6 +97,19 @@ export function durationShort(seconds: number): string {
 export const ACTIVE_NOW_MS = 5 * 60 * 1000
 
 /**
+ * Using the app right now: seen in the last few minutes AND still signed in somewhere, so
+ * someone who just signed out (or was blocked) stops showing as active straight away.
+ */
+export function isActiveNow(
+  lastSeenAt: string | Date | null,
+  signedIn: boolean,
+  now: number = Date.now(),
+): boolean {
+  if (!lastSeenAt || !signedIn) return false
+  return now - new Date(lastSeenAt).getTime() < ACTIVE_NOW_MS
+}
+
+/**
  * Exercise search: every word typed must appear in the name, its keywords (other names and
  * muscles) or its muscle group. "seated hamstring" finds "Seated Leg Curl".
  */

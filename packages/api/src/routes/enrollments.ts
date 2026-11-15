@@ -1,9 +1,18 @@
 import { type Db, enrollments, programs, users } from '@project180/db'
-import { assignInput, type EnrollmentSummary, type Me } from '@project180/shared'
+import {
+  assignInput,
+  ENROLLMENT_STATUS,
+  type EnrollmentStatus,
+  type EnrollmentSummary,
+  formatDay,
+  type Me,
+  queuesBehind,
+  todayIn,
+} from '@project180/shared'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import { managedPerson, managedUsers } from '../access'
+import { coachedPerson, coachedUsers } from '../access'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
 import { requireAdmin, requireUser } from '../middleware'
@@ -37,7 +46,10 @@ const activeFor = (db: Db, userId: number) =>
 
 /**
  * Puts someone on a program from a start date. They get their own copy (so their coach can
- * tweak it without touching anyone else's), and any current program is ended.
+ * tweak it without touching anyone else's).
+ * - Starting today or earlier (or with no current program): it replaces the current one now.
+ * - Starting later while a current program runs: it waits in the queue (`scheduled`) and takes
+ *   over on its start date (schedule.ts). The current program and its history stay until then.
  * `update`: they're already on this program, so bring their copy up to date instead and keep
  * their start date and progress.
  */
@@ -58,10 +70,39 @@ export async function assignProgram(
     const [row] = await activeFor(db, userId)
     return row
   }
+  const [[current], [person]] = await Promise.all([
+    activeFor(db, userId),
+    db.select({ timezone: users.timezone }).from(users).where(eq(users.id, userId)),
+  ])
+  const queue = queuesBehind(current, startDate, todayIn(person?.timezone ?? 'Africa/Johannesburg'))
+  if (queue) {
+    const [clash] = await db
+      .select({ id: enrollments.id })
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.userId, userId),
+          eq(enrollments.status, 'scheduled'),
+          eq(enrollments.startDate, startDate),
+        ),
+      )
+    if (clash)
+      throw new HTTPException(409, {
+        message: `A program already starts on ${formatDay(startDate)}. Pick another day or remove that one first.`,
+      })
+  }
   const copyId =
     program.clientId === userId
       ? program.id
       : await copyProgramForClient(db, program.id, userId, actor.id)
+  if (queue) {
+    const [queued] = await db
+      .insert(enrollments)
+      .values({ userId, programId: copyId, startDate, status: 'scheduled', assignedBy: actor.id })
+      .returning({ id: enrollments.id })
+    const [row] = await enrollmentQuery(db).where(eq(enrollments.id, queued?.id ?? 0))
+    return row
+  }
   await db.batch([
     db
       .update(enrollments)
@@ -83,13 +124,13 @@ export const enrollmentRoutes = new Hono<AppEnv>()
     // ?status=active: only current programs (what every screen shows), not the whole history.
     const status = c.req.query('status')
     const filters = [
-      managedUsers(user),
+      coachedUsers(user),
       // ?mine=1: only you and the clients you coach yourself (the overview), owners included.
       c.req.query('mine') === '1'
         ? or(eq(users.id, user.id), eq(users.coachId, user.id))
         : undefined,
-      status === 'active' || status === 'completed' || status === 'cancelled'
-        ? eq(enrollments.status, status)
+      status && (ENROLLMENT_STATUS as readonly string[]).includes(status)
+        ? eq(enrollments.status, status as EnrollmentStatus)
         : undefined,
       // A library program: its own enrollments plus everyone's personal copies of it.
       programId
@@ -104,11 +145,11 @@ export const enrollmentRoutes = new Hono<AppEnv>()
       .orderBy(desc(enrollments.createdAt))
     return c.json({ enrollments: rows })
   })
-  /** Assign a program. Coaches assign their own clients, owners anyone. Clients never assign. */
+  /** Assign a program: only to yourself or a client you coach (owners too). Clients never assign. */
   .post('/', async (c) => {
     const { user, db } = c.var
     const input = await parseBody(c.req.raw, assignInput)
-    await managedPerson(db, user, input.userId)
+    await coachedPerson(db, user, input.userId)
     const row = await assignProgram(
       db,
       user,
@@ -122,19 +163,26 @@ export const enrollmentRoutes = new Hono<AppEnv>()
       await pushLater(
         c,
         [input.userId],
-        input.mode === 'update'
+        row.status === 'scheduled'
           ? {
-              title: 'Your program was updated',
-              body: `${user.name.split(' ')[0]} made changes to ${row.programName}.`,
+              title: `Next program: ${row.programName}`,
+              body: `${user.name.split(' ')[0]} lined it up for you. It starts ${formatDay(row.startDate)}.`,
               url: '/calendar',
               tag: 'program',
             }
-          : {
-              title: `New program: ${row.programName}`,
-              body: `${user.name.split(' ')[0]} set it up for you. Open the app to see your plan.`,
-              url: '/calendar',
-              tag: 'program',
-            },
+          : input.mode === 'update'
+            ? {
+                title: 'Your program was updated',
+                body: `${user.name.split(' ')[0]} made changes to ${row.programName}.`,
+                url: '/calendar',
+                tag: 'program',
+              }
+            : {
+                title: `New program: ${row.programName}`,
+                body: `${user.name.split(' ')[0]} set it up for you. Open the app to see your plan.`,
+                url: '/calendar',
+                tag: 'program',
+              },
       )
     return c.json({ enrollment: row }, input.mode === 'update' ? 200 : 201)
   })
@@ -143,7 +191,7 @@ export const enrollmentRoutes = new Hono<AppEnv>()
     const id = parseId(c.req.param('id'))
     const [row] = await db.select().from(enrollments).where(eq(enrollments.id, id))
     if (!row) notFound('Enrollment not found')
-    await managedPerson(db, user, row.userId)
+    await coachedPerson(db, user, row.userId)
     await db.update(enrollments).set({ status: 'cancelled' }).where(eq(enrollments.id, id))
     return c.body(null, 204)
   })

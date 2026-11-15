@@ -95,6 +95,9 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
   const updateProfile = (patch: Partial<ProfileDraft>) => setProfile((p) => ({ ...p, ...patch }))
   const first = name.trim().split(' ')[0] || 'them'
   const isClient = !isStaff(role)
+  // Programs stay between a client and their own coach, so only you can give yours one.
+  const otherCoach = owner && isClient && coachId !== me.id
+  const coachName = coaches.data?.find((c) => c.id === coachId)?.name ?? 'Their coach'
 
   const create = useMutation({
     mutationFn: (input: CreateUserInput) =>
@@ -134,7 +137,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
         coachId: owner && isClient ? coachId : undefined,
         profile: draftToInput(profile),
         currentWeightKg: Number.isFinite(weight) ? weight : null,
-        program: programId ? { programId, startDate } : null,
+        program: programId && !otherCoach ? { programId, startDate } : null,
         sendWelcome,
       })
       void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
@@ -344,28 +347,35 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
 
               {step === 3 && (
                 <>
-                  <Field
-                    label="Program"
-                    hint={`Optional. ${first} gets their own copy you can tweak later.`}
-                  >
-                    {(id) => (
-                      <Select
-                        id={id}
-                        value={programId ?? ''}
-                        onChange={(e) =>
-                          setProgramId(e.target.value ? Number(e.target.value) : null)
-                        }
-                      >
-                        <option value="">No program yet</option>
-                        {(programs.data ?? []).map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} · {p.durationWeeks} wks
-                          </option>
-                        ))}
-                      </Select>
-                    )}
-                  </Field>
-                  {programId && (
+                  {otherCoach ? (
+                    <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
+                      {coachName} gives {first} a program. Programs stay between a client and their
+                      own coach.
+                    </p>
+                  ) : (
+                    <Field
+                      label="Program"
+                      hint={`Optional. ${first} gets their own copy you can tweak later.`}
+                    >
+                      {(id) => (
+                        <Select
+                          id={id}
+                          value={programId ?? ''}
+                          onChange={(e) =>
+                            setProgramId(e.target.value ? Number(e.target.value) : null)
+                          }
+                        >
+                          <option value="">No program yet</option>
+                          {(programs.data ?? []).map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} · {p.durationWeeks} wks
+                            </option>
+                          ))}
+                        </Select>
+                      )}
+                    </Field>
+                  )}
+                  {programId && !otherCoach && (
                     <Field label="Start date">
                       {(id) => <DatePicker id={id} value={startDate} onChange={setStartDate} />}
                     </Field>
@@ -393,7 +403,9 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                       ['Main goal', profile.mainGoal ? GOAL_LABELS[profile.mainGoal] : 'Not set'],
                       [
                         'Program',
-                        programs.data?.find((p) => p.id === programId)?.name ?? 'None yet',
+                        otherCoach
+                          ? `Set by ${coachName}`
+                          : (programs.data?.find((p) => p.id === programId)?.name ?? 'None yet'),
                       ],
                     ]}
                   />

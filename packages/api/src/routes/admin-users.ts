@@ -15,28 +15,30 @@ import {
   workouts,
 } from '@project180/db'
 import {
-  ACTIVE_NOW_MS,
   addDays,
   assignCoachInput,
   average,
+  blockAccessInput,
   clientProfileInput,
   createUserInput,
   type DeletePersonResult,
-  deviceLabel,
   type DirectoryPerson,
+  deviceLabel,
   feedbackInput,
+  isActiveNow,
   isClient,
   isOwner,
   isoDate,
   isStaff,
   type PastProgram,
   type PeoplePage,
-  peopleQueryInput,
   type PersonActivity,
   type PersonProgress,
+  peopleQueryInput,
   resetPasswordInput,
   type SessionSummary,
   todayIn,
+  type UpcomingProgram,
   type UserSummary,
 } from '@project180/shared'
 import {
@@ -59,30 +61,32 @@ import { alias } from 'drizzle-orm/sqlite-core'
 import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
-import { managedPerson, managedUsers } from '../access'
+import { coachedPerson, managedPerson, managedUsers } from '../access'
 import { newPasswordEmail, sendEmail, welcomeEmail } from '../email'
 import type { AppEnv } from '../env'
 import { forbidden, notFound, parseBody, parseId } from '../errors'
 import { addFeedback, loadFeedback, removeFeedback } from '../feedback'
 import { requireAdmin, requireUser } from '../middleware'
 import { loadProfile, logWeight, saveProfile } from '../profiles'
+import { startDuePrograms } from '../schedule'
 import { cancelWorkout, sessionSummaries } from '../sessions'
 import { buildPersonStats } from '../stats'
-import { createUserWithPassword, setPassword } from '../users'
+import { createUserWithPassword, setPassword, signedInSql } from '../users'
 import { assignProgram } from './enrollments'
 import { adminFoodRoutes } from './food'
 import { buildPlan } from './me'
 import { deleteClientProgram, findVisibleProgram } from './programs'
 import { sessionDetail } from './sessions'
+import { adminWaterRoutes } from './water'
 
 const resetProgramInput = z.object({
   startDate: isoDate,
 })
 
-/** A workout of someone you manage, from `/:id/workouts/:sessionId`; anything else is 404. */
+/** A workout of someone you coach, from `/:id/workouts/:sessionId`; anything else is 404. */
 async function managedSession(c: Context<AppEnv>) {
   const { db, user: me } = c.var
-  const person = await managedPerson(db, me, parseId(c.req.param('id') ?? ''))
+  const person = await coachedPerson(db, me, parseId(c.req.param('id') ?? ''))
   const [row] = await db
     .select()
     .from(workoutSessions)
@@ -167,7 +171,26 @@ async function enrollmentImpacts(db: Db, enrollmentIds: number[]) {
   return out
 }
 
-/** Their archived (or replaced) programs, newest first, each with its history. */
+/** Finished workouts listed per past program (the rest are counted). */
+const PAST_WORKOUTS = 100
+
+/** Programs queued to take over on their start date, soonest first. */
+async function upcomingPrograms(db: Db, userId: number): Promise<UpcomingProgram[]> {
+  return db
+    .select({
+      enrollmentId: enrollments.id,
+      programId: enrollments.programId,
+      programName: programs.name,
+      durationWeeks: programs.durationWeeks,
+      startDate: enrollments.startDate,
+    })
+    .from(enrollments)
+    .innerJoin(programs, eq(programs.id, enrollments.programId))
+    .where(and(eq(enrollments.userId, userId), eq(enrollments.status, 'scheduled')))
+    .orderBy(asc(enrollments.startDate))
+}
+
+/** Their finished, archived or replaced programs, newest first, each with its history. */
 async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
   const rows = await db
     .select({
@@ -176,12 +199,16 @@ async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
       programName: programs.name,
       durationWeeks: programs.durationWeeks,
       startDate: enrollments.startDate,
+      status: enrollments.status,
+      completedAt: enrollments.completedAt,
       updatedAt: enrollments.updatedAt,
     })
     .from(enrollments)
     .innerJoin(programs, eq(programs.id, enrollments.programId))
-    .where(and(eq(enrollments.userId, userId), ne(enrollments.status, 'active')))
-    .orderBy(desc(enrollments.updatedAt))
+    .where(
+      and(eq(enrollments.userId, userId), inArray(enrollments.status, ['completed', 'cancelled'])),
+    )
+    .orderBy(desc(enrollments.startDate), desc(enrollments.id))
   if (rows.length === 0) return []
   const enrollmentIds = rows.map((r) => r.enrollmentId)
   // Every past program's history in one go (newest first), then split per program.
@@ -215,11 +242,12 @@ async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
       programName: r.programName,
       durationWeeks: r.durationWeeks,
       startDate: r.startDate,
-      endedAt: r.updatedAt.toISOString(),
+      status: r.status === 'completed' ? 'completed' : 'cancelled',
+      endedAt: (r.completedAt ?? r.updatedAt).toISOString(),
       workouts: finished.length,
       volumeKg: Math.round(finished.reduce((a, x) => a + x.volumeKg, 0)),
       lastWorkoutAt: finished[0]?.startedAt ?? null,
-      recent: finished.slice(0, 5),
+      recent: finished.slice(0, PAST_WORKOUTS),
       impact: impacts.get(r.enrollmentId) ?? noImpact,
     }
   })
@@ -258,16 +286,20 @@ export const adminUserRoutes = new Hono<AppEnv>()
         mainGoal: clientProfiles.mainGoal,
         createdAt: users.createdAt,
         lastSeenAt: users.lastSeenAt,
+        signedIn: signedInSql(),
+        blockedAt: users.blockedAt,
       })
       .from(users)
       .leftJoin(coach, eq(coach.id, users.coachId))
       .leftJoin(clientProfiles, eq(clientProfiles.userId, users.id))
       .where(managedUsers(c.var.user))
       .orderBy(asc(users.createdAt))
-    const list: UserSummary[] = rows.map((r) => ({
+    const list: UserSummary[] = rows.map(({ blockedAt, signedIn, ...r }) => ({
       ...r,
       createdAt: r.createdAt.toISOString(),
       lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
+      signedIn: Boolean(signedIn),
+      blocked: blockedAt !== null,
     }))
     return c.json({ users: list })
   })
@@ -288,10 +320,10 @@ export const adminUserRoutes = new Hono<AppEnv>()
       view === 'me'
         ? eq(users.id, me.id)
         : view === 'team'
-        ? ne(users.role, 'member')
-        : view === 'clients'
-          ? isMember
-          : and(isMember, eq(users.coachId, me.id))
+          ? ne(users.role, 'member')
+          : view === 'clients'
+            ? isMember
+            : and(isMember, eq(users.coachId, me.id))
     const pattern = `%${input.q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`
     const search = input.q
       ? or(
@@ -319,6 +351,8 @@ export const adminUserRoutes = new Hono<AppEnv>()
           mainGoal: clientProfiles.mainGoal,
           createdAt: users.createdAt,
           lastSeenAt: users.lastSeenAt,
+          signedIn: signedInSql(),
+          blockedAt: users.blockedAt,
         })
         .from(users)
         .leftJoin(coach, eq(coach.id, users.coachId))
@@ -339,6 +373,8 @@ export const adminUserRoutes = new Hono<AppEnv>()
         .where(managedUsers(me)),
     ])
     const ids = rows.map((r) => r.id)
+    // Anyone whose queued program starts today switches over before we show their program.
+    await startDuePrograms(db, ids)
     // The one-line summary for this page only: program, last workout, clients coached.
     const [programRows, workoutRows, clientRows] = ids.length
       ? await Promise.all([
@@ -364,10 +400,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const programOf = new Map(programRows.map((r) => [r.userId, r.name]))
     const workoutOf = new Map(workoutRows.map((r) => [r.userId, r.at]))
     const clientsOf = new Map(clientRows.map((r) => [r.coachId, r.n]))
-    const people: DirectoryPerson[] = rows.map((r) => ({
+    const people: DirectoryPerson[] = rows.map(({ blockedAt, signedIn, ...r }) => ({
       ...r,
       createdAt: r.createdAt.toISOString(),
       lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
+      signedIn: Boolean(signedIn),
+      blocked: blockedAt !== null,
       programName: programOf.get(r.id) ?? null,
       lastWorkoutAt: workoutOf.get(r.id)?.toISOString() ?? null,
       clientCount: clientsOf.get(r.id) ?? 0,
@@ -408,6 +446,9 @@ export const adminUserRoutes = new Hono<AppEnv>()
     // A client is coached by whoever adds them, unless an owner picks another coach.
     const pickedCoach = isClient(input.role) && isOwner(me.role) ? (input.coachId ?? null) : null
     const coachId = isClient(input.role) ? (pickedCoach ?? me.id) : null
+    // Programs stay between a client and their own coach: their coach assigns one later.
+    if (input.program && coachId !== me.id)
+      throw new HTTPException(400, { message: 'Only their coach can give them a program' })
     // Check everything that can be refused before creating anything, so a mistake (a program
     // this coach can't use, an unknown coach, an email in use) never leaves a half-made account.
     await Promise.all([
@@ -535,6 +576,29 @@ export const adminUserRoutes = new Hono<AppEnv>()
    * choose their own password when they next sign in. (Your own: it's simply your new password,
    * and your other devices are signed out.)
    */
+  /**
+   * Block someone's access (or let them back in). Blocking signs them out everywhere and stops
+   * their notifications; their account and everything they logged stay. Never yourself, never an
+   * owner, and only owners block coaches. Coaches block only their own clients (managedPerson).
+   */
+  .post('/:id/access', async (c) => {
+    const { db, user: me } = c.var
+    const person = await managedPerson(db, me, parseId(c.req.param('id')))
+    const { blocked } = await parseBody(c.req.raw, blockAccessInput)
+    if (person.id === me.id) forbidden('You can’t block yourself')
+    if (person.role === 'owner') forbidden('An owner can’t be blocked')
+    if (isStaff(person.role) && !isOwner(me.role)) forbidden('Only an owner can block a coach')
+    if (!blocked) {
+      await db.update(users).set({ blockedAt: null }).where(eq(users.id, person.id))
+      return c.json({ blocked: false })
+    }
+    await db.batch([
+      db.update(users).set({ blockedAt: new Date() }).where(eq(users.id, person.id)),
+      db.delete(sessions).where(eq(sessions.userId, person.id)),
+      db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id)),
+    ])
+    return c.json({ blocked: true })
+  })
   .post('/:id/password', async (c) => {
     const { db, user: me } = c.var
     const person = await managedPerson(db, me, parseId(c.req.param('id')))
@@ -576,7 +640,11 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const { db, user: me } = c.var
     const person = await managedPerson(db, me, parseId(c.req.param('id')))
     const [row] = await db
-      .select({ lastSeenAt: users.lastSeenAt, mustChangePassword: users.mustChangePassword })
+      .select({
+        lastSeenAt: users.lastSeenAt,
+        mustChangePassword: users.mustChangePassword,
+        blockedAt: users.blockedAt,
+      })
       .from(users)
       .where(eq(users.id, person.id))
     const today = todayIn(person.timezone)
@@ -594,7 +662,8 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const lastSeen = row?.lastSeenAt ?? null
     const activity: PersonActivity = {
       lastSeenAt: lastSeen?.toISOString() ?? null,
-      activeNow: !!lastSeen && Date.now() - lastSeen.getTime() < ACTIVE_NOW_MS,
+      activeNow: isActiveNow(lastSeen, live.length > 0),
+      blocked: !!row?.blockedAt,
       days: Array.from({ length: 7 }, (_, i) => {
         const date = addDays(from, i)
         return { date, seconds: byDate.get(date) ?? 0 }
@@ -667,15 +736,20 @@ export const adminUserRoutes = new Hono<AppEnv>()
   /** Progress over the last weeks: volume, strength per exercise, body weight, records, swaps. */
   .get('/:id/stats', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const weeksBack = Math.min(Math.max(Number(c.req.query('weeks') ?? 12) || 12, 1), 52)
     return c.json({ stats: await buildPersonStats(db, person, weeksBack) })
   })
   .get('/:id/progress', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
-    const [plan, past] = await Promise.all([buildPlan(db, person), pastPrograms(db, person.id)])
-    if (!plan) return c.json({ progress: null, past })
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
+    // The plan first: it starts a queued program whose day has come.
+    const plan = await buildPlan(db, person)
+    const [upcoming, past] = await Promise.all([
+      upcomingPrograms(db, person.id),
+      pastPrograms(db, person.id),
+    ])
+    if (!plan) return c.json({ progress: null, upcoming, past })
     const inEnrollment = and(
       eq(workoutSessions.userId, person.id),
       eq(workoutSessions.enrollmentId, plan.enrollment.id),
@@ -702,12 +776,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
       recent: latest,
       impact: await enrollmentImpact(db, plan.enrollment.id),
     }
-    return c.json({ progress, past })
+    return c.json({ progress, upcoming, past })
   })
   /** Wipe everything logged on their current program and start it again from a date. */
   .post('/:id/reset-program', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const { startDate } = await parseBody(c.req.raw, resetProgramInput)
     const enrollment = await activeEnrollment(db, person.id)
     await db.batch([
@@ -722,7 +796,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
    */
   .post('/:id/program/start-date', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const { startDate } = await parseBody(c.req.raw, resetProgramInput)
     const enrollment = await activeEnrollment(db, person.id)
     await db.update(enrollments).set({ startDate }).where(eq(enrollments.id, enrollment.id))
@@ -731,7 +805,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
   /** Take their current program away, with everything they logged on it. */
   .delete('/:id/program', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const enrollment = await activeEnrollment(db, person.id)
     await db.batch([
       ...wipeEnrollment(db, enrollment.id),
@@ -743,7 +817,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
   /** Take their current program away but keep everything they logged; it shows under past programs. */
   .post('/:id/program/archive', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const enrollment = await activeEnrollment(db, person.id)
     await db
       .update(enrollments)
@@ -754,9 +828,13 @@ export const adminUserRoutes = new Hono<AppEnv>()
   /** Put a past program back as their current one, history and dates as they were. */
   .post('/:id/enrollments/:enrollmentId/restore', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const row = await ownEnrollment(db, person.id, parseId(c.req.param('enrollmentId')))
     if (row.status === 'active') return c.body(null, 204)
+    if (row.status === 'scheduled')
+      throw new HTTPException(409, {
+        message: 'It’s queued: it starts on its own on its start date.',
+      })
     const [current] = await db
       .select({ id: enrollments.id })
       .from(enrollments)
@@ -768,10 +846,10 @@ export const adminUserRoutes = new Hono<AppEnv>()
     await db.update(enrollments).set({ status: 'active' }).where(eq(enrollments.id, row.id))
     return c.body(null, 204)
   })
-  /** Delete a past program and everything logged on it. */
+  /** Delete a past program and everything logged on it, or take a queued program off the list. */
   .delete('/:id/enrollments/:enrollmentId', async (c) => {
     const { db } = c.var
-    const person = await managedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
     const row = await ownEnrollment(db, person.id, parseId(c.req.param('enrollmentId')))
     await db.batch([
       ...wipeEnrollment(db, row.id),
@@ -782,3 +860,5 @@ export const adminUserRoutes = new Hono<AppEnv>()
   })
   /** Their food log and the daily targets you set (routes/food.ts). */
   .route('/', adminFoodRoutes)
+  /** Their water and daily water goal (routes/water.ts). */
+  .route('/', adminWaterRoutes)

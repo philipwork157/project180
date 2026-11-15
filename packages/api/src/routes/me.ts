@@ -39,15 +39,17 @@ import { chatNewsForClient, loadThread, markRead, postMessage } from '../chat'
 import type { AppEnv } from '../env'
 import { notFound, parseBody } from '../errors'
 import { markFeedbackRead, unreadFeedback } from '../feedback'
-import { closeIdleWorkout } from '../sessions'
 import { requireUser } from '../middleware'
 import { loadProfile, saveProfile } from '../profiles'
 import { isPushEndpoint, pushConfigured } from '../push'
+import { startDuePrograms } from '../schedule'
+import { closeIdleWorkout } from '../sessions'
 import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
 import { enrollmentQuery } from './enrollments'
 import { meFoodRoutes } from './food'
 import { loadProgramDays } from './programs'
+import { meWaterRoutes } from './water'
 
 const checkinInput = z.object({
   clientUuid: z.uuid(),
@@ -74,6 +76,11 @@ export async function buildPlans(
 ): Promise<Map<number, MyPlan | null>> {
   const result = new Map<number, MyPlan | null>(people.map((p) => [p.id, null]))
   if (people.length === 0) return result
+  // A queued program whose start date has come takes over first (schedule.ts).
+  await startDuePrograms(
+    db,
+    people.map((p) => p.id),
+  )
 
   const enrollmentRows = await inChunks(
     people.map((p) => p.id),
@@ -90,7 +97,7 @@ export async function buildPlans(
 
   // Independent reads: run them together (each D1 call is a round trip).
   const assigner = alias(users, 'assigner')
-  const [dayMaps, done, assignments] = await Promise.all([
+  const [dayMaps, done, assignments, queued] = await Promise.all([
     inChunks([...new Set(active.map((e) => e.programId))], async (ids) => [
       await loadProgramDays(db, ids),
     ]),
@@ -124,13 +131,35 @@ export async function buildPlans(
             // Saving their copy, or bringing library changes to it, both touch this.
             changedAt: programs.updatedAt,
             coachName: assigner.name,
+            startedAt: enrollments.startedAt,
           })
           .from(enrollments)
           .innerJoin(programs, eq(programs.id, enrollments.programId))
           .leftJoin(assigner, eq(assigner.id, enrollments.assignedBy))
           .where(inArray(enrollments.id, ids)),
     ),
+    // What's queued after the current program (the earliest per person is "next").
+    inChunks(
+      active.map((e) => e.userId),
+      (ids) =>
+        db
+          .select({
+            enrollmentId: enrollments.id,
+            userId: enrollments.userId,
+            programName: programs.name,
+            startDate: enrollments.startDate,
+            durationWeeks: programs.durationWeeks,
+            coachName: assigner.name,
+          })
+          .from(enrollments)
+          .innerJoin(programs, eq(programs.id, enrollments.programId))
+          .leftJoin(assigner, eq(assigner.id, enrollments.assignedBy))
+          .where(and(inArray(enrollments.userId, ids), eq(enrollments.status, 'scheduled')))
+          .orderBy(asc(enrollments.startDate)),
+    ),
   ])
+  const nextOf = new Map<number, NonNullable<MyPlan['next']>>()
+  for (const { userId, ...q } of queued) if (!nextOf.has(userId)) nextOf.set(userId, q)
   const assignedOf = new Map(assignments.map((a) => [a.id, a]))
   const daysOf = new Map(dayMaps.flatMap((m) => [...m]))
   const doneOf = new Map<number, typeof done>()
@@ -200,7 +229,9 @@ export async function buildPlans(
         at: (assignment?.assignedAt ?? new Date(0)).toISOString(),
         updatedAt: assignment?.changedAt.toISOString() ?? null,
         coachName: assignment?.coachName ?? null,
+        startedAt: assignment?.startedAt?.toISOString() ?? null,
       },
+      next: nextOf.get(person.id) ?? null,
       today,
       workouts: lookup,
       days: calendar.map((d) => ({
@@ -412,3 +443,5 @@ export const meRoutes = new Hono<AppEnv>()
   })
   /** Your food log: days, totals, targets and photo estimates (routes/food.ts). */
   .route('/food', meFoodRoutes)
+  /** Your water: what you drank today and your daily goal (routes/water.ts). */
+  .route('/water', meWaterRoutes)

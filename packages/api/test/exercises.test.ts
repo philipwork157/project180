@@ -142,18 +142,19 @@ describe('who sees the library', () => {
         .map((x) => x.name)
         .sort()
 
+    // Workouts and programs are private to whoever made them, owners included.
     expect(await names(coach, '/workouts', 'workouts')).toEqual(['Coach legs'])
-    expect(await names(owner, '/workouts', 'workouts')).toEqual(['Coach legs', 'Owner legs'])
-    expect(await names(owner, '/programs', 'programs')).toEqual(['Coach plan'])
+    expect(await names(owner, '/workouts', 'workouts')).toEqual(['Owner legs'])
+    expect(await names(owner, '/programs', 'programs')).toEqual([])
     expect(
       (await call(`/workouts/${ownerWorkout.data.workout.id}`, { cookie: coach })).status,
     ).toBe(404)
     expect(
       (await call(`/workouts/${coachWorkout.data.workout.id}`, { cookie: owner })).status,
-    ).toBe(200)
+    ).toBe(404)
     expect(
       (await call(`/programs/${coachProgram.data.program.id}`, { cookie: owner })).status,
-    ).toBe(200)
+    ).toBe(404)
   })
 
   it('requires sign-in', async () => {

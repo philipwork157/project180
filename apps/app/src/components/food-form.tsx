@@ -1,4 +1,4 @@
-import { type Meal, MEAL_LABELS, MEALS } from '@project180/shared'
+import { MEAL_LABELS, MEALS, type Meal } from '@project180/shared'
 import { Button, ChoiceChips, Field, Input } from '@project180/ui'
 import { type ReactNode, useState } from 'react'
 import { amountText, type FoodDraftItem, parseAmount } from '../lib/food'
@@ -93,7 +93,8 @@ export function FoodForm({
   const [values, setValues] = useState(() => toValues(initial))
   const [clientUuid] = useState(() => initial?.clientUuid ?? crypto.randomUUID())
   const [tried, setTried] = useState(false)
-  const set = (key: keyof FormValues) => (value: string) => setValues((v) => ({ ...v, [key]: value }))
+  const set = (key: keyof FormValues) => (value: string) =>
+    setValues((v) => ({ ...v, [key]: value }))
   const kcal = parseAmount(values.kcal)
   const proteinG = parseAmount(values.proteinG)
   const nameError = values.name.trim() ? undefined : 'Give it a name'
@@ -153,7 +154,10 @@ export function FoodForm({
       </div>
       {extra}
       {error && (
-        <p role="alert" className="rounded-md bg-danger/10 p-3 font-semibold text-[14px] text-danger">
+        <p
+          role="alert"
+          className="rounded-md bg-danger/10 p-3 font-semibold text-[14px] text-danger"
+        >
           {error}
         </p>
       )}

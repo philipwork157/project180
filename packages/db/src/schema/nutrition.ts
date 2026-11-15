@@ -1,6 +1,6 @@
-// What each person eats: their food log, their coach's daily targets, and the daily
-// photo-estimate counter. Photos themselves are never stored.
-import { FOOD_SOURCES, MEALS } from '@project180/shared'
+// What each person eats and drinks: their food log, their coach's daily targets, water, and the
+// daily photo-estimate counter. Photos themselves are never stored.
+import { FOOD_SOURCES, type FoodSearchResult, MEALS } from '@project180/shared'
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { users } from './auth'
 import { createdAt, id, timestamp, updatedAt } from './columns'
@@ -55,6 +55,25 @@ export const nutritionTargets = sqliteTable(
   ],
 )
 
+/**
+ * Water someone drank: one row per tap (+250 ml), so Undo removes the last one. The daily goal
+ * is users.water_goal_ml. client_uuid is made on the phone so a retry never saves twice.
+ */
+export const waterLogs = sqliteTable(
+  'water_logs',
+  {
+    id: id(),
+    clientUuid: text('client_uuid').notNull().unique(),
+    userId: userId(),
+    // Their local day, as YYYY-MM-DD.
+    date: text('date').notNull(),
+    ml: integer('ml').notNull(),
+    createdAt: createdAt(),
+  },
+  // A day and a range of days read one person's rows by date.
+  (t) => [index('water_logs_user_date_idx').on(t.userId, t.date)],
+)
+
 /** Photo estimates used per person per day (their local day): the daily cap. */
 export const foodPhotoUses = sqliteTable(
   'food_photo_uses',
@@ -89,3 +108,14 @@ export const foodProducts = sqliteTable(
   },
   (t) => [uniqueIndex('food_products_barcode_uq').on(t.barcode)],
 )
+
+/**
+ * Name searches ("egg"), saved so the same search is sent to the providers at most once a week
+ * (Open Food Facts limits searches per IP address). `query` is the providers asked and the
+ * search as typed, lower case: "openfoodfacts|egg". The results are always read whole.
+ */
+export const foodSearches = sqliteTable('food_searches', {
+  query: text('query').primaryKey(),
+  results: text('results', { mode: 'json' }).notNull().$type<FoodSearchResult[]>(),
+  fetchedAt: timestamp('fetched_at').notNull(),
+})

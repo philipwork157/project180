@@ -14,12 +14,16 @@ import { adminUserRoutes } from './routes/admin-users'
 import { enrollmentRoutes } from './routes/enrollments'
 import { exerciseRoutes } from './routes/exercises'
 import { meRoutes } from './routes/me'
+import { programBuilderRoutes } from './routes/program-builder'
 import { programRoutes } from './routes/programs'
 import { sessionRoutes } from './routes/sessions'
 import { videoRoutes } from './routes/videos'
+import { workoutBuilderRoutes } from './routes/workout-builder'
 import { workoutRoutes } from './routes/workouts'
 import { clearFailures, minutesLocked, recordFailure } from './sign-in-limit'
 import {
+  BLOCKED_MESSAGE,
+  refuseBlocked,
   refuseExpiredTempPassword,
   refuseNonStaff,
   STAFF_ONLY_MESSAGE,
@@ -102,13 +106,18 @@ export function createApp() {
         const message = TEMP_PASSWORD_EXPIRED_MESSAGE
         return c.json({ code: 'TEMP_PASSWORD_EXPIRED', message, error: message }, 403)
       }
+      const signedIn = (await res
+        .clone()
+        .json()
+        .catch(() => null)) as { token?: unknown } | null
+      const token = typeof signedIn?.token === 'string' ? signedIn.token : null
+      // Blocked by staff: the right password, but no session (in either app).
+      if (keys.email && (await refuseBlocked(db, keys.email, token))) {
+        const message = BLOCKED_MESSAGE
+        return c.json({ code: 'BLOCKED', message, error: message }, 403)
+      }
       // The admin lets only staff in: a client's right password gets no session there.
       if (c.var.appKind === 'admin' && keys.email) {
-        const signedIn = (await res
-          .clone()
-          .json()
-          .catch(() => null)) as { token?: unknown } | null
-        const token = typeof signedIn?.token === 'string' ? signedIn.token : null
         if (await refuseNonStaff(db, keys.email, token)) {
           const message = STAFF_ONLY_MESSAGE
           return c.json({ code: 'STAFF_ONLY', message, error: message }, 403)
@@ -156,6 +165,8 @@ export function createApp() {
   app.route('/admin/chat', adminChatRoutes)
   app.route('/admin/settings', adminSettingsRoutes)
   app.route('/videos', videoRoutes)
+  app.route('/workout-builder', workoutBuilderRoutes)
+  app.route('/program-builder', programBuilderRoutes)
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404))
   app.onError((err, c) => {

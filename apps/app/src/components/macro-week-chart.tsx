@@ -205,8 +205,12 @@ export function MacroWeekChart({
                 return (
                   <tr key={date} className="border-border border-t">
                     <td className="px-3 py-2 font-semibold">{dayLabel(date)}</td>
-                    <td className="px-3 py-2 text-right">{d ? `${gramsLabel(d.proteinG)} g` : '–'}</td>
-                    <td className="px-3 py-2 text-right">{d ? `${gramsLabel(d.carbsG)} g` : '–'}</td>
+                    <td className="px-3 py-2 text-right">
+                      {d ? `${gramsLabel(d.proteinG)} g` : '–'}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {d ? `${gramsLabel(d.carbsG)} g` : '–'}
+                    </td>
                     <td className="px-3 py-2 text-right">{d ? `${gramsLabel(d.fatG)} g` : '–'}</td>
                     <td className="px-3 py-2 text-right">{d ? kcalLabel(d.kcal) : '–'}</td>
                   </tr>

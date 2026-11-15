@@ -4,6 +4,7 @@ import {
   durationShort,
   exercisePhotos,
   exerciseVideoSearchUrl,
+  isActiveNow,
   matchesExercise,
   repsLabel,
   timeAgo,
@@ -97,5 +98,21 @@ describe('youtubeId', () => {
     expect(youtubeId('https://youtube.com/shorts/abc123XYZ_-')).toBe('abc123XYZ_-')
     expect(youtubeId('https://vimeo.com/123')).toBeNull()
     expect(youtubeId('not a url')).toBeNull()
+  })
+})
+
+describe('isActiveNow', () => {
+  const now = Date.parse('2026-11-14T21:00:00Z')
+  it('is seen in the last 5 minutes and still signed in', () => {
+    expect(isActiveNow('2026-11-14T20:58:00Z', true, now)).toBe(true)
+  })
+
+  it('stops the moment they sign out, however recently they were seen', () => {
+    expect(isActiveNow('2026-11-14T20:59:30Z', false, now)).toBe(false)
+  })
+
+  it('is false when not seen lately or never', () => {
+    expect(isActiveNow('2026-11-14T20:50:00Z', true, now)).toBe(false)
+    expect(isActiveNow(null, true, now)).toBe(false)
   })
 })

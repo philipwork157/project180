@@ -22,6 +22,23 @@ export async function refuseExpiredTempPassword(db: Db, email: string, now = Dat
   return true
 }
 
+export const BLOCKED_MESSAGE =
+  'Your access to Project 180 is paused. Talk to your coach to get back in.'
+
+/**
+ * A blocked person typed the right password: remove the session Better Auth just made and
+ * refuse. Checked only after a correct password, so nobody learns who is blocked by guessing.
+ */
+export async function refuseBlocked(db: Db, email: string, token: string | null) {
+  const [row] = await db
+    .select({ blockedAt: users.blockedAt })
+    .from(users)
+    .where(eq(users.email, email.trim().toLowerCase()))
+  if (!row?.blockedAt) return false
+  if (token) await db.delete(sessions).where(eq(sessions.token, token))
+  return true
+}
+
 export const STAFF_ONLY_MESSAGE =
   'This sign-in is for coaches and owners. Clients sign in on the Project 180 app.'
 

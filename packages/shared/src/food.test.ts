@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   addFoodInput,
   energySplit,
+  foodSearchInput,
   mealForHour,
+  normalizeFoodQuery,
   nutritionTargetsInput,
+  rankFoodResults,
   scaleLabel,
   sumMacros,
   targetShare,
@@ -105,5 +108,49 @@ describe('energySplit', () => {
       carbsG: 0,
       fatG: 0,
     })
+  })
+})
+
+describe('food search', () => {
+  const food = (name: string, brand: string | null = null, kcal = 140, proteinG = 12) => ({
+    name,
+    brand,
+    per100g: { kcal, proteinG, carbsG: 1, fatG: 10 },
+  })
+
+  it('reads what was typed the same way however it was typed', () => {
+    expect(normalizeFoodQuery('  Free   Range EGGS ')).toBe('free range eggs')
+    expect(foodSearchInput.safeParse('e').success).toBe(false)
+    expect(foodSearchInput.parse(' egg ')).toBe('egg')
+    expect(foodSearchInput.safeParse('x'.repeat(61)).success).toBe(false)
+  })
+
+  it('puts the closest names first and keeps the providers’ order otherwise', () => {
+    const list = [
+      food('Eggplant dip'),
+      food('Mayonnaise with egg'),
+      food('Large free range eggs', 'Woolworths'),
+      food('Egg, whole, raw'),
+      food('Chicken breast'),
+    ]
+    expect(rankFoodResults('egg', list).map((f) => f.name)).toEqual([
+      'Egg, whole, raw',
+      'Mayonnaise with egg',
+      'Large free range eggs',
+      'Eggplant dip',
+      'Chicken breast',
+    ])
+    // Plurals still match the start of a word.
+    expect(rankFoodResults('eggs whole', list)[0]?.name).toBe('Egg, whole, raw')
+  })
+
+  it('drops repeats and foods with nothing to log', () => {
+    const list = [
+      food('Eggs', 'Nulaid'),
+      food('eggs ', 'NULAID'),
+      food('Eggs', 'Other brand'),
+      food('Egg shells', null, 0, 0),
+    ]
+    expect(rankFoodResults('egg', list).map((f) => f.brand)).toEqual(['Nulaid', 'Other brand'])
   })
 })

@@ -3,12 +3,14 @@ import type {
   ChatSummary,
   ChatThread,
   ChatUnread,
+  ClaudeFeatureSettings,
   ClientProfile,
   EnrollmentSummary,
   Exercise,
   FeedbackNews,
   FoodDay,
   FoodPhotoSettings,
+  FoodSearchResult,
   FoodSetup,
   FoodSummary,
   Me,
@@ -28,6 +30,8 @@ import type {
   SwapOptions,
   UserSummary,
   VideoSearch,
+  WaterDay,
+  WaterSummary,
   WorkoutDetail,
   WorkoutSummary,
 } from '@project180/shared'
@@ -123,6 +127,13 @@ export const enrollmentsQuery = (programId?: number, mine = false) =>
         )
       ).enrollments,
   })
+
+/** Programs queued to take over from people's current ones on their start dates. */
+export const queuedEnrollmentsQuery = queryOptions({
+  queryKey: ['enrollments', 'scheduled'],
+  queryFn: async () =>
+    (await api<{ enrollments: EnrollmentSummary[] }>('/enrollments?status=scheduled')).enrollments,
+})
 
 /** A person's progress over the last `weeks` weeks (coach view). */
 export const personStatsQuery = (userId: number, weeks: number) =>
@@ -329,6 +340,32 @@ export const foodDayQuery = (date: string) =>
     queryFn: async () => (await api<{ day: FoodDay }>(`/me/food?date=${date}`)).day,
   })
 
+/** Your water for one day: what you drank and your daily goal (phone app). */
+export const waterDayQuery = (date: string) =>
+  queryOptions({
+    queryKey: ['water', 'day', date],
+    queryFn: async () => (await api<{ water: WaterDay }>(`/me/water?date=${date}`)).water,
+  })
+
+/** A client's water for one day and their goal (admin Food card). */
+export const personWaterQuery = (userId: number, date?: string) =>
+  queryOptions({
+    queryKey: ['admin', 'water', userId, 'day', date ?? 'today'],
+    queryFn: async () =>
+      (await api<{ water: WaterDay }>(`/admin/users/${userId}/water${date ? `?date=${date}` : ''}`))
+        .water,
+  })
+
+/** A client's water per day over a range (admin Food card). */
+export const personWaterSummaryQuery = (userId: number, from: string, to: string) =>
+  queryOptions({
+    queryKey: ['admin', 'water', userId, 'summary', from, to],
+    queryFn: () =>
+      api<{ summary: WaterSummary; today: string }>(
+        `/admin/users/${userId}/water/summary?from=${from}&to=${to}`,
+      ),
+  })
+
 /** Your totals per day over a range (the Fuel week strip). */
 export const foodSummaryQuery = (from: string, to: string) =>
   queryOptions({
@@ -342,6 +379,21 @@ export const foodRecentQuery = queryOptions({
   queryKey: ['food', 'recent'],
   queryFn: async () => (await api<{ foods: RecentFood[] }>('/me/food/recent')).foods,
 })
+
+/** Foods by name from the food databases, values per 100 g (phone app). */
+export const foodSearchQuery = (q: string) =>
+  queryOptions({
+    queryKey: ['food', 'search', q.trim().toLowerCase()],
+    queryFn: async () =>
+      (
+        await api<{ results: FoodSearchResult[] }>(
+          `/me/food/search?q=${encodeURIComponent(q.trim())}`,
+        )
+      ).results,
+    // The server keeps searches for a week; an hour on the phone is plenty.
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  })
 
 /** A client's food for one day (admin). */
 export const personFoodDayQuery = (userId: number, date: string) =>
@@ -367,12 +419,26 @@ export const personPhotoLimitQuery = (userId: number) =>
   queryOptions({
     queryKey: ['admin', 'users', userId, 'food', 'photo-limit'],
     queryFn: async () =>
-      (await api<{ photoLimit: PhotoLimit }>(`/admin/users/${userId}/food/photo-limit`))
-        .photoLimit,
+      (await api<{ photoLimit: PhotoLimit }>(`/admin/users/${userId}/food/photo-limit`)).photoLimit,
   })
 
 export const foodPhotoSettingsQuery = queryOptions({
   queryKey: ['admin', 'settings', 'food-photos'],
   queryFn: async () =>
     (await api<{ foodPhotos: FoodPhotoSettings }>('/admin/settings/food-photos')).foodPhotos,
+})
+
+/** The owner's switch for "Build with Claude", and whether the site has a Claude key (admin). */
+export const workoutBuilderSettingsQuery = queryOptions({
+  queryKey: ['admin', 'settings', 'workout-builder'],
+  queryFn: async () =>
+    (await api<{ workoutBuilder: ClaudeFeatureSettings }>('/admin/settings/workout-builder'))
+      .workoutBuilder,
+})
+
+/** Is the "Build with Claude" button shown on Workouts? */
+export const workoutBuilderQuery = queryOptions({
+  queryKey: ['admin', 'workout-builder'],
+  queryFn: () => api<{ available: boolean }>('/workout-builder'),
+  staleTime: 5 * 60_000,
 })

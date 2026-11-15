@@ -93,6 +93,8 @@ export interface ProgramNews {
   assignedAt: string
   updatedAt: string | null
   coachName: string | null
+  /** When it took over from the previous program, if it was queued (ISO moment). */
+  startedAt?: string | null
 }
 
 /** A new program, or changes to it, from the last few days. Newest news only. */
@@ -113,7 +115,8 @@ function programNotification(p: ProgramNews, today: string): AppNotification | n
       body: `${coach} made changes to ${p.programName}. Have a look at what's coming up.`,
     }
   }
-  if (!recent(p.assignedAt)) return null
+  // A queued program is news again on the day it takes over.
+  if (!recent(p.assignedAt) && !(p.startedAt && recent(p.startedAt))) return null
   return {
     id: `program:${p.enrollmentId}`,
     kind: 'program',
@@ -123,6 +126,14 @@ function programNotification(p: ProgramNews, today: string): AppNotification | n
         ? `${coach} set it up for you. It starts on ${longDay(p.startDate)}.`
         : `${coach} set it up for you. Your plan is ready.`,
   }
+}
+
+/** The program queued to follow the current one (for the bell). */
+export interface NextProgramNews {
+  enrollmentId: number
+  programName: string
+  startDate: string
+  coachName: string | null
 }
 
 /**
@@ -136,10 +147,21 @@ export function appNotifications(input: {
   todayWorkout: Pick<PlanDay, 'date' | 'workoutName' | 'state'> | null
   workoutInProgress: boolean
   program?: ProgramNews | null
+  next?: NextProgramNews | null
 }): AppNotification[] {
   const list: AppNotification[] = []
   const news = input.program ? programNotification(input.program, input.today) : null
   if (news) list.push(news)
+  const next = input.next
+  if (next && next.startDate > input.today) {
+    const coach = next.coachName?.split(' ')[0] || 'Your coach'
+    list.push({
+      id: `program-next:${next.enrollmentId}`,
+      kind: 'program',
+      title: `Up next: ${next.programName}`,
+      body: `${coach} lined it up after your current program. It starts on ${longDay(next.startDate)}.`,
+    })
+  }
   const w = input.weighIn
   if (w && !w.done) {
     const late = daysBetween(w.date, input.today)

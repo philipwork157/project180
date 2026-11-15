@@ -14,7 +14,7 @@ export const MEAL_LABELS: Record<Meal, string> = {
 }
 
 /** How a food was added. */
-export const FOOD_SOURCES = ['manual', 'photo', 'barcode'] as const
+export const FOOD_SOURCES = ['manual', 'photo', 'barcode', 'search'] as const
 export type FoodSource = (typeof FOOD_SOURCES)[number]
 
 /**
@@ -124,6 +124,8 @@ export interface FoodSetup {
   photosPerDay: number
   /** At least one barcode provider is switched on for this site. */
   barcode: boolean
+  /** At least one provider can search foods by name here. */
+  search: boolean
 }
 
 /** A packaged product found by its barcode, with values per 100 g (what labels print). */
@@ -136,6 +138,59 @@ export interface BarcodeProduct {
   servingG: number | null
   /** Where the data came from, shown under the numbers (some licences require a credit). */
   source: { provider: string; label: string; url: string | null }
+}
+
+/** A food found by searching its name: like a barcode product, but not every food has a code. */
+export type FoodSearchResult = Omit<BarcodeProduct, 'barcode'> & {
+  /** Unique in the list, e.g. "openfoodfacts:6001007000000". */
+  id: string
+  barcode: string | null
+}
+
+/** What someone typed to search foods: 2 to 60 characters. */
+export const foodSearchInput = z.string().trim().min(2, 'Type a bit more').max(60)
+
+/** The same search however it was typed ("  Eggs " and "eggs" share one saved answer). */
+export const normalizeFoodQuery = (q: string) => q.trim().toLowerCase().replace(/\s+/g, ' ')
+
+/** A word without a plural "s", so "eggs" and "egg" count as the same word. */
+const oneOf = (word: string) => word.replace(/s$/, '')
+
+/**
+ * Puts the closest names first, each group in the providers' order: the typed word as the
+ * name's first word ("Egg, whole" for "eggs"), then every typed word as a whole word ("Large
+ * eggs"), then a name that starts with what was typed ("Eggplant"), then every typed word as the
+ * start of a word, then names containing them, then the rest. Drops repeats (same name and
+ * brand) and anything with no calories and no protein (nothing to log).
+ */
+export function rankFoodResults<T extends Pick<FoodSearchResult, 'name' | 'brand' | 'per100g'>>(
+  query: string,
+  results: T[],
+): T[] {
+  const q = normalizeFoodQuery(query)
+  const words = q.split(' ').map(oneOf).filter(Boolean)
+  const seen = new Set<string>()
+  const score = (r: T) => {
+    const name = normalizeFoodQuery(r.name)
+    const nameWords = name.split(/[^a-z0-9]+/).filter(Boolean)
+    const whole = words.every((w) => nameWords.some((n) => oneOf(n) === w))
+    if (whole && oneOf(nameWords[0] ?? '') === words[0]) return 0
+    if (whole) return 1
+    if (name.startsWith(q)) return 2
+    if (words.every((w) => nameWords.some((n) => n.startsWith(w)))) return 3
+    if (words.every((w) => name.includes(w))) return 4
+    return 5
+  }
+  return results
+    .map((r, i) => ({ r, i, s: score(r) }))
+    .filter(({ r }) => {
+      const key = `${normalizeFoodQuery(r.name)}|${normalizeFoodQuery(r.brand ?? '')}`
+      if (seen.has(key) || (r.per100g.kcal <= 0 && r.per100g.proteinG <= 0)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((a, b) => a.s - b.s || a.i - b.i)
+    .map(({ r }) => r)
 }
 
 /** EAN-8, UPC-A (12), EAN-13 or GTIN-14: digits only. */

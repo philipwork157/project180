@@ -2,7 +2,7 @@ import { ApiError, api, personActivityQuery, usersQuery } from '@project180/clie
 import { durationShort, type SignedInDevice, timeAgo } from '@project180/shared'
 import { Button, Chip, ConfirmDialog, cn, IconButton, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, LogOut, MonitorSmartphone } from 'lucide-react'
+import { Ban, ChevronDown, LogOut, MonitorSmartphone } from 'lucide-react'
 import { useState } from 'react'
 
 const LABEL = 'font-bold text-[11px] text-ink-muted uppercase tracking-[0.12em]'
@@ -100,7 +100,12 @@ export function PersonActivityPanel({
         <div className="min-w-0">
           <p className={LABEL}>Status</p>
           <p className="mt-1 flex items-center gap-2 font-bold text-[15px]">
-            {a.activeNow ? (
+            {a.blocked ? (
+              <span className="flex items-center gap-2 text-danger">
+                <Ban className="size-4" aria-hidden />
+                Blocked: can’t sign in
+              </span>
+            ) : a.activeNow ? (
               <>
                 <ActiveDot active />
                 Active now

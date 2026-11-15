@@ -1,4 +1,6 @@
+import { sessions, users } from '@project180/db'
 import type { Me, Role } from '@project180/shared'
+import { sql } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import type { Auth } from './auth'
 
@@ -11,6 +13,14 @@ interface SessionLikeUser {
   weightUnit?: unknown
   mustChangePassword?: unknown
 }
+
+/**
+ * 1 when the person (the `users` row of the query) has a sign-in that hasn't ended, on any
+ * device; 0 otherwise. Signing out, "sign out everywhere", a password reset and blocking all
+ * delete sessions, so "active now" ends with them. Uses sessions_user_idx.
+ */
+export const signedInSql = () =>
+  sql<number>`exists (select 1 from ${sessions} where ${sessions.userId} = ${users.id} and ${sessions.expiresAt} > ${Date.now()})`
 
 /** Better Auth types ids as strings; the rest of the app uses numbers. */
 export function toMe(u: SessionLikeUser): Me {

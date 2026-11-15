@@ -132,6 +132,14 @@ Photos are read by the Claude API and never stored: the phone shrinks the photo,
 - Open Food Facts data is under the ODbL: the app shows the credit under the numbers, and their products stay in their own table. They ask apps to send a contact (`FOOD_LOOKUP_CONTACT`, default hello@project180.co.za) and to test against their staging server (`OPEN_FOOD_FACTS_URL`).
 - Keep `zxing-wasm` pinned to the exact version `barcode-detector` depends on (both in `apps/app/package.json`).
 
+### Build with Claude (workouts)
+
+On **Workouts**, staff can tap **Build with Claude**, describe a workout ("45 min upper body, dumbbells only, beginner") and get a **new** workout made from the exercise library, which they then check and change in the normal editor.
+
+- It only ever creates: `POST /api/workout-builder` (`packages/api/src/routes/workout-builder.ts`) reads the library and calls the same `createWorkout` as the New workout button. It never updates or deletes, never adds exercises and never touches programs. `packages/api/test/workout-builder.test.ts` checks that existing workouts, their rows and the exercises are unchanged.
+- Claude may only use exercise ids from the library; anything else is dropped, and exercises it wanted but you don't have are listed, not added. The prompt is saved in the workout's description.
+- Uses the same `ANTHROPIC_API_KEY` (set it on the admin Worker too). `WORKOUT_MODEL` picks the model (default `claude-sonnet-5-5`, about US$0.04 a workout with the full library). Owners switch it on or off in **Settings > Build with Claude**.
+
 ## Cloudflare dev environment
 
 A full copy of the app on Cloudflare for testing, with its own Workers and its own database, so nothing you try there touches real data:

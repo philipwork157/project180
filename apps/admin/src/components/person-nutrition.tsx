@@ -21,8 +21,9 @@ import {
 } from '@project180/shared'
 import { Button, Card, cn, Drawer, Field, Input, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Camera, ChevronRight, ScanBarcode } from 'lucide-react'
+import { Camera, ChevronRight, ScanBarcode, Search } from 'lucide-react'
 import { type ChangeEvent, useState } from 'react'
+import { WaterRow } from './person-water'
 
 const DAYS = 7
 
@@ -112,6 +113,7 @@ export function NutritionCard({ userId, name }: { userId: number; name: string }
         </>
       )}
 
+      <WaterRow userId={userId} name={name} />
       <PhotoLimitRow userId={userId} name={name} />
 
       <TargetsDrawer
@@ -256,7 +258,12 @@ function TargetsForm({
     mutationFn: () =>
       api(`/admin/users/${userId}/nutrition-targets`, {
         method: 'PUT',
-        body: { kcal: whole(kcal), proteinG: whole(protein), carbsG: whole(carbs), fatG: whole(fat) },
+        body: {
+          kcal: whole(kcal),
+          proteinG: whole(protein),
+          carbsG: whole(carbs),
+          fatG: whole(fat),
+        },
       }),
     onSuccess: () => {
       refresh()
@@ -292,9 +299,7 @@ function TargetsForm({
     >
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Calories (kcal)" hint="800 to 6 000">
-          {(id) => (
-            <Input id={id} inputMode="numeric" value={kcal} onChange={numeric(setKcal)} />
-          )}
+          {(id) => <Input id={id} inputMode="numeric" value={kcal} onChange={numeric(setKcal)} />}
         </Field>
         <Field label="Protein (g)" hint="20 to 400">
           {(id) => (
@@ -485,7 +490,9 @@ function FoodDayDrawer({
       description={`What ${name.split(' ')[0]} logged.`}
     >
       {!day.data ? (
-        <p className="text-[14px] text-ink-muted">{day.isError ? 'Couldn’t load it.' : 'Loading…'}</p>
+        <p className="text-[14px] text-ink-muted">
+          {day.isError ? 'Couldn’t load it.' : 'Loading…'}
+        </p>
       ) : (
         <div className="flex flex-col gap-5">
           <p className="tabular rounded-md bg-surface-raised p-4 text-[14px]">
@@ -510,7 +517,9 @@ function FoodDayDrawer({
                       <span className="flex min-w-0 flex-1 items-center gap-2">
                         <span className="truncate font-semibold">{f.name}</span>
                         {f.grams !== null && (
-                          <span className="tabular shrink-0 text-ink-muted">{gramsLabel(f.grams)} g</span>
+                          <span className="tabular shrink-0 text-ink-muted">
+                            {gramsLabel(f.grams)} g
+                          </span>
                         )}
                         {f.source === 'barcode' && (
                           <ScanBarcode
@@ -518,8 +527,17 @@ function FoodDayDrawer({
                             aria-label="From a barcode"
                           />
                         )}
+                        {f.source === 'search' && (
+                          <Search
+                            className="size-3.5 shrink-0 text-ink-muted"
+                            aria-label="From the food database"
+                          />
+                        )}
                         {f.source === 'photo' && (
-                          <Camera className="size-3.5 shrink-0 text-ink-muted" aria-label="Estimated from a photo" />
+                          <Camera
+                            className="size-3.5 shrink-0 text-ink-muted"
+                            aria-label="Estimated from a photo"
+                          />
                         )}
                       </span>
                       <span className="tabular shrink-0 text-right">

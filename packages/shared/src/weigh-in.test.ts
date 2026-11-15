@@ -141,6 +141,40 @@ describe('program news in the notifications', () => {
     expect(appNotifications({ ...base, program: { ...updated, updatedAt: null } })).toEqual([])
   })
 
+  it('is news again on the day a queued program takes over', () => {
+    const queued = {
+      ...program,
+      startDate: '2026-11-23',
+      assignedAt: '2026-11-01T05:00:00.000Z',
+      updatedAt: null,
+    }
+    expect(appNotifications({ ...base, today: '2026-11-23', program: queued })).toEqual([])
+    const [n] = appNotifications({
+      ...base,
+      today: '2026-11-23',
+      program: { ...queued, startedAt: '2026-11-22T22:05:00.000Z' },
+    })
+    expect(n).toMatchObject({ id: 'program:4', body: 'Kim set it up for you. Your plan is ready.' })
+  })
+
+  it('tells them what is lined up next, until it starts', () => {
+    const next = {
+      enrollmentId: 9,
+      programName: 'Week 2',
+      startDate: '2026-11-16',
+      coachName: 'Kim Coach',
+    }
+    expect(appNotifications({ ...base, next })).toEqual([
+      {
+        id: 'program-next:9',
+        kind: 'program',
+        title: 'Up next: Week 2',
+        body: expect.stringMatching(/^Kim lined it up after your current program\. It starts on/),
+      },
+    ])
+    expect(appNotifications({ ...base, today: '2026-11-16', next })).toEqual([])
+  })
+
   it('comes before the things to do today', () => {
     const todayWorkout = { date: '2026-11-13', workoutName: 'Legs', state: 'planned' as const }
     const list = appNotifications({ ...base, todayWorkout, program })

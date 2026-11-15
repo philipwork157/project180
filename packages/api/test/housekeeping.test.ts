@@ -1,6 +1,7 @@
 // The daily cleanup, one workout in progress per person, and the active-only enrollments list.
-import { createDb } from '@project180/db'
+
 import { env } from 'cloudflare:test'
+import { createDb } from '@project180/db'
 import { describe, expect, it } from 'vitest'
 import { dailyCleanup } from '../src/cleanup'
 import { ADMIN, call, MEMBER, setupHousehold } from './helpers'
@@ -72,7 +73,9 @@ describe('daily cleanup', () => {
       .bind(Date.now() - 2 * DAY_MS, forgotten)
       .run()
     // An expired sign-in (the member's, the newest), and a wrong-password counter from two days ago.
-    await env.DB.prepare('UPDATE sessions SET expires_at = ? WHERE id = (SELECT max(id) FROM sessions)')
+    await env.DB.prepare(
+      'UPDATE sessions SET expires_at = ? WHERE id = (SELECT max(id) FROM sessions)',
+    )
       .bind(Date.now() - DAY_MS)
       .run()
     await env.DB.prepare(

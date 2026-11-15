@@ -1,8 +1,9 @@
 // Runs before `bun run deploy`: refuses to ship the live site while it isn't set up, so a
 // deploy never goes out against the placeholder database or without the sign-in secret.
 // Usage: bun scripts/check-live.ts   (needs `bunx wrangler login` for the secrets check)
-import { readFileSync } from 'node:fs'
+
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 const PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const APPS = ['app', 'admin'] as const
@@ -49,10 +50,14 @@ for (const app of APPS) {
       `apps/${app}/wrangler.jsonc: the live database_id is still the placeholder. Run \`bunx wrangler d1 create project180-db\` and paste the id into both apps.`,
     )
 
-  const list = spawnSync('bunx', ['wrangler', 'secret', 'list', '--name', config.name, '--format', 'json'], {
-    cwd: `apps/${app}`,
-    encoding: 'utf8',
-  })
+  const list = spawnSync(
+    'bunx',
+    ['wrangler', 'secret', 'list', '--name', config.name, '--format', 'json'],
+    {
+      cwd: `apps/${app}`,
+      encoding: 'utf8',
+    },
+  )
   if (list.status !== 0) {
     problems.push(
       `${config.name}: couldn't list its secrets (signed in with \`bunx wrangler login\`?).`,

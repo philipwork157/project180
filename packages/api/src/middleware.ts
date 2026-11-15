@@ -38,6 +38,8 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   if (!session) return c.json({ error: 'Not signed in' }, 401)
   const me = toMe(session.user)
   if (c.var.appKind === 'admin' && !isStaff(me.role)) return c.json({ error: 'Not signed in' }, 401)
+  // Blocked: their sessions were deleted, but a cached cookie could still hold one for a moment.
+  if (session.user.blockedAt) return c.json({ error: 'Not signed in' }, 401)
   c.set('user', me)
   c.set('sessionId', Number(session.session.id))
 

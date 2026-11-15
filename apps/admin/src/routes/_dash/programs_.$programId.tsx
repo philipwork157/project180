@@ -477,6 +477,7 @@ function Builder({
                     const canDrag = canEdit && brush === null
                     return (
                       <td key={day} className="p-0 align-top">
+                        {/* biome-ignore lint/a11y/noStaticElementInteractions: dragging is a mouse shortcut; the day's button below does the same by keyboard */}
                         <div
                           draggable={canDrag}
                           onDragStart={(e) => {

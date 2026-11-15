@@ -67,6 +67,7 @@ export function createAuth(env: Bindings, kind: AppKind = 'app') {
         coachId: { type: 'number', required: false, input: false },
         mustChangePassword: { type: 'boolean', required: false, input: false, defaultValue: false },
         lastSeenAt: { type: 'date', required: false, input: false },
+        blockedAt: { type: 'date', required: false, input: false },
       },
     },
     databaseHooks: {

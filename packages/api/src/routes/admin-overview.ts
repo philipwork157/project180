@@ -9,10 +9,10 @@ import {
   workouts,
 } from '@project180/db'
 import {
-  ACTIVE_NOW_MS,
   type AdminOverview,
   addDays,
   average,
+  isActiveNow,
   tempPasswordExpired,
   todayIn,
 } from '@project180/shared'
@@ -24,6 +24,7 @@ import type { AppEnv } from '../env'
 import { libraryOnly, visibleTo } from '../library'
 import { requireAdmin, requireUser } from '../middleware'
 import { sessionSummaries } from '../sessions'
+import { signedInSql } from '../users'
 import { buildPlans } from './me'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -51,6 +52,7 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
         name: users.name,
         timezone: users.timezone,
         lastSeenAt: users.lastSeenAt,
+        signedIn: signedInSql(),
         mustChangePassword: users.mustChangePassword,
         passwordSetAt: accounts.updatedAt,
       })
@@ -245,9 +247,8 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
     const overview: AdminOverview = {
       clients: {
         total: clients.length,
-        activeNow: clients.filter(
-          (u) => u.lastSeenAt && now - u.lastSeenAt.getTime() < ACTIVE_NOW_MS,
-        ).length,
+        activeNow: clients.filter((u) => isActiveNow(u.lastSeenAt, Boolean(u.signedIn), now))
+          .length,
         activeThisWeek: clients.filter(
           (u) => u.lastSeenAt && now - u.lastSeenAt.getTime() < 7 * DAY_MS,
         ).length,

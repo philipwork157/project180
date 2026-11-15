@@ -1,14 +1,9 @@
 // The phone's food log: saving, editing and deleting foods, and turning a photo into a draft.
 // Every change updates the day from the server's reply at once; the rest refreshes behind it.
-import { api, apiForm, foodDayQuery, foodRecentQuery } from '@project180/client'
-import type {
-  BarcodeProduct,
-  FoodDay,
-  FoodPhotoDraft,
-  FoodSource,
-  Meal,
-} from '@project180/shared'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { api, apiForm, foodDayQuery, foodRecentQuery, foodSearchQuery } from '@project180/client'
+import type { BarcodeProduct, FoodDay, FoodPhotoDraft, FoodSource, Meal } from '@project180/shared'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 
 /** One food as the forms hold it, with the id made on this phone (kept across retries). */
 export interface FoodDraftItem {
@@ -50,7 +45,10 @@ export function useAddFood(onSaved?: () => void) {
 export function useUpdateFood(onSaved?: () => void) {
   const putDay = useDayReply()
   return useMutation({
-    mutationFn: ({ id, ...changes }: { id: number } & Partial<Omit<FoodDraftItem, 'clientUuid'>> & {
+    mutationFn: ({
+      id,
+      ...changes
+    }: { id: number } & Partial<Omit<FoodDraftItem, 'clientUuid'>> & {
         meal?: Meal
       }) => api<{ day: FoodDay }>(`/me/food/${id}`, { method: 'PATCH', body: changes }),
     onSuccess: ({ day }) => {
@@ -118,4 +116,32 @@ export function useBarcodeLookup() {
     mutationFn: async (code: string) =>
       (await api<{ product: BarcodeProduct }>(`/me/food/barcode/${code}`)).product,
   })
+}
+
+/** Searches start this many characters in, once typing pauses this long (their limits are low). */
+export const SEARCH_MIN_CHARS = 2
+const SEARCH_PAUSE_MS = 450
+
+/**
+ * Foods matching what's typed, from the food databases. Asks once typing pauses, keeps showing
+ * the last results while the next ones load, and never asks while the box is (nearly) empty.
+ */
+export function useFoodSearch(query: string, enabled = true) {
+  const [settled, setSettled] = useState(query.trim())
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(query.trim()), SEARCH_PAUSE_MS)
+    return () => clearTimeout(timer)
+  }, [query])
+  const ready = enabled && settled.length >= SEARCH_MIN_CHARS
+  const search = useQuery({
+    ...foodSearchQuery(settled),
+    enabled: ready,
+    placeholderData: keepPreviousData,
+  })
+  return {
+    ...search,
+    /** Still typing, or waiting for the answer. */
+    searching: ready && (search.isFetching || settled !== query.trim()),
+    settled,
+  }
 }

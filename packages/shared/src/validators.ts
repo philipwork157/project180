@@ -80,6 +80,9 @@ export type CreateUserInput = z.input<typeof createUserInput>
 
 export const resetPasswordInput = z.object({ password, sendEmail: z.boolean().default(false) })
 
+/** Block someone's access to the apps (true) or let them back in (false). */
+export const blockAccessInput = z.object({ blocked: z.boolean() })
+
 /** First sign-in after a temporary password: they choose their own. */
 export const choosePasswordInput = z.object({ password })
 

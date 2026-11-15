@@ -3,8 +3,8 @@ import {
   type FoodDayTotals,
   gramsLabel,
   kcalLabel,
-  type MacroKey,
   MACROS,
+  type MacroKey,
   type MacroTotals,
   type NutritionTargets,
   targetShare,
@@ -93,11 +93,16 @@ export function FuelTotals({
                 key={m.key}
                 className="flex min-h-11 items-center gap-3 border-border border-t py-2 first:border-t-0"
               >
-                <span aria-hidden className={cn('size-3 shrink-0 rounded-[3px]', MACRO_FILL[m.key])} />
+                <span
+                  aria-hidden
+                  className={cn('size-3 shrink-0 rounded-[3px]', MACRO_FILL[m.key])}
+                />
                 <span className="min-w-0 flex-1 font-semibold text-[15px]">{m.label}</span>
                 <span className="tabular text-[15px]">
                   <span className="font-bold">{gramsLabel(totals[m.key])}</span>
-                  <span className="text-ink-muted">{target === null ? ' g' : ` / ${target} g`}</span>
+                  <span className="text-ink-muted">
+                    {target === null ? ' g' : ` / ${target} g`}
+                  </span>
                 </span>
                 <span className="tabular w-11 shrink-0 text-right text-[13px] text-ink-muted">
                   {empty ? '–' : percent(split[m.key])}

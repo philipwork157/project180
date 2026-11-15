@@ -102,10 +102,10 @@ describe('coach sees a client’s workout', () => {
     const done = await call<Json>(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: coach })
     expect(done.data.session).toMatchObject({ status: 'completed', feeling: 4 })
 
-    // The owner sees everyone.
+    // Workouts stay between a client and their own coach: an owner who isn't Sam's coach gets 404.
     expect(
       (await call(`/admin/users/${sam}/workouts/${sessionId}`, { cookie: owner })).status,
-    ).toBe(200)
+    ).toBe(404)
   })
 
   it('nobody else can read it', async () => {

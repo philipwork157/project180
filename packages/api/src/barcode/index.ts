@@ -32,7 +32,7 @@ export function barcodeProviders(env: Bindings): BarcodeProvider[] {
     .map((id) => id.trim().toLowerCase())
   return [...new Set(ids)]
     .map((id) => PROVIDERS[id])
-    .filter((p): p is BarcodeProvider => p !== undefined && p.configured(env))
+    .filter((p): p is BarcodeProvider => p?.configured(env) === true)
 }
 
 function toProduct(
@@ -56,7 +56,12 @@ function toProduct(
   }
 }
 
-async function remember(db: Db, barcode: string, providerId: string | null, p: ProviderProduct | null) {
+async function remember(
+  db: Db,
+  barcode: string,
+  providerId: string | null,
+  p: ProviderProduct | null,
+) {
   const values = {
     found: p !== null,
     provider: providerId,

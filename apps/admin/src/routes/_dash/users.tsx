@@ -8,10 +8,10 @@ import {
   usersQuery,
 } from '@project180/client'
 import {
-  ACTIVE_NOW_MS,
   type DeletePersonResult,
   type DirectoryPerson,
   generateTempPassword,
+  isActiveNow,
   isClient,
   isOwner,
   isStaff,
@@ -39,6 +39,7 @@ import {
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import {
+  Ban,
   ChartLine,
   ChevronDown,
   KeyRound,
@@ -46,6 +47,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldCheck,
   Trash2,
   UserRoundCog,
   UsersRound,
@@ -336,7 +338,7 @@ function PersonRow({
   const client = isClient(u.role)
   // Your own row shows your program too (staff train themselves in the app).
   const trains = client || isMe
-  const active = !!u.lastSeenAt && Date.now() - new Date(u.lastSeenAt).getTime() < ACTIVE_NOW_MS
+  const active = !u.blocked && isActiveNow(u.lastSeenAt, u.signedIn)
   const detailId = `person-${u.id}`
   return (
     <li>
@@ -365,6 +367,9 @@ function PersonRow({
                   {ROLE_LABELS[u.role]}
                 </Chip>
               )}
+              {u.blocked && (
+                <Chip className="h-6 shrink-0 bg-danger/15 text-[12px] text-danger">Blocked</Chip>
+              )}
             </span>
             <span className="block truncate text-[13px] text-ink-muted">
               {u.email}
@@ -390,7 +395,13 @@ function PersonRow({
                 ? `Trained ${timeAgo(u.lastWorkoutAt).toLowerCase()}`
                 : 'No workouts yet')}
             {trains && ' · '}
-            {active ? 'active now' : u.lastSeenAt ? `seen ${timeAgo(u.lastSeenAt).toLowerCase()}` : 'not signed in yet'}
+            {u.blocked
+              ? 'can’t sign in'
+              : active
+                ? 'active now'
+                : u.lastSeenAt
+                  ? `seen ${timeAgo(u.lastSeenAt).toLowerCase()}`
+                  : 'not signed in yet'}
           </span>
         </span>
         <ChevronDown
@@ -435,6 +446,7 @@ function PersonRow({
                   onClick={onPassword}
                 />
               )}
+              {!isMe && u.role !== 'owner' && (owner || client) && <BlockButton user={u} />}
               {owner && !isMe && u.role !== 'owner' && (
                 <DeletePersonButton user={u} clients={u.clientCount} />
               )}
@@ -446,6 +458,73 @@ function PersonRow({
         </div>
       )}
     </li>
+  )
+}
+
+/**
+ * Block someone's access (or let them back in): they're signed out everywhere and can't sign
+ * in, but their account and everything they logged stay. Coaches block their own clients;
+ * owners also block coaches.
+ */
+function BlockButton({ user }: { user: UserSummary }) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const first = user.name.split(' ')[0] ?? user.name
+  const blocking = !user.blocked
+  const change = useMutation({
+    mutationFn: () =>
+      api<{ blocked: boolean }>(`/admin/users/${user.id}/access`, {
+        method: 'POST',
+        body: { blocked: blocking },
+      }),
+    onSuccess: ({ blocked }) => {
+      setOpen(false)
+      const patch = <T extends UserSummary>(u: T): T =>
+        u.id === user.id ? { ...u, blocked, signedIn: blocked ? false : u.signedIn } : u
+      queryClient.setQueryData(usersQuery.queryKey, (list) => list?.map(patch))
+      queryClient.setQueriesData<{ people: DirectoryPerson[] }>(
+        { queryKey: ['admin', 'users', 'directory'] },
+        (page) => (page ? { ...page, people: page.people.map(patch) } : page),
+      )
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })
+      void queryClient.invalidateQueries({ queryKey: adminOverviewQuery.queryKey })
+      toast({
+        title: blocked ? `${user.name} is blocked` : `${user.name} can sign in again`,
+        description: blocked
+          ? 'Signed out on every device. Everything they logged is kept.'
+          : 'Their account, program and history are just as they were.',
+      })
+    },
+    onError: (err) =>
+      toast({
+        tone: 'error',
+        title: blocking ? 'Couldn’t block' : 'Couldn’t unblock',
+        description: err instanceof ApiError ? err.message : undefined,
+      }),
+  })
+  return (
+    <>
+      <IconButton
+        label={blocking ? `Block ${user.name}` : `Unblock ${user.name}`}
+        icon={blocking ? <Ban aria-hidden /> : <ShieldCheck aria-hidden />}
+        size="lg"
+        active={!blocking}
+        onClick={() => setOpen(true)}
+      />
+      <ConfirmDialog
+        open={open}
+        title={blocking ? `Block ${user.name}?` : `Let ${user.name} back in?`}
+        confirmLabel={blocking ? 'Block' : 'Unblock'}
+        tone={blocking ? 'danger' : 'primary'}
+        loading={change.isPending}
+        onConfirm={() => change.mutate()}
+        onClose={() => setOpen(false)}
+      >
+        {blocking
+          ? `${first} is signed out on every device straight away, gets no more notifications and can’t sign in until you unblock them. Their account, program and everything they logged stay as they are.`
+          : `${first} can sign in again with their password, and everything is as they left it.`}
+      </ConfirmDialog>
+    </>
   )
 }
 

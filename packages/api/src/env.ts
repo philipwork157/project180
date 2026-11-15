@@ -30,10 +30,14 @@ export interface Bindings {
    * "openfoodfacts"; e.g. "openfoodfacts,usda" to fall back to USDA.
    */
   FOOD_BARCODE_PROVIDERS?: string
+  /** Which Claude model builds workouts for coaches (default in workout-builder.ts). */
+  WORKOUT_MODEL?: string
   /** USDA FoodData Central key (free from api.data.gov), for the "usda" barcode provider. */
   USDA_API_KEY?: string
   /** Open Food Facts address; their staging server for testing. Default world.openfoodfacts.org. */
   OPEN_FOOD_FACTS_URL?: string
+  /** Open Food Facts' name search (Search-a-licious). Default search.openfoodfacts.org. */
+  OPEN_FOOD_FACTS_SEARCH_URL?: string
   /** Contact sent to food-data providers with every lookup (they ask apps to identify themselves). */
   FOOD_LOOKUP_CONTACT?: string
   /**

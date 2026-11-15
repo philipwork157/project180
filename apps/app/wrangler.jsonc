@@ -43,6 +43,8 @@
     // Barcode providers to try, in order (packages/api/src/barcode). "openfoodfacts" needs no
     // key; add ",usda" with the USDA_API_KEY secret to fall back to USDA FoodData Central.
     "FOOD_BARCODE_PROVIDERS": "openfoodfacts",
+    // Which Claude model builds workouts in the admin ("Build with Claude").
+    "WORKOUT_MODEL": "claude-sonnet-5-5",
     // Seconds a sign-in is trusted from its cookie before the database is asked again.
     // Signing someone out (or deleting them) takes up to this long to bite.
     "SESSION_CACHE_SECONDS": "60"
@@ -103,6 +105,8 @@
         // Barcode providers to try, in order (packages/api/src/barcode). "openfoodfacts" needs no
         // key; add ",usda" with the USDA_API_KEY secret to fall back to USDA FoodData Central.
         "FOOD_BARCODE_PROVIDERS": "openfoodfacts",
+        // Which Claude model builds workouts in the admin ("Build with Claude").
+        "WORKOUT_MODEL": "claude-sonnet-5-5",
         "SESSION_CACHE_SECONDS": "60",
         // Every email from dev goes to the developer, never to real people.
         "EMAIL_REDIRECT_TO": "philipwork157@gmail.com"

@@ -142,7 +142,10 @@ export async function cancelWorkout(db: Db, session: { id: number; startedAt: Da
     .set({
       status: 'cancelled',
       endedAt,
-      durationSeconds: Math.max(0, Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000)),
+      durationSeconds: Math.max(
+        0,
+        Math.round((endedAt.getTime() - session.startedAt.getTime()) / 1000),
+      ),
     })
     .where(and(eq(workoutSessions.id, session.id), eq(workoutSessions.status, 'in_progress')))
     .returning({ id: workoutSessions.id })

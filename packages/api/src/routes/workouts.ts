@@ -19,7 +19,7 @@ import {
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import { managedPerson } from '../access'
+import { coachedPerson } from '../access'
 import { inChunks, insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
@@ -39,33 +39,33 @@ export async function loadWorkoutExercises(
   // In slices: D1 allows 100 bound values per statement, and the library can be bigger.
   const rows = await inChunks(workoutIds, (ids) =>
     db
-    .select({
-      workoutId: workoutExercises.workoutId,
-      exerciseId: workoutExercises.exerciseId,
-      exerciseName: exercises.name,
-      muscleGroup: exercises.muscleGroup,
-      trackingType: exercises.trackingType,
-      instructions: exercises.instructions,
-      imageKey: exercises.imageKey,
-      videoUrl: exercises.videoUrl,
-      targetSets: workoutExercises.targetSets,
-      targetRepsMin: workoutExercises.targetRepsMin,
-      targetRepsMax: workoutExercises.targetRepsMax,
-      targetRepsPerSet: workoutExercises.targetRepsPerSet,
-      bodyweight: workoutExercises.bodyweight,
-      targetSeconds: workoutExercises.targetSeconds,
-      restSeconds: workoutExercises.restSeconds,
-      section: workoutExercises.section,
-      targetDistanceM: workoutExercises.targetDistanceM,
-      targetPaceSeconds: workoutExercises.targetPaceSeconds,
-      targetHrZone: workoutExercises.targetHrZone,
-      supersetGroup: workoutExercises.supersetGroup,
-      notes: workoutExercises.notes,
-    })
-    .from(workoutExercises)
-    .innerJoin(exercises, eq(exercises.id, workoutExercises.exerciseId))
-    .where(inArray(workoutExercises.workoutId, ids))
-    .orderBy(asc(workoutExercises.workoutId), asc(workoutExercises.position)),
+      .select({
+        workoutId: workoutExercises.workoutId,
+        exerciseId: workoutExercises.exerciseId,
+        exerciseName: exercises.name,
+        muscleGroup: exercises.muscleGroup,
+        trackingType: exercises.trackingType,
+        instructions: exercises.instructions,
+        imageKey: exercises.imageKey,
+        videoUrl: exercises.videoUrl,
+        targetSets: workoutExercises.targetSets,
+        targetRepsMin: workoutExercises.targetRepsMin,
+        targetRepsMax: workoutExercises.targetRepsMax,
+        targetRepsPerSet: workoutExercises.targetRepsPerSet,
+        bodyweight: workoutExercises.bodyweight,
+        targetSeconds: workoutExercises.targetSeconds,
+        restSeconds: workoutExercises.restSeconds,
+        section: workoutExercises.section,
+        targetDistanceM: workoutExercises.targetDistanceM,
+        targetPaceSeconds: workoutExercises.targetPaceSeconds,
+        targetHrZone: workoutExercises.targetHrZone,
+        supersetGroup: workoutExercises.supersetGroup,
+        notes: workoutExercises.notes,
+      })
+      .from(workoutExercises)
+      .innerJoin(exercises, eq(exercises.id, workoutExercises.exerciseId))
+      .where(inArray(workoutExercises.workoutId, ids))
+      .orderBy(asc(workoutExercises.workoutId), asc(workoutExercises.position)),
   )
   for (const { workoutId, ...item } of rows) {
     const list = result.get(workoutId) ?? []
@@ -283,7 +283,7 @@ export const workoutRoutes = new Hono<AppEnv>()
     const archived = c.req.query('archived') === '1'
     const clientParam = c.req.query('clientId')
     const clientId = clientParam
-      ? (await managedPerson(c.var.db, c.var.user, Number(clientParam))).id
+      ? (await coachedPerson(c.var.db, c.var.user, Number(clientParam))).id
       : undefined
     const rows = await c.var.db
       .select()

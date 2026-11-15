@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { SearchInput, Segmented, Toolbar } from '../../components/controls'
 import { DeleteForGood } from '../../components/delete-for-good'
 import { PageHeader } from '../../components/page-header'
+import { BuildWithClaude } from '../../components/workout-builder'
 
 export const Route = createFileRoute('/_dash/workouts')({
   component: WorkoutsPage,
@@ -51,7 +52,12 @@ function WorkoutsPage() {
       <PageHeader
         title="Workouts"
         subtitle="Exercises in order, with sets, reps and rest. Clients never see this list: they get workouts through the program you assign them."
-        action={newButton}
+        action={
+          <div className="flex flex-wrap gap-3">
+            <BuildWithClaude />
+            {newButton}
+          </div>
+        }
       />
       <Toolbar>
         <Segmented

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { ADMIN, call, createAdmin, MEMBER, setupHousehold } from './helpers'
 
 const cookiesOf = (res: { headers: Headers }) =>
-  (res.headers as unknown as { getSetCookie(): string[] }).getSetCookie().map((c) => c.split(';')[0])
+  (res.headers as unknown as { getSetCookie(): string[] })
+    .getSetCookie()
+    .map((c) => c.split(';')[0])
 
 async function signInTo(app: 'app' | 'admin', email: string, password: string) {
   const res = await call('/auth/sign-in/email', {

@@ -1,26 +1,27 @@
-import { foodDayQuery, foodSummaryQuery } from '@project180/client'
+import { foodDayQuery, foodSummaryQuery, waterDayQuery } from '@project180/client'
 import {
   addDays,
   type FoodEntry,
   gramsLabel,
   kcalLabel,
-  type Meal,
   MEAL_LABELS,
   MEALS,
+  type Meal,
   mealForHour,
   sumMacros,
   todayIn,
 } from '@project180/shared'
-import { Button, IconButton } from '@project180/ui'
+import { Button, cn, IconButton } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Camera, ChevronLeft, ChevronRight, Plus, ScanBarcode } from 'lucide-react'
+import { Camera, ChevronLeft, ChevronRight, Plus, ScanBarcode, Search } from 'lucide-react'
 import { useState } from 'react'
 import { AddFoodSheet } from '../../components/add-food-sheet'
 import { EditFoodSheet } from '../../components/edit-food-sheet'
 import { FuelTotals, FuelWeek } from '../../components/fuel-totals'
 import { MacroWeekChart } from '../../components/macro-week-chart'
 import { ScreenHeader } from '../../components/screen-header'
+import { WaterCard } from '../../components/water-card'
 
 export const Route = createFileRoute('/_app/fuel')({
   component: FuelPage,
@@ -50,6 +51,7 @@ function FuelPage() {
   const week = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
   const sunday = week[6] ?? monday
   const day = useQuery(foodDayQuery(date))
+  const water = useQuery(waterDayQuery(date))
   const summary = useQuery(foodSummaryQuery(monday, sunday))
   const targets = day.data?.targets ?? summary.data?.targets ?? null
   const thisWeek = sunday >= today
@@ -74,6 +76,7 @@ function FuelPage() {
               disabled={thisWeek}
               onClick={() => {
                 const next = addDays(date, 7)
+                // biome-ignore lint/complexity/useMathMinMax: YYYY-MM-DD strings; Math.min would give NaN
                 setDate(next > today ? today : next)
               }}
             />
@@ -101,9 +104,9 @@ function FuelPage() {
       ) : !day.data ? (
         <div className="h-64 animate-pulse rounded-xl bg-surface" />
       ) : (
-        // Phone: totals, Add food, the meals, then the week. Laptop: totals and Add food on the
-        // left, the meals filling the rest of that row, and the week full width underneath, so
-        // neither column runs on while the other sits empty.
+        // Phone: totals, Add food, water, the meals, then the week. Laptop: totals, Add food and
+        // water on the left, the meals filling the rest of that row, and the week full width
+        // underneath, so neither column runs on while the other sits empty.
         <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <div className="flex flex-col gap-5">
             <FuelTotals totals={day.data.totals} targets={day.data.targets} />
@@ -117,6 +120,18 @@ function FuelPage() {
             >
               Add food
             </Button>
+            {water.data ? (
+              <WaterCard water={water.data} isToday={date === today} />
+            ) : (
+              <div
+                className={cn(
+                  'rounded-lg bg-surface p-5 shadow-card md:p-6',
+                  water.isError ? 'text-[14px] text-ink-muted' : 'h-48 animate-pulse',
+                )}
+              >
+                {water.isError && 'Couldn’t load your water. Check your signal and try again.'}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
             {MEALS.map((meal) => (
@@ -199,7 +214,10 @@ function MealCard({
                   <span className="flex items-center gap-2 font-semibold text-[15px]">
                     <span className="truncate">{e.name}</span>
                     {e.source === 'photo' && (
-                      <Camera className="size-3.5 shrink-0 text-ink-muted" aria-label="From a photo" />
+                      <Camera
+                        className="size-3.5 shrink-0 text-ink-muted"
+                        aria-label="From a photo"
+                      />
                     )}
                     {e.source === 'barcode' && (
                       <ScanBarcode
@@ -207,9 +225,17 @@ function MealCard({
                         aria-label="From a barcode"
                       />
                     )}
+                    {e.source === 'search' && (
+                      <Search
+                        className="size-3.5 shrink-0 text-ink-muted"
+                        aria-label="From the food database"
+                      />
+                    )}
                   </span>
                   {e.grams !== null && (
-                    <span className="tabular text-[13px] text-ink-muted">{gramsLabel(e.grams)} g</span>
+                    <span className="tabular text-[13px] text-ink-muted">
+                      {gramsLabel(e.grams)} g
+                    </span>
                   )}
                 </span>
                 <span className="tabular flex shrink-0 flex-col items-end gap-0.5 text-[13px]">

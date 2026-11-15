@@ -120,7 +120,8 @@ export type Equipment = (typeof EQUIPMENT)[number]
 export const TRACKING_TYPES = ['weight_reps', 'reps', 'time', 'distance_time'] as const
 export type TrackingType = (typeof TRACKING_TYPES)[number]
 
-export const ENROLLMENT_STATUS = ['active', 'completed', 'cancelled'] as const
+/** scheduled = queued to take over from the current program on its start date. */
+export const ENROLLMENT_STATUS = ['active', 'scheduled', 'completed', 'cancelled'] as const
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUS)[number]
 
 /**

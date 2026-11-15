@@ -1175,7 +1175,9 @@ function StopSheet({
             variant={doneCount > 0 ? 'ghost' : 'danger'}
             size="lg"
             block
-            className={doneCount > 0 ? 'text-danger hover:bg-danger/10 hover:text-danger' : undefined}
+            className={
+              doneCount > 0 ? 'text-danger hover:bg-danger/10 hover:text-danger' : undefined
+            }
             onClick={() => setSure(true)}
           >
             Cancel this workout

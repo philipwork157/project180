@@ -32,6 +32,8 @@
     "EMAIL_FROM": "Project 180 <hello@project180.co.za>",
     // Signed out after this many days without use (renewed while in use).
     "SESSION_DAYS": "7",
+    // Which Claude model builds workouts in the admin ("Build with Claude").
+    "WORKOUT_MODEL": "claude-sonnet-5-5",
     // Seconds a sign-in is trusted from its cookie before the database is asked again.
     // Signing someone out (or deleting them) takes up to this long to bite.
     "SESSION_CACHE_SECONDS": "60",
@@ -77,6 +79,8 @@
         "AWS_REGION": "af-south-1",
         "EMAIL_FROM": "Project 180 Dev <hello@project180.co.za>",
         "SESSION_DAYS": "7",
+        // Which Claude model builds workouts in the admin ("Build with Claude").
+        "WORKOUT_MODEL": "claude-sonnet-5-5",
         "SESSION_CACHE_SECONDS": "60",
         "STAFF_ONLY": "1",
         // Every email from dev goes to the developer, never to real people.

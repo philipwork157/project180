@@ -92,9 +92,7 @@ describe('the People list', () => {
     expect(all.people.every((p: Json) => p.email.startsWith('client'))).toBe(true)
     // The owner sees everyone; the team tab holds staff only.
     const staff = (await list(owner, 'view=team')).data
-    expect(staff.people.map((p: Json) => p.email).sort()).toEqual(
-      [ADMIN.email, COACH.email].sort(),
-    )
+    expect(staff.people.map((p: Json) => p.email).sort()).toEqual([ADMIN.email, COACH.email].sort())
     expect(staff.people.find((p: Json) => p.email === COACH.email).clientCount).toBe(KIM_CLIENTS)
     const clients = (await list(owner, 'view=clients')).data
     expect(clients.total).toBe(KIM_CLIENTS + 1)

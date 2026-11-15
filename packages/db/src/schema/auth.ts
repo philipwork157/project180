@@ -34,6 +34,10 @@ export const users = sqliteTable(
     lastSeenAt: timestamp('last_seen_at'),
     // Food photo estimates this person may take a day; null = the site default (app_settings).
     foodPhotosPerDay: integer('food_photos_per_day'),
+    // Set when staff block their access: no sign-in, no notifications; everything is kept.
+    blockedAt: timestamp('blocked_at'),
+    // How much water to drink a day, in ml; set by their coach or themselves. Null = no goal.
+    waterGoalMl: integer('water_goal_ml'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

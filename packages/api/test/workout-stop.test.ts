@@ -83,9 +83,9 @@ describe('cancelling a workout', () => {
       409,
     )
     const other = await start()
-    expect((await call(`/sessions/${other}/cancel`, { method: 'POST', cookie: admin })).status).toBe(
-      404,
-    )
+    expect(
+      (await call(`/sessions/${other}/cancel`, { method: 'POST', cookie: admin })).status,
+    ).toBe(404)
   })
 
   it('the coach can cancel a client’s open workout', async () => {

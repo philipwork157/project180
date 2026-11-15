@@ -9,9 +9,11 @@ import {
   type FoodDay,
   type FoodEntry,
   type FoodPhotoDraft,
+  type FoodSearchResult,
   type FoodSetup,
   type FoodSummary,
   foodPhotoHint,
+  foodSearchInput,
   isoDate,
   type NutritionTargets,
   nutritionTargetsInput,
@@ -31,6 +33,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { managedPerson, type Person } from '../access'
 import { barcodeProviders, lookupBarcode } from '../barcode'
+import { searchFoods, searchProviders } from '../barcode/search'
 import { insertMany, runAll } from '../batch'
 import type { AppEnv, Bindings } from '../env'
 import { conflict, notFound, parseBody, parseId } from '../errors'
@@ -42,6 +45,7 @@ import {
   PHOTO_TYPES,
   releasePhoto,
 } from '../food-photo'
+import { withinLimit } from '../rate-limit'
 import { foodPhotoSettings, foodPhotosAvailable, photoLimitFor } from '../settings'
 
 /** The longest range one summary may cover (a quarter). */
@@ -169,10 +173,7 @@ async function recentFoods(db: Db, userId: number, today: string): Promise<Recen
     })
     .from(foodEntries)
     .where(
-      and(
-        eq(foodEntries.userId, userId),
-        gte(foodEntries.date, addDays(today, -RECENT_FOOD_DAYS)),
-      ),
+      and(eq(foodEntries.userId, userId), gte(foodEntries.date, addDays(today, -RECENT_FOOD_DAYS))),
     )
     .orderBy(desc(foodEntries.date), desc(foodEntries.id))
     .limit(RECENT_SCAN)
@@ -200,6 +201,7 @@ export const meFoodRoutes = new Hono<AppEnv>()
       photos: available && perDay > 0,
       photosPerDay: perDay,
       barcode: barcodeProviders(c.env).length > 0,
+      search: searchProviders(c.env).length > 0,
     })
   })
   /** One day (today when no ?date). */
@@ -222,6 +224,16 @@ export const meFoodRoutes = new Hono<AppEnv>()
         message: 'We don’t know this product yet. Photograph its nutrition label instead.',
       })
     return c.json<{ product: BarcodeProduct }>({ product })
+  })
+  /** Foods by name (?q=egg), values per 100 g, from the providers or the saved search. */
+  .get('/search', async (c) => {
+    const q = parseQuery(foodSearchInput, c.req.query('q') ?? '')
+    // A search that isn't saved yet goes out to the providers: keep anyone from flooding them.
+    if (!(await withinLimit(c.env.SEND_LIMIT, `food-search:${c.var.user.id}`)))
+      throw new HTTPException(429, { message: 'Searching a lot. Please wait a minute.' })
+    return c.json<{ results: FoodSearchResult[] }>({
+      results: await searchFoods(c.var.db, c.env, q),
+    })
   })
   .get('/recent', async (c) => {
     const { db, user } = c.var

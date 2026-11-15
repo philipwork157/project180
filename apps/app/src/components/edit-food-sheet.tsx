@@ -7,7 +7,13 @@ import { FoodForm, MealPicker } from './food-form'
 import { Sheet } from './sheet'
 
 /** Change a food already logged (its numbers or its meal), or delete it. */
-export function EditFoodSheet({ entry, onClose }: { entry: FoodEntry | null; onClose: () => void }) {
+export function EditFoodSheet({
+  entry,
+  onClose,
+}: {
+  entry: FoodEntry | null
+  onClose: () => void
+}) {
   return (
     <Sheet open={entry !== null} onClose={onClose} label="Edit food">
       {entry && <EditFood key={entry.id} entry={entry} onDone={onClose} />}
@@ -34,7 +40,9 @@ function EditFood({ entry, onDone }: { entry: FoodEntry; onDone: () => void }) {
         submitLabel="Save changes"
         saving={update.isPending}
         error={update.isError ? 'Couldn’t save. Check your signal and try again.' : null}
-        onSubmit={({ clientUuid: _uuid, ...food }) => update.mutate({ id: entry.id, meal, ...food })}
+        onSubmit={({ clientUuid: _uuid, ...food }) =>
+          update.mutate({ id: entry.id, meal, ...food })
+        }
         extra={
           <Button
             variant="ghost"

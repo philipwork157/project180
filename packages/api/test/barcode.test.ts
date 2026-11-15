@@ -13,7 +13,9 @@ afterEach(() => {
 const CODE = '6001007000000'
 
 const off = (product: Json | null) =>
-  Response.json(product ? { status: 1, product } : { status: 0, status_verbose: 'product not found' })
+  Response.json(
+    product ? { status: 1, product } : { status: 0, status_verbose: 'product not found' },
+  )
 
 const rusks = {
   product_name: 'Buttermilk Rusks',

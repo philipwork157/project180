@@ -1,6 +1,7 @@
 // Site-wide switches the owner sets in the admin (app_settings, one row per key).
 import { appSettings, type Db, users } from '@project180/db'
 import {
+  type ClaudeFeatureSettings,
   DEFAULT_FOOD_PHOTOS_PER_DAY,
   type FoodPhotoSettings,
   isOwner,
@@ -76,3 +77,24 @@ export async function photoLimitFor(
   ])
   return row?.perDay ?? settings.perDay
 }
+
+const WORKOUT_BUILDER = 'workout_builder'
+
+/** The owner's switch for "Build with Claude" (on by default) and whether there's a Claude key. */
+export async function workoutBuilderSettings(
+  db: Db,
+  env: Bindings,
+): Promise<ClaudeFeatureSettings> {
+  const [row] = await db
+    .select({ value: appSettings.value, updatedAt: appSettings.updatedAt })
+    .from(appSettings)
+    .where(eq(appSettings.key, WORKOUT_BUILDER))
+  return {
+    enabled: row ? row.value !== 'off' : true,
+    configured: foodPhotosConfigured(env),
+    updatedAt: row?.updatedAt.toISOString() ?? null,
+  }
+}
+
+export const setWorkoutBuilder = (db: Db, enabled: boolean, ownerId: number) =>
+  setSetting(db, WORKOUT_BUILDER, enabled ? 'on' : 'off', ownerId)

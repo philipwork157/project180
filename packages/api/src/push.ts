@@ -234,7 +234,9 @@ export async function sendPush(
     const gone = targets.filter((_, i) => results[i] === 'gone').map((t) => t.id)
     await runAll(
       db,
-      chunk(gone).map((ids) => db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, ids))),
+      chunk(gone).map((ids) =>
+        db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, ids)),
+      ),
     )
     return { sent: results.filter((r) => r === 'sent').length }
   } catch (err) {

@@ -1,9 +1,9 @@
 import { planQuery } from '@project180/client'
-import type { PlanDay } from '@project180/shared'
+import { formatDay, type PlanDay } from '@project180/shared'
 import { Button, cn, EmptyState } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { CalendarDays, Check, Moon, Play, Scale } from 'lucide-react'
+import { CalendarClock, CalendarDays, Check, Moon, Play, Scale } from 'lucide-react'
 import { useState } from 'react'
 import { ScreenHeader } from '../../components/screen-header'
 import { SessionDetails } from '../../components/session-details'
@@ -131,6 +131,28 @@ function CalendarPage() {
           )
         })}
       </div>
+
+      {p.next && (
+        <section
+          aria-label="Up next"
+          className="flex w-full items-center gap-3 rounded-lg border-[1.5px] border-brand/40 border-dashed bg-surface p-4"
+        >
+          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-brand-soft text-brand-text">
+            <CalendarClock className="size-5" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+              Up next
+            </p>
+            <p className="mt-1 truncate font-bold text-[15px]">{p.next.programName}</p>
+            <p className="font-semibold text-[13px] text-ink-muted">
+              Starts {formatDay(p.next.startDate)} · {p.next.durationWeeks}{' '}
+              {p.next.durationWeeks === 1 ? 'week' : 'weeks'}. Your calendar switches over by
+              itself.
+            </p>
+          </div>
+        </section>
+      )}
 
       <Sheet open={selected !== null} onClose={() => setSelected(null)} label="Day details">
         {selected && (

@@ -1,9 +1,12 @@
 import { ApiError, api, personProgressQuery } from '@project180/client'
 import {
+  formatDay,
   formatNumber,
   type PastProgram,
   type PersonProgress,
   type PlanDay,
+  programEndDate,
+  type UpcomingProgram,
 } from '@project180/shared'
 import {
   Button,
@@ -28,6 +31,7 @@ import {
   ChevronRight,
   Dumbbell,
   History,
+  ListPlus,
   Moon,
   Pencil,
   RotateCcw,
@@ -75,7 +79,7 @@ export function PersonProgressPanel({
       </p>
     )
 
-  const { progress, past } = query.data
+  const { progress, upcoming, past } = query.data
   return (
     <div className="flex flex-col gap-6">
       {progress ? (
@@ -98,6 +102,15 @@ export function PersonProgressPanel({
             Assign program
           </Button>
         </div>
+      )}
+      {(progress || upcoming.length > 0) && (
+        <UpNext
+          upcoming={upcoming}
+          userId={userId}
+          name={name}
+          after={progress?.plan.enrollment.programName ?? null}
+          onAssign={onAssign}
+        />
       )}
       {past.length > 0 && (
         <PastPrograms
@@ -296,7 +309,7 @@ function CurrentProgram({
                     <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       <span className="min-w-0 flex-1 truncate font-bold text-[14px]">
                         {s.workoutName ?? 'Workout'}
-<SessionStatusTag status={s.status} />
+                        <SessionStatusTag status={s.status} />
                       </span>
                       <span className="tabular font-semibold text-[13px] text-ink-muted">
                         {relativeDay(s.startedAt)} · {s.setCount}{' '}
@@ -352,12 +365,7 @@ function CurrentProgram({
         description={`${plan.enrollment.programName} for ${name}`}
       >
         {moving && (
-          <StartDateForm
-            userId={userId}
-            name={name}
-            progress={p}
-            onDone={() => setMoving(false)}
-          />
+          <StartDateForm userId={userId} name={name} progress={p} onDone={() => setMoving(false)} />
         )}
       </Drawer>
       <ResetProgramDialog
@@ -603,7 +611,141 @@ function ArchiveProgramDialog({
   )
 }
 
-/** Archived (or replaced) programs, each with its history; re-enable or delete. */
+/**
+ * Programs lined up after the current one. Each takes over by itself on its start date; the
+ * current program and everything logged on it move to Past programs.
+ */
+function UpNext({
+  upcoming,
+  userId,
+  name,
+  after,
+  onAssign,
+}: {
+  upcoming: UpcomingProgram[]
+  userId: number
+  name: string
+  /** The current program's name, when there is one. */
+  after: string | null
+  onAssign: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [removing, setRemoving] = useState<UpcomingProgram | null>(null)
+  const firstName = firstNameOf(name)
+  const remove = useMutation({
+    mutationFn: (enrollmentId: number) =>
+      api(`/admin/users/${userId}/enrollments/${enrollmentId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void invalidatePerson(queryClient, userId)
+      toast({
+        title: 'Taken off the list',
+        description: `${removing?.programName ?? 'It'} won’t start for ${firstName}.`,
+      })
+      setRemoving(null)
+    },
+  })
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="flex items-center gap-2 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.1em]">
+        <CalendarClock className="size-3.5" aria-hidden />
+        Up next
+      </h3>
+      {upcoming.length === 0 ? (
+        <div className="flex flex-col items-start gap-3 rounded-md border-[1.5px] border-border-strong border-dashed p-4 sm:flex-row sm:items-center">
+          <p className="min-w-0 flex-1 text-[14px] text-ink-muted">
+            Nothing lined up after {after ?? 'this'}. Plan the next program now and it takes over by
+            itself on its start date; {firstName}’s history is kept.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<ListPlus className="size-4" aria-hidden />}
+            onClick={onAssign}
+          >
+            Plan next program
+          </Button>
+        </div>
+      ) : (
+        <ul className="flex w-full flex-col gap-2">
+          {upcoming.map((x, i) => (
+            <li
+              key={x.enrollmentId}
+              className="flex flex-wrap items-center gap-3 rounded-md border-[1.5px] border-brand/40 border-dashed bg-surface-raised p-4"
+            >
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-soft font-display font-extrabold text-[15px] text-brand-text tabular">
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-bold text-[15px]">{x.programName}</p>
+                <p className="mt-0.5 font-semibold text-[13px] text-ink-muted">
+                  {formatDay(x.startDate)} –{' '}
+                  {formatDay(programEndDate(x.startDate, x.durationWeeks))} · {x.durationWeeks}{' '}
+                  {x.durationWeeks === 1 ? 'week' : 'weeks'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <Link
+                  to="/programs/$programId"
+                  params={{ programId: String(x.programId) }}
+                  className={buttonClasses('secondary', 'sm')}
+                >
+                  <Pencil className="size-4" aria-hidden />
+                  Edit
+                </Link>
+                <IconButton
+                  label="Take it off the list"
+                  tone="danger"
+                  size="sm"
+                  icon={<Trash2 aria-hidden />}
+                  onClick={() => setRemoving(x)}
+                />
+              </div>
+            </li>
+          ))}
+          <li>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<ListPlus className="size-4" aria-hidden />}
+              onClick={onAssign}
+            >
+              Line up another
+            </Button>
+          </li>
+        </ul>
+      )}
+      <ConfirmDialog
+        open={removing !== null}
+        title={`Take ${removing?.programName ?? 'it'} off ${firstName}’s list?`}
+        confirmLabel="Take it off"
+        loading={remove.isPending}
+        onConfirm={() => removing && remove.mutate(removing.enrollmentId)}
+        onClose={() => {
+          remove.reset()
+          setRemoving(null)
+        }}
+      >
+        <p>
+          It won’t start on {removing ? formatDay(removing.startDate) : 'its start date'}.{' '}
+          {firstName} hasn’t logged anything on it yet, and the program stays in your library.
+        </p>
+        {remove.isError && (
+          <p role="alert" className="mt-3 font-semibold text-danger">
+            {remove.error instanceof ApiError
+              ? remove.error.message
+              : 'Could not take it off. Try again.'}
+          </p>
+        )}
+      </ConfirmDialog>
+    </section>
+  )
+}
+
+/** How many of a past program's workouts show before "Show all". */
+const PAST_PREVIEW = 5
+
+/** Finished, archived or replaced programs, each with its history; re-enable or delete. */
 function PastPrograms({
   past,
   userId,
@@ -619,6 +761,7 @@ function PastPrograms({
 }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState<number | null>(null)
+  const [showAll, setShowAll] = useState(false)
   const [deleting, setDeleting] = useState<PastProgram | null>(null)
   const firstName = firstNameOf(name)
   const restore = useMutation({
@@ -655,12 +798,21 @@ function PastPrograms({
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-2 font-bold text-[15px]">
                     <span className="truncate">{x.programName}</span>
-                    <span className="rounded-pill bg-surface px-2 py-0.5 font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.12em]">
-                      Archived
+                    <span
+                      className={cn(
+                        'shrink-0 rounded-pill px-2 py-0.5 font-extrabold text-[10px] uppercase tracking-[0.12em]',
+                        x.status === 'completed'
+                          ? 'bg-brand-soft text-brand-text'
+                          : 'bg-surface text-ink-muted',
+                      )}
+                    >
+                      {x.status === 'completed' ? 'Finished' : 'Archived'}
                     </span>
                   </p>
                   <p className="mt-0.5 font-semibold text-[13px] text-ink-muted">
-                    Started {shortDate(x.startDate)} · archived {shortDate(x.endedAt.slice(0, 10))}
+                    Started {shortDate(x.startDate)} ·{' '}
+                    {x.status === 'completed' ? 'finished' : 'archived'}{' '}
+                    {shortDate(x.endedAt.slice(0, 10))}
                   </p>
                   <p className="mt-1.5 font-semibold text-[13px]">
                     <span className="tabular">{x.workouts}</span>{' '}
@@ -700,7 +852,10 @@ function PastPrograms({
                   <button
                     type="button"
                     aria-expanded={expanded}
-                    onClick={() => setOpen(expanded ? null : x.enrollmentId)}
+                    onClick={() => {
+                      setOpen(expanded ? null : x.enrollmentId)
+                      setShowAll(false)
+                    }}
                     className="mt-2 inline-flex items-center gap-1 font-bold text-[13px] text-brand-text hover:underline"
                   >
                     <ChevronDown
@@ -711,7 +866,7 @@ function PastPrograms({
                   </button>
                   {expanded && (
                     <ul className="mt-2 divide-y divide-border overflow-hidden rounded-sm bg-surface">
-                      {x.recent.map((s) => (
+                      {(showAll ? x.recent : x.recent.slice(0, PAST_PREVIEW)).map((s) => (
                         <li key={s.id}>
                           <button
                             type="button"
@@ -723,7 +878,7 @@ function PastPrograms({
                             </span>
                             <span className="min-w-0 flex-1 truncate font-bold">
                               {s.workoutName ?? 'Workout'}
-<SessionStatusTag status={s.status} />
+                              <SessionStatusTag status={s.status} />
                             </span>
                             <span className="tabular text-ink-muted">
                               {s.setCount} {s.setCount === 1 ? 'set' : 'sets'} ·{' '}
@@ -734,11 +889,23 @@ function PastPrograms({
                           </button>
                         </li>
                       ))}
-                      {x.workouts > x.recent.length && (
-                        <li className="px-3 py-2 font-semibold text-[12px] text-ink-muted">
-                          The last {x.recent.length} of {x.workouts} workouts.
+                      {!showAll && x.recent.length > PAST_PREVIEW && (
+                        <li>
+                          <button
+                            type="button"
+                            onClick={() => setShowAll(true)}
+                            className="flex min-h-11 w-full items-center px-3 py-2 font-bold text-[13px] text-brand-text hover:bg-surface-raised"
+                          >
+                            Show all {x.recent.length} workouts
+                          </button>
                         </li>
                       )}
+                      {(showAll || x.recent.length <= PAST_PREVIEW) &&
+                        x.workouts > x.recent.length && (
+                          <li className="px-3 py-2 font-semibold text-[12px] text-ink-muted">
+                            The last {x.recent.length} of {x.workouts} workouts.
+                          </li>
+                        )}
                     </ul>
                   )}
                 </>

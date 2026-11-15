@@ -23,7 +23,7 @@ import type { BatchItem } from 'drizzle-orm/batch'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import { managedUsers } from '../access'
+import { coachedUsers } from '../access'
 import { chunk, inChunks, insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
@@ -31,11 +31,7 @@ import { assertCanEditItem, libraryOnly, visibleTo } from '../library'
 import { requireAdmin, requireUser } from '../middleware'
 import { programImpact, purgeProgram } from '../purge'
 import { pushLater } from '../push'
-import {
-  clientNames,
-  copyWorkoutForClient,
-  workoutCopyValues,
-} from './workouts'
+import { clientNames, copyWorkoutForClient, workoutCopyValues } from './workouts'
 
 type ProgramRow = typeof programs.$inferSelect
 type ProgramInputParsed = ReturnType<typeof programInput.parse>
@@ -446,79 +442,79 @@ export async function syncClientCopies(db: Db, copyIds: number[], actorId: numbe
   )
   const createdIds: number[] = []
   try {
-  for (const part of chunkList(toCreate, 500)) {
-    const [first, ...rest] = part.map((t) =>
-      db
-        .insert(workouts)
-        .values(workoutCopyValues(t.source, t.plan.clientId, actorId))
-        .returning({ id: workouts.id }),
-    )
-    if (!first) continue
-    const made = (await db.batch([first, ...rest])) as Array<Array<{ id: number }>>
-    createdIds.push(...made.map((r) => r[0]?.id as number))
-  }
-  const newCopyOf = new Map<string, number>()
-  toCreate.forEach((t, i) => {
-    newCopyOf.set(`${t.plan.copy.id}:${t.from}`, createdIds[i] as number)
-  })
-
-  // 4. Everything else in one batch: workout contents, schedules, names, leftovers.
-  const rowsFor = (from: number, to: number) => [
-    ...insertMany(
-      db,
-      workoutExercises,
-      (itemsOf.get(from) ?? []).map(({ id: _id, ...r }) => ({ ...r, workoutId: to })),
-    ),
-    ...insertMany(
-      db,
-      workoutGroups,
-      (groupsOf.get(from) ?? []).map(({ id: _id, ...r }) => ({ ...r, workoutId: to })),
-    ),
-  ]
-  const statements: BatchItem<'sqlite'>[] = []
-  const now = new Date()
-  for (const p of plans) {
-    const map = new Map<number, number>()
-    for (const { from, to } of p.rewrite) {
-      const source = workoutOf.get(from) as WorkoutRow
-      map.set(from, to)
-      statements.push(
+    for (const part of chunkList(toCreate, 500)) {
+      const [first, ...rest] = part.map((t) =>
         db
-          .update(workouts)
+          .insert(workouts)
+          .values(workoutCopyValues(t.source, t.plan.clientId, actorId))
+          .returning({ id: workouts.id }),
+      )
+      if (!first) continue
+      const made = (await db.batch([first, ...rest])) as Array<Array<{ id: number }>>
+      createdIds.push(...made.map((r) => r[0]?.id as number))
+    }
+    const newCopyOf = new Map<string, number>()
+    toCreate.forEach((t, i) => {
+      newCopyOf.set(`${t.plan.copy.id}:${t.from}`, createdIds[i] as number)
+    })
+
+    // 4. Everything else in one batch: workout contents, schedules, names, leftovers.
+    const rowsFor = (from: number, to: number) => [
+      ...insertMany(
+        db,
+        workoutExercises,
+        (itemsOf.get(from) ?? []).map(({ id: _id, ...r }) => ({ ...r, workoutId: to })),
+      ),
+      ...insertMany(
+        db,
+        workoutGroups,
+        (groupsOf.get(from) ?? []).map(({ id: _id, ...r }) => ({ ...r, workoutId: to })),
+      ),
+    ]
+    const statements: BatchItem<'sqlite'>[] = []
+    const now = new Date()
+    for (const p of plans) {
+      const map = new Map<number, number>()
+      for (const { from, to } of p.rewrite) {
+        const source = workoutOf.get(from) as WorkoutRow
+        map.set(from, to)
+        statements.push(
+          db
+            .update(workouts)
+            .set({
+              name: source.name,
+              description: source.description,
+              estimatedMinutes: source.estimatedMinutes,
+            })
+            .where(eq(workouts.id, to)),
+          db.delete(workoutExercises).where(eq(workoutExercises.workoutId, to)),
+          db.delete(workoutGroups).where(eq(workoutGroups.workoutId, to)),
+          ...rowsFor(from, to),
+        )
+      }
+      for (const from of p.create) {
+        const to = newCopyOf.get(`${p.copy.id}:${from}`) as number
+        map.set(from, to)
+        statements.push(...rowsFor(from, to))
+      }
+      statements.push(
+        ...dayStatements(db, p.copy.id, p.source.id, p.sourceDays, map),
+        db
+          .update(programs)
           .set({
-            name: source.name,
-            description: source.description,
-            estimatedMinutes: source.estimatedMinutes,
+            name: p.source.name,
+            description: p.source.description,
+            durationWeeks: p.source.durationWeeks,
+            syncedAt: now,
           })
-          .where(eq(workouts.id, to)),
-        db.delete(workoutExercises).where(eq(workoutExercises.workoutId, to)),
-        db.delete(workoutGroups).where(eq(workoutGroups.workoutId, to)),
-        ...rowsFor(from, to),
+          .where(eq(programs.id, p.copy.id)),
+        ...unusedClientWorkouts(
+          db,
+          p.oldIds.filter((w) => !new Set(map.values()).has(w)),
+          p.clientId,
+        ),
       )
     }
-    for (const from of p.create) {
-      const to = newCopyOf.get(`${p.copy.id}:${from}`) as number
-      map.set(from, to)
-      statements.push(...rowsFor(from, to))
-    }
-    statements.push(
-      ...dayStatements(db, p.copy.id, p.source.id, p.sourceDays, map),
-      db
-        .update(programs)
-        .set({
-          name: p.source.name,
-          description: p.source.description,
-          durationWeeks: p.source.durationWeeks,
-          syncedAt: now,
-        })
-        .where(eq(programs.id, p.copy.id)),
-      ...unusedClientWorkouts(
-        db,
-        p.oldIds.filter((w) => !new Set(map.values()).has(w)),
-        p.clientId,
-      ),
-    )
-  }
     await runAll(db, statements)
   } catch (err) {
     // Take back the copies made in step 3 (their rows and groups go with them).
@@ -646,7 +642,7 @@ export async function programCopies(
         and(
           eq(enrollments.status, 'active'),
           eq(programs.sourceProgramId, libraryId),
-          managedUsers(user),
+          coachedUsers(user),
         ),
       )
       .orderBy(asc(users.name)),
@@ -717,6 +713,18 @@ function programValues(input: ProgramInputParsed) {
   }
 }
 
+/** A new library program with its schedule (the "New program" save and Build with Claude). */
+export async function createProgram(db: Db, user: Me, input: ProgramInputParsed) {
+  await assertWorkoutsUsable(db, user, input)
+  const [row] = await db
+    .insert(programs)
+    .values({ ...programValues(input), createdBy: user.id })
+    .returning()
+  if (!row) throw new Error('Insert returned no row')
+  await writeDays(db, row.id, input)
+  return row
+}
+
 export const programRoutes = new Hono<AppEnv>()
   .use(requireUser, requireAdmin)
   /** The library (clients' personal copies are left out; they live on each person). */
@@ -755,13 +763,7 @@ export const programRoutes = new Hono<AppEnv>()
   })
   .post('/', async (c) => {
     const input = await parseBody(c.req.raw, programInput)
-    await assertWorkoutsUsable(c.var.db, c.var.user, input)
-    const [row] = await c.var.db
-      .insert(programs)
-      .values({ ...programValues(input), createdBy: c.var.user.id })
-      .returning()
-    if (!row) throw new Error('Insert returned no row')
-    await writeDays(c.var.db, row.id, input)
+    const row = await createProgram(c.var.db, c.var.user, input)
     return c.json({ program: await programDetail(c.var.db, row) }, 201)
   })
   .put('/:id', async (c) => {
@@ -820,7 +822,7 @@ export const programRoutes = new Hono<AppEnv>()
       db
         .select({ id: users.id })
         .from(users)
-        .where(and(inArray(users.id, slice), managedUsers(user))),
+        .where(and(inArray(users.id, slice), coachedUsers(user))),
     )
     if (managed.length !== people.length) notFound('Enrollment not found')
     await syncClientCopies(

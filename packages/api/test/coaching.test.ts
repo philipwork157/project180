@@ -604,3 +604,122 @@ describe('deleting a person', () => {
     expect(progress.data.progress.plan.enrollment.sourceProgramId).toBe(program.id)
   })
 })
+
+describe('programs and workouts stay private', () => {
+  it("one owner never sees, changes or assigns another owner's workouts and programs", async () => {
+    const { owner, byEmail } = await team()
+    const OTHER = { name: 'Other Owner', email: 'other@example.com', password: 'other-password-1' }
+    await createAdmin(OTHER)
+    const other = await signIn(OTHER.email, OTHER.password)
+    const { workout, program, exerciseId } = await workoutAndProgram(owner)
+
+    const list = async (path: string, key: string) =>
+      (await call<Json>(path, { cookie: other })).data[key].map((r: Json) => r.id)
+    expect(await list('/workouts', 'workouts')).not.toContain(workout.id)
+    expect(await list('/programs', 'programs')).not.toContain(program.id)
+    expect((await call(`/workouts/${workout.id}`, { cookie: other })).status).toBe(404)
+    expect((await call(`/programs/${program.id}`, { cookie: other })).status).toBe(404)
+    const edit = await call(`/workouts/${workout.id}`, {
+      method: 'PUT',
+      cookie: other,
+      body: { name: 'Mine now', exercises: [] },
+    })
+    expect(edit.status).toBe(404)
+    expect(
+      (await call(`/workouts/${workout.id}`, { method: 'DELETE', cookie: other })).status,
+    ).toBe(404)
+    const wife = await byEmail(MEMBER.email)
+    const assign = await call('/enrollments', {
+      method: 'POST',
+      cookie: other,
+      body: { userId: wife.id, programId: program.id, startDate: '2026-11-09' },
+    })
+    expect(assign.status).toBe(404)
+    const start = await call('/sessions', {
+      method: 'POST',
+      cookie: other,
+      body: { clientUuid: crypto.randomUUID(), workoutId: workout.id },
+    })
+    expect(start.status).toBe(404)
+
+    // Exercises stay shared with all staff, and the creator still sees their own.
+    expect(await list('/exercises', 'exercises')).toContain(exerciseId)
+    expect((await call(`/workouts/${workout.id}`, { cookie: owner })).status).toBe(200)
+  })
+
+  it("an owner never sees or changes another coach's client's program and workouts", async () => {
+    const { owner, coach, byEmail } = await team()
+    const sam = await byEmail(CLIENT.email)
+    const kim = await byEmail(COACH.email)
+    const { program, workout } = await workoutAndProgram(coach)
+    const enrol = await call<Json>('/enrollments', {
+      method: 'POST',
+      cookie: coach,
+      body: { userId: sam.id, programId: program.id, startDate: '2026-11-09' },
+    })
+    expect(enrol.status).toBe(201)
+    const copyId = enrol.data.enrollment.programId as number
+    const plan = await call<Json>(`/admin/users/${sam.id}/progress`, { cookie: coach })
+    expect(plan.status).toBe(200)
+    const copyWorkout = plan.data.progress.plan.days.find((d: Json) => d.workoutId).workoutId
+
+    // Kim (their coach) sees it all; the owner sees none of it.
+    for (const path of [
+      `/programs/${program.id}`,
+      `/programs/${copyId}`,
+      `/workouts/${workout.id}`,
+      `/workouts/${copyWorkout}`,
+      `/workouts?clientId=${sam.id}`,
+      `/admin/users/${sam.id}/progress`,
+      `/admin/users/${sam.id}/stats`,
+    ]) {
+      expect((await call(path, { cookie: coach })).status, path).toBe(200)
+      expect((await call(path, { cookie: owner })).status, path).toBe(404)
+    }
+    const theirs = (await call<Json>('/enrollments', { cookie: owner })).data.enrollments
+    expect(theirs.map((e: Json) => e.userId)).not.toContain(sam.id)
+    const ownerList = (await call<Json>('/programs', { cookie: owner })).data.programs
+    expect(ownerList.map((p: Json) => p.id)).not.toContain(copyId)
+
+    // Nor can the owner change their program, give them one, or take it away.
+    const mine = await workoutAndProgram(owner)
+    const assign = await call('/enrollments', {
+      method: 'POST',
+      cookie: owner,
+      body: { userId: sam.id, programId: mine.program.id, startDate: '2026-11-09' },
+    })
+    expect(assign.status).toBe(404)
+    for (const [method, path] of [
+      ['DELETE', `/enrollments/${enrol.data.enrollment.id}`],
+      ['DELETE', `/admin/users/${sam.id}/program`],
+      ['POST', `/admin/users/${sam.id}/program/archive`],
+    ] as const) {
+      expect((await call(path, { method, cookie: owner })).status, path).toBe(404)
+    }
+    const edit = await call(`/programs/${copyId}`, {
+      method: 'PUT',
+      cookie: owner,
+      body: { name: 'Changed', durationWeeks: 1, days: [] },
+    })
+    expect(edit.status).toBe(404)
+    // ...and can't hand a new client of Kim's a program either: Kim does that.
+    const added = await call('/admin/users', {
+      method: 'POST',
+      cookie: owner,
+      body: {
+        name: 'Ann',
+        email: 'ann@example.com',
+        password: 'client-password-3',
+        coachId: kim.id,
+        program: { programId: mine.program.id, startDate: '2026-11-09' },
+      },
+    })
+    expect(added.status).toBe(400)
+
+    // The owner still manages the account itself (activity, coach, password).
+    expect((await call(`/admin/users/${sam.id}/activity`, { cookie: owner })).status).toBe(200)
+    // Their plan is untouched.
+    const still = await call<Json>(`/admin/users/${sam.id}/progress`, { cookie: coach })
+    expect(still.data.progress.plan.enrollment.programId).toBe(copyId)
+  })
+})

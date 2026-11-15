@@ -317,8 +317,8 @@ function CancelWorkout({
         onConfirm={() => cancel.mutate()}
         onClose={() => setOpen(false)}
       >
-        For a workout started by accident or left open. It won’t count or show in {first}’s
-        history; you’ll still see it here as cancelled.
+        For a workout started by accident or left open. It won’t count or show in {first}’s history;
+        you’ll still see it here as cancelled.
       </ConfirmDialog>
     </>
   )

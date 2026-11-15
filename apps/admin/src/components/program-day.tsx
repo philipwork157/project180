@@ -70,9 +70,7 @@ function DayForm({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-3 rounded-md bg-surface-raised p-4">
-        <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
-          Now
-        </p>
+        <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">Now</p>
         <div className="flex flex-wrap items-center gap-3">
           <span className="min-w-0 flex-1 font-bold text-[17px]">
             {current?.name ?? (archived ? 'Archived workout' : 'Rest day')}

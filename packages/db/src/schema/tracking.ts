@@ -31,6 +31,8 @@ export const enrollments = sqliteTable(
     status: text('status', { enum: ENROLLMENT_STATUS }).notNull().default('active'),
     assignedBy: integer('assigned_by').references(() => users.id),
     completedAt: timestamp('completed_at'),
+    /** When a queued program took over from the previous one (null if it started on assignment). */
+    startedAt: timestamp('started_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -42,6 +44,12 @@ export const enrollments = sqliteTable(
     index('enrollments_assigned_by_idx').on(t.assignedBy),
     // At most one active program per person.
     uniqueIndex('enrollments_one_active_uq').on(t.userId).where(sql`${t.status} = 'active'`),
+    // Queued programs: at most one starting on any day per person.
+    uniqueIndex('enrollments_one_scheduled_per_day_uq')
+      .on(t.userId, t.startDate)
+      .where(sql`${t.status} = 'scheduled'`),
+    // The daily switch-over finds every queued program whose start date has come.
+    index('enrollments_status_start_idx').on(t.status, t.startDate),
   ],
 )
 

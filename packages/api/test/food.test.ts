@@ -3,12 +3,7 @@ import { createDb } from '@project180/db'
 import { todayIn } from '@project180/shared'
 import { HTTPException } from 'hono/http-exception'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  claimPhoto,
-  estimateFoodPhoto,
-  parseFoodPhotoReply,
-  releasePhoto,
-} from '../src/food-photo'
+import { claimPhoto, estimateFoodPhoto, parseFoodPhotoReply, releasePhoto } from '../src/food-photo'
 import { foodPhotosAvailable, photoLimitFor } from '../src/settings'
 import { ADMIN, call, createAdmin, MEMBER, setupHousehold, signIn, signInAsIs } from './helpers'
 
@@ -124,7 +119,9 @@ describe('food log privacy', () => {
     const { admin, member } = await setupHousehold()
     const mine = await addFood(admin, { entries: [food({ name: 'Coach lunch' })] })
     const id = mine.data.day.entries[0].id
-    expect((await call(`/me/food/${id}`, { method: 'PATCH', cookie: member, body: { kcal: 1 } })).status).toBe(404)
+    expect(
+      (await call(`/me/food/${id}`, { method: 'PATCH', cookie: member, body: { kcal: 1 } })).status,
+    ).toBe(404)
     expect((await call(`/me/food/${id}`, { method: 'DELETE', cookie: member })).status).toBe(404)
     const theirs = await call<Json>(`/me/food?date=${DAY}`, { cookie: member })
     expect(theirs.data.day.entries).toEqual([])
@@ -134,7 +131,11 @@ describe('food log privacy', () => {
     await createAdmin()
     const owner = await signIn(ADMIN.email, ADMIN.password)
     await call('/admin/users', { method: 'POST', cookie: owner, body: { ...COACH, role: 'admin' } })
-    const created = await call<Json>('/admin/users', { method: 'POST', cookie: owner, body: MEMBER })
+    const created = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie: owner,
+      body: MEMBER,
+    })
     const clientId = created.data.user.id
     const client = await signIn(MEMBER.email, MEMBER.password)
     const coach = await signIn(COACH.email, COACH.password)
@@ -142,16 +143,28 @@ describe('food log privacy', () => {
 
     const seen = await call<Json>(`/admin/users/${clientId}/food?date=${DAY}`, { cookie: owner })
     expect(seen.data.day.entries).toHaveLength(1)
-    expect((await call(`/admin/users/${clientId}/food?date=${DAY}`, { cookie: coach })).status).toBe(404)
+    expect(
+      (await call(`/admin/users/${clientId}/food?date=${DAY}`, { cookie: coach })).status,
+    ).toBe(404)
     const targets = { kcal: 2100, proteinG: 140 }
     expect(
-      (await call(`/admin/users/${clientId}/nutrition-targets`, { method: 'PUT', cookie: coach, body: targets }))
-        .status,
+      (
+        await call(`/admin/users/${clientId}/nutrition-targets`, {
+          method: 'PUT',
+          cookie: coach,
+          body: targets,
+        })
+      ).status,
     ).toBe(404)
     // A client can't reach the admin routes at all, not even for themselves.
     expect(
-      (await call(`/admin/users/${clientId}/nutrition-targets`, { method: 'PUT', cookie: client, body: targets }))
-        .status,
+      (
+        await call(`/admin/users/${clientId}/nutrition-targets`, {
+          method: 'PUT',
+          cookie: client,
+          body: targets,
+        })
+      ).status,
     ).toBe(403)
   })
 })
@@ -176,8 +189,13 @@ describe('nutrition targets', () => {
     const day = await call<Json>('/me/food', { cookie: member })
     expect(day.data.day.targets).toMatchObject({ kcal: 2000, proteinG: 150, carbsG: null })
     expect(
-      (await call(`/admin/users/${id}/nutrition-targets`, { method: 'PUT', cookie: admin, body: { kcal: 100, proteinG: 150 } }))
-        .status,
+      (
+        await call(`/admin/users/${id}/nutrition-targets`, {
+          method: 'PUT',
+          cookie: admin,
+          body: { kcal: 100, proteinG: 150 },
+        })
+      ).status,
     ).toBe(400)
     await call(`/admin/users/${id}/nutrition-targets`, { method: 'DELETE', cookie: admin })
     expect((await call<Json>('/me/food', { cookie: member })).data.day.targets).toBeNull()
@@ -188,7 +206,7 @@ describe('food photos', () => {
   it('without a Claude key the app is told photos are off, and the photo route never calls out', async () => {
     const { member } = await setupHousehold()
     const setup = await call<Json>('/me/food/setup', { cookie: member })
-    expect(setup.data).toEqual({ photos: false, photosPerDay: 10, barcode: true })
+    expect(setup.data).toEqual({ photos: false, photosPerDay: 10, barcode: true, search: true })
     const spy = vi.spyOn(globalThis, 'fetch')
     const form = new FormData()
     form.set('photo', new File([new Uint8Array([1, 2, 3])], 'meal.jpg', { type: 'image/jpeg' }))
@@ -233,8 +251,24 @@ describe('food photos', () => {
     expect(draft).toEqual({
       kind: 'meal',
       items: [
-        { name: 'Pap', grams: 250.4, kcal: 291, proteinG: 6, carbsG: 63, fatG: 1, confidence: 'medium' },
-        { name: 'Boerewors', grams: 120, kcal: 5000, proteinG: 0, carbsG: null, fatG: 30, confidence: 'low' },
+        {
+          name: 'Pap',
+          grams: 250.4,
+          kcal: 291,
+          proteinG: 6,
+          carbsG: 63,
+          fatG: 1,
+          confidence: 'medium',
+        },
+        {
+          name: 'Boerewors',
+          grams: 120,
+          kcal: 5000,
+          proteinG: 0,
+          carbsG: null,
+          fatG: 30,
+          confidence: 'low',
+        },
       ],
       label: null,
       note: 'Oil is hard to see.',
@@ -246,7 +280,15 @@ describe('food photos', () => {
       JSON.stringify({
         kind: 'label',
         items: [
-          { name: 'Muesli', grams: 45, kcal: 171, protein_g: 5.6, carbs_g: 28.8, fat_g: 3.2, confidence: 'high' },
+          {
+            name: 'Muesli',
+            grams: 45,
+            kcal: 171,
+            protein_g: 5.6,
+            carbs_g: 28.8,
+            fat_g: 3.2,
+            confidence: 'high',
+          },
         ],
         label: { per_100g: { kcal: 380, protein_g: 12.5, carbs_g: 64, fat_g: 7.2 }, serving_g: 45 },
         note: null,
@@ -257,7 +299,22 @@ describe('food photos', () => {
       servingG: 45,
     })
     const shoe = parseFoodPhotoReply(
-      JSON.stringify({ kind: 'not_food', items: [{ name: 'Shoe', grams: null, kcal: 1, protein_g: 0, carbs_g: null, fat_g: null, confidence: 'low' }], label: null, note: null }),
+      JSON.stringify({
+        kind: 'not_food',
+        items: [
+          {
+            name: 'Shoe',
+            grams: null,
+            kcal: 1,
+            protein_g: 0,
+            carbs_g: null,
+            fat_g: null,
+            confidence: 'low',
+          },
+        ],
+        label: null,
+        note: null,
+      }),
     )
     expect(shoe?.items).toEqual([])
     expect(parseFoodPhotoReply('not json')).toBeNull()
@@ -267,7 +324,17 @@ describe('food photos', () => {
   it('sends the photo to Claude and turns the answer into a draft', async () => {
     const answer = {
       kind: 'meal',
-      items: [{ name: 'Biltong', grams: 50, kcal: 140, protein_g: 27, carbs_g: 1, fat_g: 3, confidence: 'high' }],
+      items: [
+        {
+          name: 'Biltong',
+          grams: 50,
+          kcal: 140,
+          protein_g: 27,
+          carbs_g: 1,
+          fat_g: 3,
+          confidence: 'high',
+        },
+      ],
       label: null,
       note: null,
     }
@@ -285,7 +352,15 @@ describe('food photos', () => {
       '50 g packet',
     )
     expect(draft.items).toEqual([
-      { name: 'Biltong', grams: 50, kcal: 140, proteinG: 27, carbsG: 1, fatG: 3, confidence: 'high' },
+      {
+        name: 'Biltong',
+        grams: 50,
+        kcal: 140,
+        proteinG: 27,
+        carbsG: 1,
+        fatG: 3,
+        confidence: 'high',
+      },
     ])
     expect(calls[0]?.url).toBe('https://api.anthropic.com/v1/messages')
     const headers = new Headers(calls[0]?.init.headers)
@@ -309,7 +384,10 @@ describe('food photos', () => {
     )
     await expect(estimateFoodPhoto(keyed, photo, '')).rejects.toMatchObject({ status: 502 })
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      Response.json({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'A plate of food' }] }),
+      Response.json({
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'A plate of food' }],
+      }),
     )
     await expect(estimateFoodPhoto(keyed, photo, '')).rejects.toBeInstanceOf(HTTPException)
     await expect(estimateFoodPhoto(env, photo, '')).rejects.toMatchObject({ status: 503 })
@@ -379,7 +457,11 @@ describe('food photo limits', () => {
     await createAdmin()
     const owner = await signIn(ADMIN.email, ADMIN.password)
     await call('/admin/users', { method: 'POST', cookie: owner, body: { ...COACH, role: 'admin' } })
-    const created = await call<Json>('/admin/users', { method: 'POST', cookie: owner, body: MEMBER })
+    const created = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie: owner,
+      body: MEMBER,
+    })
     const clientId = created.data.user.id as number
     const client = await signIn(MEMBER.email, MEMBER.password)
     const coach = await signIn(COACH.email, COACH.password)

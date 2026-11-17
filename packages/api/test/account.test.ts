@@ -29,14 +29,16 @@ async function starterLibrary() {
   const exercise = await call<Json>('/exercises', {
     method: 'POST',
     cookie,
-    body: { name: 'Goblet Squat', muscleGroup: 'quads', equipment: 'dumbbell' },
+    body: { name: 'Goblet Squat', muscleGroup: 'legs', equipment: 'dumbbell' },
   })
+  expect(exercise.status, JSON.stringify(exercise.data)).toBe(201)
   const exerciseId = exercise.data.exercise.id as number
   const workout = await call<Json>('/workouts', {
     method: 'POST',
     cookie,
     body: { name: 'Legs', exercises: [{ exerciseId, targetSets: 3 }] },
   })
+  expect(workout.status, JSON.stringify(workout.data)).toBe(201)
   const program = await call<Json>('/programs', {
     method: 'POST',
     cookie,

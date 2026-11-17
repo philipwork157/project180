@@ -25,9 +25,10 @@ export async function audit(
   try {
     await db.insert(auditEvents).values({
       action: input.action,
-      actorId: input.actor?.id ?? null,
+      // 0 = someone no longer in the database (deleted): name only.
+      actorId: input.actor?.id || null,
       actorName: input.actor?.name ?? null,
-      targetId: input.target?.id ?? null,
+      targetId: input.target?.id || null,
       targetName: input.target?.name ?? null,
       businessId: input.businessId ?? null,
       detail: input.detail?.slice(0, 200) ?? null,

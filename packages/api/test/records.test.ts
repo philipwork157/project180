@@ -2,7 +2,16 @@
 // in the app and "download my data". Each checks nobody sees anyone else's.
 import { env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { ADMIN, call, createAdmin, MEMBER, setupHousehold, signIn, signInPlatform } from './helpers'
+import {
+  ADMIN,
+  call,
+  createAdmin,
+  MEMBER,
+  PLATFORM,
+  setupHousehold,
+  signIn,
+  signInPlatform,
+} from './helpers'
 
 type Json = Record<string, any>
 
@@ -188,7 +197,17 @@ describe('the record and errors (platform admin only)', () => {
     ])
     const { createDb } = await import('@project180/db')
     await dailyCleanup(createDb(env.DB), Date.now() + 31 * 24 * 60 * 60 * 1000)
-    const after = await call<Json>('/platform/errors', { cookie: platform, asAdminApp: true })
+    // The cleanup 31 days ahead also ended that sign-in: sign in again.
+    const again = await call('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: PLATFORM.email, password: PLATFORM.password },
+      asAdminApp: true,
+    })
+    const cookie = again.headers
+      .getSetCookie()
+      .map((c) => c.split(';')[0])
+      .join('; ')
+    const after = await call<Json>('/platform/errors', { cookie, asAdminApp: true })
     expect(after.data.errors.recent).toEqual([])
   })
 })

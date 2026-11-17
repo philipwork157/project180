@@ -16,16 +16,20 @@ import {
   type ChatUnread,
   choosePasswordInput,
   clientProfileInput,
+  deleteMyAccountInput,
   feedbackReadInput,
   heartbeatInput,
   isClient,
   isoDate,
+  type Me,
   type MyPlan,
   messageInput,
   messageReadInput,
+  nutritionTargetsInput,
   type PushSetup,
   pushSubscriptionInput,
   pushUnsubscribeInput,
+  startStarterProgramInput,
   todayIn,
   updateProfileInput,
 } from '@project180/shared'
@@ -36,18 +40,21 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { inChunks } from '../batch'
 import { chatNewsForClient, loadThread, markRead, postMessage } from '../chat'
+import { deletePersonForGood } from '../delete-person'
 import type { AppEnv } from '../env'
-import { notFound, parseBody } from '../errors'
+import { notFound, parseBody, parseId } from '../errors'
 import { markFeedbackRead, unreadFeedback } from '../feedback'
 import { requireUser } from '../middleware'
 import { loadProfile, saveProfile } from '../profiles'
 import { isPushEndpoint, pushConfigured } from '../push'
+import { canQuickWorkout } from '../quick'
 import { startDuePrograms } from '../schedule'
 import { closeIdleWorkout } from '../sessions'
+import { findStarterProgram, listStarterPrograms } from '../starter'
 import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
-import { enrollmentQuery } from './enrollments'
-import { meFoodRoutes } from './food'
+import { assignProgram, enrollmentQuery } from './enrollments'
+import { loadTargets, meFoodRoutes, saveTargets } from './food'
 import { loadProgramDays } from './programs'
 import { meWaterRoutes } from './water'
 
@@ -249,9 +256,50 @@ export async function buildPlans(
 
 const coachUser = alias(users, 'coach')
 
+/** A client without a coach, using the app on their own: they set their own targets and plan. */
+const onTheirOwn = (user: Me) => isClient(user.role) && user.coachId === null
+
 export const meRoutes = new Hono<AppEnv>()
   .use(requireUser)
-  .get('/', (c) => c.json({ user: c.var.user }))
+  .get('/', async (c) => {
+    const { db, user } = c.var
+    // Read fresh (a cached sign-in can be a few minutes old): the wizard must end at once.
+    const [row] = await db
+      .select({ needsOnboarding: users.needsOnboarding })
+      .from(users)
+      .where(eq(users.id, user.id))
+    return c.json({ user: { ...user, needsOnboarding: row?.needsOnboarding ?? false } })
+  })
+  /**
+   * Delete your own account and everything you logged, for good (clients only; staff ask an
+   * owner). Your password first, so a phone left unlocked can't do it.
+   */
+  .post('/delete', async (c) => {
+    const { db, user, auth } = c.var
+    if (!isClient(user.role))
+      throw new HTTPException(403, {
+        message: 'Coaches and owners can’t delete themselves here. Ask an owner.',
+      })
+    const { password } = await parseBody(c.req.raw, deleteMyAccountInput)
+    const ctx = await auth.$context
+    const account = (await ctx.internalAdapter.findAccounts(String(user.id))).find(
+      (a) => a.providerId === 'credential',
+    )
+    const ok =
+      account?.password !== undefined &&
+      account.password !== null &&
+      (await ctx.password.verify({ hash: account.password, password }))
+    if (!ok) throw new HTTPException(400, { message: 'That isn’t your password.' })
+    // Nothing of theirs is handed to anyone: clients have no library. Their own copies go too.
+    await deletePersonForGood(db, user.id, user.coachId ?? user.id)
+    return c.body(null, 204)
+  })
+  /** The welcome wizard is done (or skipped): it never shows again. */
+  .post('/onboarding/done', async (c) => {
+    const { db, user } = c.var
+    await db.update(users).set({ needsOnboarding: false }).where(eq(users.id, user.id))
+    return c.json({ user: { ...user, needsOnboarding: false } })
+  })
   /**
    * First sign-in after a temporary password from their coach: they choose their own. It must
    * differ from the temporary one, and every other device signed in with it is signed out.
@@ -303,16 +351,55 @@ export const meRoutes = new Hono<AppEnv>()
   /** Your goals and body basics (the same profile your coach sees). */
   .get('/profile', async (c) => c.json({ profile: await loadProfile(c.var.db, c.var.user.id) }))
   .put('/profile', async (c) => {
+    const { user } = c.var
     const input = await parseBody(c.req.raw, clientProfileInput)
-    await saveProfile(c.var.db, c.var.user.id, input)
-    return c.json({ profile: await loadProfile(c.var.db, c.var.user.id) })
+    // With a coach, their goal weight and activity level are the coach's, set with their daily
+    // targets. On their own, they set them themselves.
+    await saveProfile(
+      c.var.db,
+      user.id,
+      onTheirOwn(user) ? input : { ...input, goalWeightKg: undefined, activityLevel: undefined },
+    )
+    return c.json({ profile: await loadProfile(c.var.db, user.id) })
+  })
+  /** On your own (no coach): set your own daily targets, with the calculator's settings. */
+  .put('/nutrition-targets', async (c) => {
+    const { db, user } = c.var
+    if (!onTheirOwn(user))
+      throw new HTTPException(403, { message: 'Your coach sets your daily targets.' })
+    const input = await parseBody(c.req.raw, nutritionTargetsInput)
+    await saveTargets(db, user, input, user.id)
+    return c.json({ targets: await loadTargets(db, user.id) })
+  })
+  /** On your own: the ready-made programs you can start (none with a coach: they give you one). */
+  .get('/starter-programs', async (c) => {
+    const { db, user } = c.var
+    return c.json({ programs: onTheirOwn(user) ? await listStarterPrograms(db) : [] })
+  })
+  /** On your own: start a ready-made program (your own copy, like a coach assigning it). */
+  .post('/starter-programs/:id/start', async (c) => {
+    const { db, user } = c.var
+    if (!onTheirOwn(user)) notFound('Program not found')
+    const program = await findStarterProgram(db, parseId(c.req.param('id')))
+    if (!program) notFound('Program not found')
+    const { startDate } = await parseBody(c.req.raw, startStarterProgramInput)
+    const enrollment = await assignProgram(
+      db,
+      user,
+      user.id,
+      program.id,
+      startDate,
+      'restart',
+      program,
+    )
+    return c.json({ enrollment }, 201)
   })
   /** Your active program laid out day by day, plus any unfinished workout. */
   .get('/plan', async (c) => {
     const { db, user } = c.var
     // A workout left idle for hours is closed first, so "Resume" never shows a stale one.
     await closeIdleWorkout(db, user.id)
-    const [[active], plan] = await Promise.all([
+    const [[active], plan, quickWorkouts] = await Promise.all([
       db
         .select({
           id: workoutSessions.id,
@@ -325,8 +412,9 @@ export const meRoutes = new Hono<AppEnv>()
         .orderBy(desc(workoutSessions.startedAt))
         .limit(1),
       buildPlan(db, user),
+      canQuickWorkout(db, user),
     ])
-    return c.json({ plan, activeSession: active ?? null })
+    return c.json({ plan, activeSession: active ?? null, quickWorkouts })
   })
   .get('/stats', async (c) => {
     const { db, user } = c.var

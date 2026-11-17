@@ -10,6 +10,7 @@ import {
 } from '@project180/shared'
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { users } from './auth'
+import { businesses } from './businesses'
 import { createdAt, id, timestamp, updatedAt } from './columns'
 
 const createdBy = () =>
@@ -35,11 +36,16 @@ export const exercises = sqliteTable(
     videoUrl: text('video_url'),
     imageKey: text('image_key'),
     createdBy: createdBy(),
+    // Each business has its own exercise library; only its staff and clients see these rows.
+    businessId: integer('business_id').references(() => businesses.id),
     archivedAt: timestamp('archived_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('exercises_created_by_idx').on(t.createdBy)],
+  (t) => [
+    index('exercises_created_by_idx').on(t.createdBy),
+    index('exercises_business_name_idx').on(t.businessId, t.name),
+  ],
 )
 
 /** A workout template, such as "Leg Day A". */
@@ -54,6 +60,8 @@ export const workouts = sqliteTable(
     clientId: clientId(),
     // The library workout this copy was made from.
     sourceWorkoutId: integer('source_workout_id'),
+    // Built by the person themselves in the app (Quick workout): never in a library or program.
+    quick: integer('quick', { mode: 'boolean' }).notNull().default(false),
     archivedAt: timestamp('archived_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -1,4 +1,4 @@
-import { adminOverviewQuery, enrollmentsQuery } from '@project180/client'
+import { adminChatsQuery, adminOverviewQuery, enrollmentsQuery } from '@project180/client'
 import { type AdminOverview, durationShort, formatNumber, timeAgo } from '@project180/shared'
 import { Button, buttonClasses, Card, cn, Drawer, StatCard, Tooltip } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
@@ -11,6 +11,7 @@ import {
   Dumbbell,
   KeyRound,
   ListChecks,
+  MessageCircle,
   MoonStar,
   UserPlus,
   UsersRound,
@@ -40,7 +41,7 @@ function Overview() {
     <>
       <PageHeader
         title={`Hi, ${me.name.split(' ')[0]}`}
-        subtitle="How your clients are doing over the last 7 days."
+        subtitle="Who needs you today, and how your clients did over the last 7 days."
         action={
           <Button
             icon={<UserPlus className="size-5" aria-hidden />}
@@ -60,6 +61,8 @@ function Overview() {
       ) : (
         <div className="flex flex-col gap-5">
           {o.clients.total === 0 && <GettingStarted library={o.library} />}
+
+          <UnreadChats />
 
           {o.live.length > 0 && <TrainingNow items={o.live} onOpen={open} />}
 
@@ -282,7 +285,8 @@ function Attention({ items }: { items: AdminOverview['attention'] }) {
           {items.slice(0, 8).map((a) => (
             <li key={`${a.userId}-${a.reason}`}>
               <Link
-                to="/users"
+                to="/clients/$clientId"
+                params={{ clientId: String(a.userId) }}
                 className="flex items-center gap-3 rounded-md px-2 py-2.5 transition hover:bg-surface-raised"
               >
                 <span
@@ -510,10 +514,55 @@ function GettingStarted({ library }: { library: AdminOverview['library'] }) {
         >
           Plan a program
         </Link>
-        <Link to="/users" className={step(false)}>
+        <Link to="/clients" className={step(false)}>
           Add your first client
         </Link>
       </div>
     </Card>
+  )
+}
+
+/** Clients waiting for a reply: straight into their chat. Hidden when nobody is waiting. */
+function UnreadChats() {
+  const chats = useQuery(adminChatsQuery)
+  const waiting = (chats.data ?? []).filter((c) => c.unread > 0)
+  if (waiting.length === 0) return null
+  return (
+    <SectionCard
+      title={`${waiting.length} ${waiting.length === 1 ? 'client is' : 'clients are'} waiting for a reply`}
+      description="Open one to answer in their chat."
+    >
+      <ul className="-mx-2 flex w-full flex-col">
+        {waiting.map((c) => (
+          <li key={c.clientId}>
+            <Link
+              to="/clients/$clientId"
+              params={{ clientId: String(c.clientId) }}
+              search={{ tab: 'chat' }}
+              className="flex min-h-12 items-center gap-3 rounded-md px-2 py-2.5 transition hover:bg-surface-raised"
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-clay/20 text-clay-text">
+                <MessageCircle className="size-4" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-bold text-[14px]">{c.name}</span>
+                <span className="block truncate text-[13px] text-ink-muted">
+                  {c.last ? c.last.body : 'New message'}
+                </span>
+              </span>
+              <span className="tabular grid h-5 min-w-5 shrink-0 place-items-center rounded-pill bg-clay px-1.5 font-extrabold text-[11px] text-on-clay">
+                {c.unread}
+                <span className="sr-only"> unread</span>
+              </span>
+              {c.last && (
+                <span className="hidden shrink-0 text-[12px] text-ink-muted sm:block">
+                  {timeAgo(c.last.createdAt)}
+                </span>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </SectionCard>
   )
 }

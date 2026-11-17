@@ -693,8 +693,13 @@ describe('programs and workouts stay private', () => {
       ['DELETE', `/enrollments/${enrol.data.enrollment.id}`],
       ['DELETE', `/admin/users/${sam.id}/program`],
       ['POST', `/admin/users/${sam.id}/program/archive`],
+      ['POST', `/admin/users/${sam.id}/enrollments/${enrol.data.enrollment.id}/restart`],
     ] as const) {
-      expect((await call(path, { method, cookie: owner })).status, path).toBe(404)
+      const body =
+        method === 'POST' && path.endsWith('/restart')
+          ? { startDate: '2026-11-09', mode: 'continue' }
+          : undefined
+      expect((await call(path, { method, cookie: owner, body })).status, path).toBe(404)
     }
     const edit = await call(`/programs/${copyId}`, {
       method: 'PUT',

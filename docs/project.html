@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project 180 · how it works</title>
+<!--
+  Project 180's own "Confluence page": the stack, how the code is laid out, who can see what,
+  every script, the environment, deploying and the latest changes. Plain HTML: open it in any
+  browser. Keep it up to date with every change (see CLAUDE.md).
+-->
+<style>
+  :root {
+    --charcoal: #202321; --lime: #b6e63b; --offwhite: #f5f3ed; --grey: #777c78;
+    --bg: #f5f3ed; --surface: #ffffff; --raised: #ece9e1; --ink: #202321; --muted: #5b605c;
+    --border: #dedad0; --brand-text: #5b7a12; --code: #ece9e1;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161817; --surface: #202321; --raised: #2a2d2b; --ink: #f5f3ed; --muted: #a3a8a4;
+      --border: #333734; --brand-text: #b6e63b; --code: #2a2d2b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 500 15px/1.6 "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  ::selection { background: var(--lime); color: var(--charcoal); }
+  a { color: var(--brand-text); font-weight: 700; text-underline-offset: 3px; }
+  code, kbd {
+    font: 500 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code); border-radius: 6px; padding: 1px 6px; white-space: nowrap;
+  }
+  pre { background: var(--code); border-radius: 12px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; white-space: pre; }
+  .hero {
+    background: var(--charcoal); color: var(--offwhite);
+    padding: 32px 16px 28px; position: relative; overflow: hidden;
+  }
+  .hero::after {
+    content: ""; position: absolute; right: -140px; top: -140px; width: 360px; height: 360px;
+    border: 3px solid var(--lime); border-color: var(--lime) var(--lime) transparent transparent;
+    border-radius: 50%; transform: rotate(45deg); opacity: .9;
+  }
+  .hero h1 {
+    font: 800 32px/1.1 "Archivo", ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.02em;
+    margin: 6px 0 8px;
+  }
+  .hero p { margin: 0; max-width: 70ch; color: rgba(245, 243, 237, .75); }
+  .kicker { font-weight: 800; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--lime); }
+  .layout { display: grid; grid-template-columns: 1fr; gap: 24px; padding: 24px 16px 64px; }
+  nav.toc { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  nav.toc a {
+    flex-shrink: 0; white-space: nowrap; font-weight: 600; font-size: 14px; color: var(--muted);
+    text-decoration: none; padding: 10px 12px; border-radius: 10px; background: var(--raised);
+  }
+  nav.toc a:hover { color: var(--ink); }
+  main { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  section.card {
+    background: var(--surface); border-radius: 18px; padding: 20px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 8px 24px rgba(0, 0, 0, .04); scroll-margin-top: 16px;
+  }
+  h2 { font: 800 21px/1.25 "Archivo", ui-sans-serif, system-ui, sans-serif; margin: 0 0 4px; }
+  h3 { font-size: 16px; margin: 20px 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 14px; max-width: 80ch; }
+  p, li { max-width: 80ch; }
+  .table-wrap { overflow-x: auto; margin: 0 -4px; }
+  table { width: 100%; border-collapse: collapse; min-width: 560px; }
+  th {
+    text-align: left; font-weight: 800; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); padding: 8px 4px; border-bottom: 1px solid var(--border);
+  }
+  td { padding: 10px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .tile { background: var(--raised); border-radius: 12px; padding: 14px 16px; }
+  .tile b { display: block; margin-bottom: 2px; }
+  .tile span { color: var(--muted); font-size: 14px; }
+  .pill {
+    display: inline-block; font-weight: 800; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    background: var(--lime); color: var(--charcoal); border-radius: 999px; padding: 2px 8px;
+  }
+  .warn { border-left: 0; background: var(--raised); border-radius: 12px; padding: 12px 14px; }
+  ul.log { padding-left: 18px; }
+  ul.log li { margin-bottom: 6px; }
+  @media (min-width: 768px) {
+    .hero { padding: 44px 32px 36px; }
+    .hero h1 { font-size: 40px; }
+    .layout { padding: 32px 32px 80px; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    section.card { padding: 24px; }
+  }
+  @media (min-width: 1100px) {
+    .hero { padding-left: 48px; padding-right: 48px; }
+    .layout { grid-template-columns: 240px minmax(0, 1fr); gap: 40px; padding: 40px 48px 96px; }
+    nav.toc { flex-direction: column; position: sticky; top: 24px; align-self: start; overflow: visible; }
+    nav.toc a { background: none; padding: 8px 12px; }
+    nav.toc a:hover { background: var(--raised); }
+    .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="kicker">Project 180 · TRAIN. FUEL. FEEL. LIVE.</div>
+  <h1>How Project 180 works</h1>
+  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>17 November 2026</b>.</p>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <a href="#glance">At a glance</a>
+    <a href="#stack">Stack</a>
+    <a href="#layout">Code layout</a>
+    <a href="#people">Roles and businesses</a>
+    <a href="#accounts">Sign-up and accounts</a>
+    <a href="#claude">Claude and costs</a>
+    <a href="#scripts">Scripts</a>
+    <a href="#database">Database and migrations</a>
+    <a href="#deploy">Deploying</a>
+    <a href="#env">Environment and secrets</a>
+    <a href="#jobs">Scheduled jobs</a>
+    <a href="#tests">Tests and checks</a>
+    <a href="#changes">Latest changes</a>
+  </nav>
+
+  <main>
+    <section class="card" id="glance">
+      <h2>At a glance</h2>
+      <p class="lead">Two apps on Cloudflare sharing one API and one database.</p>
+      <div class="grid">
+        <div class="tile"><b>Phone app (PWA)</b><span>Clients and people on their own: training, food, water, progress, coach chat. <br>Live <a href="https://project180.co.za">project180.co.za</a> · Dev <a href="https://dev.project180.co.za">dev.project180.co.za</a> · Local :5173</span></div>
+        <div class="tile"><b>Admin dashboard</b><span>Coaches and owners manage clients and the library; the platform admin's Platform page. <br>Live <a href="https://admin.project180.co.za">admin.project180.co.za</a> · Dev <a href="https://admin-dev.project180.co.za">admin-dev.project180.co.za</a> · Local :5174</span></div>
+        <div class="tile"><b>API</b><span>Hono on Cloudflare Workers at <code>/api</code> in both apps (each app has its own Worker and sign-in cookie). Locally the admin proxies <code>/api</code> to :5173.</span></div>
+        <div class="tile"><b>Database</b><span>Cloudflare D1 (SQLite), one database shared by both Workers. Drizzle ORM and migrations.</span></div>
+        <div class="tile"><b>Files</b><span>Cloudflare R2 bucket <code>MEDIA</code> for coaches' uploaded photos (<code>/api/media/uploads/…</code>). Stock photos are bundled in the app.</span></div>
+        <div class="tile"><b>Email and push</b><span>Amazon SES (hand-signed, no SDK) and Web Push (VAPID, signed with WebCrypto).</span></div>
+      </div>
+    </section>
+
+    <section class="card" id="stack">
+      <h2>Stack</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part</th><th>What we use</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Monorepo</td><td>Bun workspaces + Turborepo</td><td>Bun 1.4. <code>apps/*</code> and <code>packages/*</code>.</td></tr>
+          <tr><td>Front end</td><td>React 19, Vite 8, TanStack Router + Query, Tailwind CSS v4, Motion</td><td>Phone-first, full width on desktop, light and dark.</td></tr>
+          <tr><td>API</td><td>Hono 4 on Cloudflare Workers</td><td>Zod 4 validates every input (<code>packages/shared</code>).</td></tr>
+          <tr><td>Auth</td><td>Better Auth</td><td>Email + password only; sign-up goes through our own <code>/api/account</code> routes.</td></tr>
+          <tr><td>Database</td><td>Cloudflare D1 + Drizzle ORM</td><td>Never a migration that rebuilds a table.</td></tr>
+          <tr><td>AI</td><td>Claude API (Anthropic)</td><td>Food photos, workout builder, program builder. Plain <code>fetch</code>, no SDK.</td></tr>
+          <tr><td>Bot protection</td><td>Cloudflare Turnstile</td><td>Sign-up, forgot password, new verify links.</td></tr>
+          <tr><td>Code style</td><td>Biome</td><td>Single quotes, no semicolons, 2 spaces, 100 columns. Lefthook runs it before every commit.</td></tr>
+          <tr><td>Tests</td><td>Vitest (+ Workers pool for the API), Playwright</td><td>See <a href="#tests">Tests and checks</a>.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="card" id="layout">
+      <h2>Code layout</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Folder</th><th>What's in it</th></tr></thead>
+        <tbody>
+          <tr><td><code>apps/app</code></td><td>The phone app (routes in <code>src/routes</code>, its Worker, PWA service worker and push handlers in <code>public</code>).</td></tr>
+          <tr><td><code>apps/admin</code></td><td>The admin dashboard (clients, library, Settings, Platform page).</td></tr>
+          <tr><td><code>packages/api</code></td><td>The API: routes, access rules (<code>access.ts</code>), Claude, email, push, scripts like <code>create-admin.ts</code>, and the API tests.</td></tr>
+          <tr><td><code>packages/db</code></td><td>Database schema (<code>src/schema</code>), migrations (<code>drizzle</code>), seed data and seed scripts.</td></tr>
+          <tr><td><code>packages/shared</code></td><td>Types, validators, dates, calorie maths, Claude prices, the workout board, all with unit tests.</td></tr>
+          <tr><td><code>packages/client</code></td><td>Browser code both apps share: API calls, queries, theme.</td></tr>
+          <tr><td><code>packages/ui</code></td><td>Shared components: Field, Select, DatePicker, Drawer, sign-up forms, Turnstile, legal pages, tokens.</td></tr>
+          <tr><td><code>scripts/check-live.ts</code></td><td>Safety checks before a live deploy.</td></tr>
+          <tr><td><code>docs/</code></td><td>This page and design audits.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="card" id="people">
+      <h2>Roles and businesses</h2>
+      <p class="lead">Every owner, coach and client belongs to one <b>business</b>. Businesses never see each other.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Who</th><th>Signs in to</th><th>Sees</th><th>How they get an account</th></tr></thead>
+        <tbody>
+          <tr><td><b>Platform admin</b> (you)</td><td>Admin only</td><td>The Platform page: people, businesses, sign-ups, Claude costs and switches, starter library, site setup. Never anyone's training, food or chats.</td><td><code>bun run admin:create</code> → p (use a separate email, e.g. <code>name+platform@gmail.com</code>).</td></tr>
+          <tr><td><b>Owner</b></td><td>Both</td><td>Everyone in their business; manages accounts. Not other coaches' programs.</td><td>Coach sign-up in the admin (makes a new business), or <code>admin:create</code>.</td></tr>
+          <tr><td><b>Coach</b></td><td>Both</td><td>Their own clients and library.</td><td>Added by an owner, or <code>admin:create</code>.</td></tr>
+          <tr><td><b>Client</b></td><td>Phone app</td><td>Only themselves. Goal weight, activity and calories are their coach's (read-only).</td><td>Added by their coach.</td></tr>
+          <tr><td><b>On their own</b></td><td>Phone app</td><td>Only themselves, plus the starter library. Edit their own goals, body and calories; pick starter programs; quick workouts.</td><td>"Create an account" in the app, then confirm their email and see the welcome wizard.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>The starter library</h3>
+      <p>A normal business the platform admin picks on the Platform page. People on their own read its exercises, recipes and programs. Every coach who signs up gets their own copy of its exercises, recipes and workouts. Fill it by signing in as one of its coaches, or with <code>bun run db:seed -- --business "Starter library"</code>.</p>
+    </section>
+
+    <section class="card" id="accounts">
+      <h2>Sign-up and accounts</h2>
+      <ul>
+        <li><b>Sign-up</b>: name, email, password twice, agree to the terms and privacy policy, Turnstile. App: someone on their own. Admin: a coach with a new business.</li>
+        <li><b>Confirm email</b>: a one-time link (48 hours). Sign-in refuses unconfirmed accounts and offers a new link.</li>
+        <li><b>Forgot password</b>: a one-time link (60 minutes) in both apps; signs out everywhere.</li>
+        <li><b>Welcome wizard</b> (<code>/welcome</code>): only for people who signed up themselves. Goal, about you, daily plan; skippable.</li>
+        <li><b>Delete my account</b>: Profile in the app (clients), with their password. Owners delete people from the client page.</li>
+        <li><b>Temporary passwords</b>: staff-set passwords must be changed at first sign-in.</li>
+        <li><b>Limits</b>: 5 wrong passwords per email / 20 per network per 15 minutes; 5 sign-ups per network per hour; 3 emails per address and 10 per network per hour.</li>
+        <li><b>Terms and privacy</b>: <code>/terms</code> and <code>/privacy</code> in both apps (draft text in <code>packages/ui/src/legal.tsx</code>; have it checked by a lawyer).</li>
+      </ul>
+    </section>
+
+    <section class="card" id="claude">
+      <h2>Claude and costs</h2>
+      <p class="lead">Three features call Claude. The platform admin controls each on the Platform page.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Feature</th><th>Default model</th><th>Default hard limit</th></tr></thead>
+        <tbody>
+          <tr><td>Food photos (app)</td><td>Sonnet 5.5</td><td>50 photos per person per day (owners set their business's default, 10)</td></tr>
+          <tr><td>Workout builder (admin)</td><td>Sonnet 5.5</td><td>20 per coach per day</td></tr>
+          <tr><td>Program builder (admin)</td><td>Sonnet 5.5</td><td>10 per coach per day</td></tr>
+        </tbody>
+      </table></div>
+      <p>Every call is saved in <code>claude_calls</code> with tokens and cost (USD, at that day's price; prices in <code>packages/shared/src/claude.ts</code>). Never the photo, note or prompt. Needs <code>ANTHROPIC_API_KEY</code>.</p>
+    </section>
+
+    <section class="card" id="scripts">
+      <h2>Scripts</h2>
+      <p class="lead">Run from the project folder. Commands ending in <code>:dev</code> act on the Cloudflare dev site; <code>:remote</code> / <code>:live</code> on the live site.</p>
+      <h3>Every day</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>bun run dev</code></td><td>Both apps locally (app :5173 with the API and database, admin :5174).</td></tr>
+          <tr><td><code>bun run dev:app</code></td><td>Only the phone app (and the API).</td></tr>
+          <tr><td><code>bun run format</code></td><td>Biome fixes formatting and import order.</td></tr>
+          <tr><td><code>bun run check</code></td><td>Biome, then type checks and every test. Run before deploying.</td></tr>
+          <tr><td><code>bun run lint</code> · <code>typecheck</code> · <code>test</code></td><td>Each step of <code>check</code> on its own.</td></tr>
+          <tr><td><code>bun run e2e</code></td><td>Playwright end-to-end tests for both apps.</td></tr>
+          <tr><td><code>bun run build</code></td><td>Builds both apps for the live site.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Database</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>bun run db:apply</code></td><td>After a schema change: makes the migration and applies it locally.</td></tr>
+          <tr><td><code>bun run db:generate</code></td><td>Only makes the migration (read the SQL: no <code>__new_</code> tables).</td></tr>
+          <tr><td><code>bun run db:migrate</code></td><td>Applies new migrations to the local database.</td></tr>
+          <tr><td><code>bun run db:migrate:dev</code></td><td>Applies them to the dev database.</td></tr>
+          <tr><td><code>bun run db:migrate:live</code></td><td>Applies them to the live database (<code>deploy</code> does this for you).</td></tr>
+          <tr><td><code>bun run db:dev:apply</code></td><td>Make + apply to dev in one go.</td></tr>
+        </tbody>
+      </table></div>
+      <h3>People and content</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>bun run admin:create</code> (<code>:dev</code>, <code>:live</code>)</td><td>Makes an owner, coach or platform admin (asks name, email, role, business, password). Refuses to turn a coach with clients or a library into the platform admin.</td></tr>
+          <tr><td><code>bun run db:seed</code> (<code>:dev</code>, <code>:remote</code>)</td><td>Starter exercises (with photos) and workouts. Add <code>-- --business "Name"</code> for one business; otherwise the first owner's. Safe to run again.</td></tr>
+          <tr><td><code>bun run db:recipes</code> (<code>:dev</code>, <code>:remote</code>)</td><td>Starter recipes, same <code>--business</code> option.</td></tr>
+          <tr><td><code>bun run db:philip</code> (<code>:dev</code>)</td><td>Philip's own program (personal seed).</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Shipping</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>bun run deploy:dev</code></td><td>Applies migrations to dev, builds both apps in dev mode and deploys both Workers.</td></tr>
+          <tr><td><code>bun run deploy</code></td><td>Live: safety checks (<code>scripts/check-live.ts</code>: database id, <code>BETTER_AUTH_SECRET</code>, Turnstile secret and site key), migrations, then both Workers.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="card" id="database">
+      <h2>Database and migrations</h2>
+      <ul>
+        <li>Change <code>packages/db/src/schema</code>, then <code>bun run db:apply</code>. Never hand-edit a generated migration; one-off data moves are custom migrations (<code>drizzle-kit generate --custom</code>).</li>
+        <li><b>Never rebuild a table on D1</b> (a <code>__new_</code> table in the SQL): it can cascade-delete child rows. Add nullable columns, new tables or indexes instead.</li>
+        <li>D1 takes at most 100 values per statement: multi-row inserts use <code>insertMany</code> + <code>runAll</code>.</li>
+        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="deploy">
+      <h2>Deploying</h2>
+      <pre><code>bun run check          # everything green first
+bun run deploy:dev     # dev: migrations + both apps
+bun run deploy         # live, when dev looks right</code></pre>
+      <p>First time on a site: <code>bun run admin:create:dev</code> (or <code>:live</code>), pick the starter library on the Platform page, then seed it with <code>bun run db:seed:dev -- --business "Starter library"</code> and <code>db:recipes:dev</code> the same way.</p>
+    </section>
+
+    <section class="card" id="env">
+      <h2>Environment and secrets</h2>
+      <p class="lead">Worker settings live in <code>apps/*/wrangler.jsonc</code> (vars) and Cloudflare secrets (<code>bunx wrangler secret put NAME --env dev</code>, without <code>--env</code> for live, in both <code>apps/app</code> and <code>apps/admin</code>). Front-end settings in <code>apps/*/.env.dev</code> / <code>.env.production</code>. Locally: <code>.dev.vars</code>.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th>What for</th><th>Without it</th></tr></thead>
+        <tbody>
+          <tr><td><code>BETTER_AUTH_SECRET</code>, <code>BETTER_AUTH_URL</code></td><td>Sign-in cookies and the site's address.</td><td>Nothing works (live deploy refuses).</td></tr>
+          <tr><td><code>APP_URL</code>, <code>TRUSTED_ORIGINS</code></td><td>Links in emails; extra allowed origins.</td><td>Falls back to <code>BETTER_AUTH_URL</code>.</td></tr>
+          <tr><td><code>STAFF_ONLY</code>, <code>SESSION_DAYS</code>, <code>SESSION_CACHE_SECONDS</code></td><td>Admin Worker: own cookie, staff only; sign-in length; cookie cache.</td><td>Defaults (30 days, no cache).</td></tr>
+          <tr><td><code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, <code>AWS_REGION</code>, <code>EMAIL_FROM</code></td><td>Amazon SES email.</td><td>Emails are only logged.</td></tr>
+          <tr><td><code>EMAIL_REDIRECT_TO</code></td><td>Dev: every email goes to one test inbox.</td><td>On test sites nothing is sent at all.</td></tr>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Claude: food photos and both builders.</td><td>Those buttons hide.</td></tr>
+          <tr><td><code>FOOD_MODEL</code>, <code>WORKOUT_MODEL</code></td><td>Fallback models (the Platform page's choice wins).</td><td>Sonnet 5.5.</td></tr>
+          <tr><td><code>TURNSTILE_SECRET_KEY</code> + <code>VITE_TURNSTILE_SITE_KEY</code></td><td>Cloudflare Turnstile on sign-up and email forms. The site key goes in <code>apps/*/.env.production</code> (and <code>.env.dev</code>).</td><td>No bot check (fine locally); a live deploy refuses.</td></tr>
+          <tr><td><code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code>, <code>VAPID_SUBJECT</code></td><td>Push notifications.</td><td>Only the bell shows news.</td></tr>
+          <tr><td><code>YOUTUBE_API_KEY</code></td><td>How-to video search.</td><td>A "Search on YouTube" link instead.</td></tr>
+          <tr><td><code>MEDIA</code> (R2 binding)</td><td>Coaches' uploaded photos.</td><td>Uploading answers 503.</td></tr>
+          <tr><td><code>FOOD_BARCODE_PROVIDERS</code>, <code>USDA_API_KEY</code>, <code>OPEN_FOOD_FACTS_URL</code>, <code>OPEN_FOOD_FACTS_SEARCH_URL</code>, <code>FOOD_LOOKUP_CONTACT</code></td><td>Barcode and food search providers.</td><td>Open Food Facts only.</td></tr>
+          <tr><td><code>API_LIMIT</code>, <code>SEND_LIMIT</code></td><td>Workers rate limits per person.</td><td>No per-minute limit (local, tests).</td></tr>
+          <tr><td><code>VITE_APP_URL</code> (admin)</td><td>Where the phone app lives, for photo links.</td><td>localhost:5173.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="card" id="jobs">
+      <h2>Scheduled jobs</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>When (South African time)</th><th>What</th></tr></thead>
+        <tbody>
+          <tr><td>04:00 daily (<code>0 2 * * *</code> UTC)</td><td>Daily cleanup: expired sign-ins, old sign-in counters, idle workouts closed, orphaned push subscriptions, old photo counters, expired email links; queued programs start.</td></tr>
+          <tr><td>19:30 daily (<code>30 17 * * *</code> UTC)</td><td>Food reminders: a push to people who turned them on and logged little.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="card" id="tests">
+      <h2>Tests and checks</h2>
+      <ul>
+        <li><b>Unit tests</b>: <code>packages/shared/src/*.test.ts</code> (dates, calories, Claude prices…).</li>
+        <li><b>API tests</b>: <code>packages/api/test/*.test.ts</code> run the real Worker with a real database. Privacy tests for every resource, including <code>businesses.test.ts</code> (two businesses never see each other), <code>platform.test.ts</code> and <code>account.test.ts</code>.</li>
+        <li><b>End to end</b>: <code>apps/*/e2e</code> with Playwright (<code>bun run e2e</code>).</li>
+        <li><b>Before every commit</b>: Lefthook runs Biome and the type checks.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="changes">
+      <h2>Latest changes</h2>
+      <ul class="log">
+        <li><span class="pill">17 Nov</span> Security pass: sign-up and reset links only come back in the API answer on localhost (never on the public dev site); a live deploy refuses without Turnstile. Removed the local free-exercise-db clone (clone it again only when picking new exercise photos).</li>
+        <li><span class="pill">17 Nov</span> Terms and privacy pages and a required tick at sign-up; Delete my account in the app; seed scripts take <code>--business</code>; <code>admin:create</code> safety check; new coaches get the starter workouts; Platform page: people, sign-ups per week, businesses table; compact calories card on phones; this page.</li>
+        <li><span class="pill">17 Nov</span> Confirm password, Turnstile, the welcome wizard, editable profile for people on their own.</li>
+        <li><span class="pill">17 Nov</span> Sign-up (app: on your own; admin: coach + business), email confirmation, forgot password, starter library and starter programs.</li>
+        <li><span class="pill">17 Nov</span> Businesses: every owner, coach and client belongs to one; owners only see their own.</li>
+        <li><span class="pill">16 Nov</span> Platform admin role and Platform page: Claude switches, models, limits and costs; every Claude call saved with its cost.</li>
+      </ul>
+    </section>
+  </main>
+</div>
+</body>
+</html>

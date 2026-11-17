@@ -11,6 +11,7 @@ import {
   Heart,
   MessageCircle,
   Scale,
+  Utensils,
 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useEffect, useState } from 'react'
@@ -40,6 +41,7 @@ const LOOK: Record<AppNotification['kind'], { icon: typeof Scale; tint: string }
   program: { icon: CalendarDays, tint: 'bg-steel/20 text-steel-text' },
   feedback: { icon: Heart, tint: 'bg-brand-soft text-brand-text' },
   chat: { icon: MessageCircle, tint: 'bg-brand-soft text-brand-text' },
+  food: { icon: Utensils, tint: 'bg-clay/20 text-clay-text' },
 }
 
 function NotificationsPage() {
@@ -66,6 +68,8 @@ function NotificationsPage() {
     if (n.kind === 'chat') return void navigate({ to: '/chat' })
     // A new or updated program: the calendar shows the whole plan.
     if (n.kind === 'program') return void navigate({ to: '/calendar' })
+    // The evening food reminder: open Fuel.
+    if (n.kind === 'food') return void navigate({ to: '/fuel' })
     // A like or comment from your coach: open that workout.
     if (n.kind === 'feedback' && n.sessionId)
       return void navigate({ to: '/progress', search: { workout: n.sessionId } })

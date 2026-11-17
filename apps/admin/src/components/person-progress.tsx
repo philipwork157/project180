@@ -1,11 +1,15 @@
 import { ApiError, api, personProgressQuery } from '@project180/client'
 import {
+  type EnrollmentImpact,
   formatDay,
   formatNumber,
   type PastProgram,
   type PersonProgress,
   type PlanDay,
   programEndDate,
+  type RestartMode,
+  startDateForWeek,
+  todayIn,
   type UpcomingProgram,
 } from '@project180/shared'
 import {
@@ -30,8 +34,10 @@ import {
   ChevronDown,
   ChevronRight,
   Dumbbell,
+  Heart,
   History,
   ListPlus,
+  MessageSquare,
   Moon,
   Pencil,
   RotateCcw,
@@ -95,7 +101,7 @@ export function PersonProgressPanel({
           <p className="font-bold text-[15px]">No current program</p>
           <p className="text-[14px] text-ink-muted">
             {past.length > 0
-              ? `Assign a new one, or re-enable a past program below.`
+              ? `Assign a new one, or restart a past program below.`
               : `Assign one and it shows up in ${firstNameOf(name)}’s calendar straight away.`}
           </p>
           <Button size="sm" icon={<UserPlus className="size-4" aria-hidden />} onClick={onAssign}>
@@ -511,21 +517,7 @@ function ResetProgramDialog({
         <b className="text-ink">{progress.plan.enrollment.programName}</b> starts again from day
         one. Everything {firstName} logged on it is deleted for good:
       </p>
-      <ul className="mt-3 flex flex-col gap-2 rounded-md bg-danger/10 p-4 font-semibold text-[15px] text-ink">
-        <Impact
-          icon={<CalendarClock aria-hidden />}
-          n={impact.sessions}
-          one="workout"
-          many="workouts"
-        />
-        <Impact
-          icon={<Dumbbell aria-hidden />}
-          n={impact.loggedSets}
-          one="logged set"
-          many="logged sets"
-        />
-        <Impact icon={<Scale aria-hidden />} n={impact.checkins} one="weigh-in" many="weigh-ins" />
-      </ul>
+      <ImpactList impact={impact} />
       <div className="mt-4 flex flex-col gap-4">
         <Field label="Start again on">
           {(id) => <DatePicker id={id} value={startDate} onChange={setStartDate} />}
@@ -598,7 +590,8 @@ function ArchiveProgramDialog({
         ’s history and under Past programs here.
       </p>
       <p className="mt-2">
-        You can re-enable it later, as long as {firstName} has no other current program.
+        You can restart it later from Past programs: pick up where {firstName} left off, or start
+        again.
       </p>
       {archive.isError && (
         <p role="alert" className="mt-3 font-semibold text-danger">
@@ -745,7 +738,7 @@ function UpNext({
 /** How many of a past program's workouts show before "Show all". */
 const PAST_PREVIEW = 5
 
-/** Finished, archived or replaced programs, each with its history; re-enable or delete. */
+/** Finished, archived or replaced programs, each with its history; restart or delete. */
 function PastPrograms({
   past,
   userId,
@@ -759,29 +752,11 @@ function PastPrograms({
   hasCurrent: boolean
   onOpenWorkout: (sessionId: number) => void
 }) {
-  const queryClient = useQueryClient()
   const [open, setOpen] = useState<number | null>(null)
   const [showAll, setShowAll] = useState(false)
   const [deleting, setDeleting] = useState<PastProgram | null>(null)
   const firstName = firstNameOf(name)
-  const restore = useMutation({
-    mutationFn: (enrollmentId: number) =>
-      api(`/admin/users/${userId}/enrollments/${enrollmentId}/restore`, { method: 'POST' }),
-    onSuccess: (_, enrollmentId) => {
-      void invalidatePerson(queryClient, userId)
-      const item = past.find((x) => x.enrollmentId === enrollmentId)
-      toast({
-        title: 'Program re-enabled',
-        description: `${item?.programName ?? 'It'} is back on ${firstName}’s calendar with its original dates.`,
-      })
-    },
-    onError: (err) =>
-      toast({
-        tone: 'error',
-        title: 'Couldn’t re-enable it',
-        description: err instanceof ApiError ? err.message : undefined,
-      }),
-  })
+  const [restarting, setRestarting] = useState<PastProgram | null>(null)
 
   return (
     <section className="flex flex-col gap-3">
@@ -795,7 +770,7 @@ function PastPrograms({
           return (
             <li key={x.enrollmentId} className="rounded-md bg-surface-raised p-4">
               <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 basis-56">
                   <p className="flex items-center gap-2 font-bold text-[15px]">
                     <span className="truncate">{x.programName}</span>
                     <span
@@ -832,11 +807,10 @@ function PastPrograms({
                     size="sm"
                     icon={<ArchiveRestore className="size-4" aria-hidden />}
                     disabled={hasCurrent}
-                    loading={restore.isPending && restore.variables === x.enrollmentId}
                     title={hasCurrent ? `Archive ${firstName}’s current program first` : undefined}
-                    onClick={() => restore.mutate(x.enrollmentId)}
+                    onClick={() => setRestarting(x)}
                   >
-                    Re-enable
+                    Restart
                   </Button>
                   <IconButton
                     label="Delete it and its history for good"
@@ -916,9 +890,24 @@ function PastPrograms({
       </ul>
       {hasCurrent && (
         <p className="font-semibold text-[12px] text-ink-muted">
-          To re-enable one, archive {firstName}’s current program first.
+          To restart one, archive {firstName}’s current program first.
         </p>
       )}
+      <Drawer
+        open={restarting !== null}
+        onClose={() => setRestarting(null)}
+        title={`Restart ${restarting?.programName ?? 'program'}`}
+        description={`For ${name}`}
+      >
+        {restarting && (
+          <RestartProgramForm
+            item={restarting}
+            userId={userId}
+            name={name}
+            onDone={() => setRestarting(null)}
+          />
+        )}
+      </Drawer>
       <DeletePastDialog
         item={deleting}
         onClose={() => setDeleting(null)}
@@ -926,6 +915,193 @@ function PastPrograms({
         name={name}
       />
     </section>
+  )
+}
+
+const RESTART_OPTIONS: { mode: RestartMode; title: string; hint: (first: string) => string }[] = [
+  {
+    mode: 'continue',
+    title: 'Pick up where they left off',
+    hint: (first) => `Carries on from the week ${first} stopped. Everything logged stays.`,
+  },
+  {
+    mode: 'again',
+    title: 'Start again, keep history',
+    hint: (first) =>
+      `Week 1 starts on the date. ${first}’s old workouts stay in history and totals, and new ones add to them.`,
+  },
+  {
+    mode: 'fresh',
+    title: 'Start fresh',
+    hint: () => 'Week 1 starts on the date. Everything logged on it is deleted for good.',
+  },
+]
+
+/** Restart a past program from a date (Drawer from Past programs). */
+function RestartProgramForm({
+  item,
+  userId,
+  name,
+  onDone,
+}: {
+  item: PastProgram
+  userId: number
+  name: string
+  onDone: () => void
+}) {
+  const queryClient = useQueryClient()
+  const firstName = firstNameOf(name)
+  const canContinue = item.resumeWeek !== null
+  const [mode, setMode] = useState<RestartMode>(canContinue ? 'continue' : 'again')
+  const [startDate, setStartDate] = useState(() => todayIn('Africa/Johannesburg'))
+  const [confirming, setConfirming] = useState(false)
+  const restart = useMutation({
+    mutationFn: () =>
+      api<{ startDate: string }>(
+        `/admin/users/${userId}/enrollments/${item.enrollmentId}/restart`,
+        {
+          method: 'POST',
+          body: { startDate, mode },
+        },
+      ),
+    onSuccess: () => {
+      void invalidatePerson(queryClient, userId)
+      toast({
+        title: 'Program restarted',
+        description:
+          mode === 'continue'
+            ? `${firstName} picks up at week ${item.resumeWeek} on ${shortDate(startDate)}.`
+            : mode === 'fresh'
+              ? `${item.programName} starts fresh on ${shortDate(startDate)}.`
+              : `${item.programName} starts again on ${shortDate(startDate)}, history kept.`,
+      })
+      setConfirming(false)
+      onDone()
+    },
+    onError: () => setConfirming(false),
+  })
+  const week = mode === 'continue' ? (item.resumeWeek ?? 1) : 1
+  const lastDay = programEndDate(startDateForWeek(startDate, week), item.durationWeeks)
+  const nothingLogged = item.impact.sessions === 0 && item.impact.checkins === 0
+
+  return (
+    <>
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (mode === 'fresh' && !nothingLogged) setConfirming(true)
+          else restart.mutate()
+        }}
+      >
+        <p className="text-[15px] text-ink-muted">
+          It goes back on {firstName}’s calendar as the current program. Pick how to restart it.
+        </p>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="sr-only">How to restart</legend>
+          {RESTART_OPTIONS.map((o) => {
+            const on = mode === o.mode
+            const disabled = o.mode === 'continue' && !canContinue
+            return (
+              <label
+                key={o.mode}
+                className={cn(
+                  'flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md p-4 text-left transition has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand active:scale-[0.99]',
+                  disabled && 'cursor-not-allowed opacity-50 active:scale-100',
+                  on
+                    ? o.mode === 'fresh'
+                      ? 'bg-danger/10 ring-[1.5px] ring-danger ring-inset'
+                      : 'bg-brand-soft ring-[1.5px] ring-brand ring-inset'
+                    : 'bg-surface-raised hover:ring-[1.5px] hover:ring-border-strong hover:ring-inset',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="restart-mode"
+                  value={o.mode}
+                  checked={on}
+                  disabled={disabled}
+                  onChange={() => setMode(o.mode)}
+                  className="sr-only"
+                />
+                <span
+                  aria-hidden
+                  className={cn(
+                    'mt-0.5 grid size-5 shrink-0 place-items-center rounded-full ring-2 ring-inset',
+                    on
+                      ? o.mode === 'fresh'
+                        ? 'bg-danger text-on-danger ring-danger'
+                        : 'bg-brand text-on-brand ring-brand'
+                      : 'ring-border-strong',
+                  )}
+                >
+                  {on && <Check className="size-3" strokeWidth={3.5} />}
+                </span>
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span
+                    className={cn(
+                      'font-bold text-[15px]',
+                      o.mode === 'fresh' && on && 'text-danger',
+                    )}
+                  >
+                    {o.title}
+                  </span>
+                  <span className="text-[13px] text-ink-muted">
+                    {disabled
+                      ? 'Every workout on it is done, so there’s nothing to pick up.'
+                      : o.mode === 'continue'
+                        ? `Carries on at week ${item.resumeWeek} of ${item.durationWeeks}. Everything logged stays.`
+                        : o.hint(firstName)}
+                  </span>
+                </span>
+              </label>
+            )
+          })}
+        </fieldset>
+        <Field
+          label={mode === 'continue' ? `Week ${week} starts on` : 'Week 1 starts on'}
+          hint={`Runs until ${formatDay(lastDay)}`}
+        >
+          {(id) => <DatePicker id={id} value={startDate} onChange={setStartDate} />}
+        </Field>
+        {mode === 'fresh' && !nothingLogged && (
+          <div>
+            <p className="font-semibold text-[14px]">This is deleted for good:</p>
+            <ImpactList impact={item.impact} />
+          </div>
+        )}
+        {restart.isError && (
+          <p role="alert" className="font-semibold text-danger">
+            {restart.error instanceof ApiError
+              ? restart.error.message
+              : 'Could not restart it. Try again.'}
+          </p>
+        )}
+        <Button
+          type="submit"
+          size="lg"
+          variant={mode === 'fresh' && !nothingLogged ? 'danger' : 'primary'}
+          loading={restart.isPending && !confirming}
+          icon={<RotateCcw className="size-5" aria-hidden />}
+        >
+          {mode === 'fresh' && !nothingLogged ? 'Delete history and restart' : 'Restart program'}
+        </Button>
+      </form>
+      <ConfirmDialog
+        open={confirming}
+        title={`Start ${item.programName} fresh?`}
+        confirmLabel="Delete and restart"
+        loading={restart.isPending}
+        onConfirm={() => restart.mutate()}
+        onClose={() => setConfirming(false)}
+      >
+        <p>
+          Everything {firstName} logged on it is deleted for good, with your likes and comments on
+          those workouts. Your chat with {firstName} isn’t touched.
+        </p>
+        <ImpactList impact={item.impact} />
+      </ConfirmDialog>
+    </>
   )
 }
 
@@ -973,27 +1149,10 @@ function DeletePastDialog({
       {item && (
         <>
           <p>Everything {firstName} logged on it is deleted for good:</p>
-          <ul className="mt-3 flex flex-col gap-2 rounded-md bg-danger/10 p-4 font-semibold text-[15px] text-ink">
-            <Impact
-              icon={<CalendarClock aria-hidden />}
-              n={item.impact.sessions}
-              one="workout"
-              many="workouts"
-            />
-            <Impact
-              icon={<Dumbbell aria-hidden />}
-              n={item.impact.loggedSets}
-              one="logged set"
-              many="logged sets"
-            />
-            <Impact
-              icon={<Scale aria-hidden />}
-              n={item.impact.checkins}
-              one="weigh-in"
-              many="weigh-ins"
-            />
-          </ul>
-          <p className="mt-3 text-[14px]">The program itself stays in your library.</p>
+          <ImpactList impact={item.impact} />
+          <p className="mt-3 text-[14px]">
+            The program itself stays in your library, and your chat with {firstName} isn’t touched.
+          </p>
           <div className="mt-4">
             <Field label="Type DELETE to confirm" hint="This can’t be undone.">
               {(id) => (
@@ -1071,24 +1230,10 @@ function RemoveProgramDialog({
         {firstName}’s calendar is cleared and everything {firstName} logged on this program is
         deleted for good:
       </p>
-      <ul className="mt-3 flex flex-col gap-2 rounded-md bg-danger/10 p-4 font-semibold text-[15px] text-ink">
-        <Impact
-          icon={<CalendarClock aria-hidden />}
-          n={impact.sessions}
-          one="workout"
-          many="workouts"
-        />
-        <Impact
-          icon={<Dumbbell aria-hidden />}
-          n={impact.loggedSets}
-          one="logged set"
-          many="logged sets"
-        />
-        <Impact icon={<Scale aria-hidden />} n={impact.checkins} one="weigh-in" many="weigh-ins" />
-      </ul>
+      <ImpactList impact={impact} />
       <p className="mt-3 text-[14px]">
         The program itself stays in your library, and you can assign {firstName} a new one
-        afterwards.
+        afterwards. Your chat with {firstName} isn’t touched.
       </p>
       <div className="mt-4">
         <Field label="Type REMOVE to confirm" hint="This can’t be undone.">
@@ -1112,6 +1257,40 @@ function RemoveProgramDialog({
         </p>
       )}
     </ConfirmDialog>
+  )
+}
+
+/** What's deleted for good: workouts, sets, weigh-ins, and your likes and comments on them. */
+function ImpactList({ impact }: { impact: EnrollmentImpact }) {
+  return (
+    <ul className="mt-3 flex flex-col gap-2 rounded-md bg-danger/10 p-4 font-semibold text-[15px] text-ink">
+      <Impact
+        icon={<CalendarClock aria-hidden />}
+        n={impact.sessions}
+        one="workout"
+        many="workouts"
+      />
+      <Impact
+        icon={<Dumbbell aria-hidden />}
+        n={impact.loggedSets}
+        one="logged set"
+        many="logged sets"
+      />
+      {impact.checkins > 0 && (
+        <Impact icon={<Scale aria-hidden />} n={impact.checkins} one="weigh-in" many="weigh-ins" />
+      )}
+      {impact.likes > 0 && (
+        <Impact icon={<Heart aria-hidden />} n={impact.likes} one="like" many="likes" />
+      )}
+      {impact.comments > 0 && (
+        <Impact
+          icon={<MessageSquare aria-hidden />}
+          n={impact.comments}
+          one="comment on a workout"
+          many="comments on workouts"
+        />
+      )}
+    </ul>
   )
 }
 

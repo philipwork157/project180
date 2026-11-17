@@ -16,6 +16,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { chunk, inChunks, runAll } from './batch'
+import type { ClaudeMeter } from './claude-calls'
 import type { Bindings } from './env'
 import { libraryOnly, visibleTo } from './library'
 import { createProgram, programDetail } from './routes/programs'
@@ -188,22 +189,27 @@ export function askClaudeForProgram(
   prompt: string,
   library: LibraryExercise[],
   existing: LibraryWorkout[],
+  meter: ClaudeMeter,
 ): Promise<ProgramBuilderReply> {
-  return askClaude(env, {
-    tag: 'program-builder',
-    failMessage: 'Claude couldn’t build that program. Try again, or describe it differently.',
-    system: INSTRUCTIONS,
-    texts: [
-      `Existing workouts (id | name | minutes | exercises):\n${workoutsText(existing)}`,
-      `Exercise library (id | name | muscle group | equipment | tracked by):\n${libraryText(library)}`,
-      `The coach asks for:\n${prompt}`,
-    ],
-    schema: REPLY_SCHEMA,
-    check: replySchema,
-    maxTokens: 20000,
-    timeoutMs: TIMEOUT_MS,
-    size: (r) => `${r.duration_weeks} weeks, ${r.new_workouts.length} new workouts`,
-  })
+  return askClaude(
+    env,
+    {
+      tag: 'program-builder',
+      failMessage: 'Claude couldn’t build that program. Try again, or describe it differently.',
+      system: INSTRUCTIONS,
+      texts: [
+        `Existing workouts (id | name | minutes | exercises):\n${workoutsText(existing)}`,
+        `Exercise library (id | name | muscle group | equipment | tracked by):\n${libraryText(library)}`,
+        `The coach asks for:\n${prompt}`,
+      ],
+      schema: REPLY_SCHEMA,
+      check: replySchema,
+      maxTokens: 20000,
+      timeoutMs: TIMEOUT_MS,
+      size: (r) => `${r.duration_weeks} weeks, ${r.new_workouts.length} new workouts`,
+    },
+    meter,
+  )
 }
 
 type WorkoutInputParsed = NonNullable<ReturnType<typeof toWorkoutInput>>
@@ -269,13 +275,16 @@ export async function buildProgram(
   env: Bindings,
   user: Me,
   prompt: string,
+  meter: ClaudeMeter,
 ): Promise<ProgramBuildResult> {
   const [library, existing] = await Promise.all([libraryFor(db, user), workoutsFor(db, user)])
   if (library.length === 0 && existing.length === 0)
     throw new HTTPException(409, {
       message: 'Add some exercises or workouts to the library first.',
     })
-  const reply = await askClaudeForProgram(env, prompt, library, existing)
+  const reply = await askClaudeForProgram(env, prompt, library, existing, meter)
+  meter.kind = 'program'
+  meter.items = reply.new_workouts.length
   const plan = toProgramPlan(reply, library, existing, prompt)
   if (!plan)
     throw new HTTPException(422, {

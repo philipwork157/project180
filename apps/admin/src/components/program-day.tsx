@@ -1,7 +1,16 @@
 import type { ProgramCell, WorkoutSummary } from '@project180/shared'
 import { buttonClasses, cn, Drawer, Input } from '@project180/ui'
 import { Link } from '@tanstack/react-router'
-import { Check, MoonStar, Pencil, Scale, Search } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Check,
+  CopyCheck,
+  Eraser,
+  MoonStar,
+  Pencil,
+  Scale,
+  Search,
+} from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 /** Search only earns its place once the list is longer than a glance. */
@@ -10,6 +19,8 @@ const SEARCH_FROM = 8
 /**
  * One day of a program, opened by clicking it in the schedule: pick its workout (or rest),
  * make it a weigh-in day, or open the workout itself. Picking a workout closes the panel.
+ * "Swap with another day" and "every week" work on phones and by keyboard too, where dragging
+ * days doesn't.
  */
 export function ProgramDayDrawer({
   day,
@@ -17,6 +28,9 @@ export function ProgramDayDrawer({
   workouts,
   onPick,
   onToggleWeighIn,
+  weeks,
+  onSwap,
+  onCopyToAllWeeks,
   onClose,
 }: {
   /** The day being edited; null = closed. */
@@ -25,6 +39,12 @@ export function ProgramDayDrawer({
   workouts: WorkoutSummary[]
   onPick: (workoutId: number | null) => void
   onToggleWeighIn: () => void
+  /** How many weeks the program has. */
+  weeks: number
+  /** Start picking the day to swap this one with (the panel closes). */
+  onSwap: () => void
+  /** Put this day on the same day of every week. */
+  onCopyToAllWeeks: () => void
   onClose: () => void
 }) {
   return (
@@ -32,19 +52,49 @@ export function ProgramDayDrawer({
       open={day !== null}
       onClose={onClose}
       title={day ? `Week ${day.week} · Day ${day.day}` : 'Day'}
-      description="Pick what happens on this day. Drag days in the schedule to swap them."
+      description="Pick what happens on this day."
     >
       {day && (
-        <DayForm
-          key={`${day.week}:${day.day}`}
-          cell={cell}
-          workouts={workouts}
-          onPick={(id) => {
-            onPick(id)
-            onClose()
-          }}
-          onToggleWeighIn={onToggleWeighIn}
-        />
+        <div className="flex flex-col gap-6">
+          <DayForm
+            key={`${day.week}:${day.day}`}
+            cell={cell}
+            workouts={workouts}
+            onPick={(id) => {
+              onPick(id)
+              onClose()
+            }}
+            onToggleWeighIn={onToggleWeighIn}
+          />
+          <div className="flex flex-col gap-2 border-border border-t pt-5">
+            <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+              Move or repeat
+            </p>
+            <ActionRow
+              icon={<ArrowLeftRight className="size-4" aria-hidden />}
+              title="Swap with another day"
+              sub="Then click the day it should swap with."
+              onClick={() => {
+                onClose()
+                onSwap()
+              }}
+            />
+            <ActionRow
+              icon={<CopyCheck className="size-4" aria-hidden />}
+              title={`Put this on day ${day.day} of every week`}
+              sub={
+                weeks > 1
+                  ? `Same workout and weigh-in in all ${weeks} weeks.`
+                  : 'Add more weeks first.'
+              }
+              disabled={weeks <= 1}
+              onClick={() => {
+                onClose()
+                onCopyToAllWeeks()
+              }}
+            />
+          </div>
+        </div>
       )}
     </Drawer>
   )
@@ -188,6 +238,108 @@ function Choice({
         <span className="truncate text-[12px] text-ink-muted">{sub}</span>
       </span>
       {on && <Check className="size-4 shrink-0 text-brand-text" strokeWidth={3} aria-hidden />}
+    </button>
+  )
+}
+
+/** A whole week, opened by clicking its name in the schedule: copy, swap or clear it. */
+export function ProgramWeekDrawer({
+  week,
+  weeks,
+  filled,
+  onCopy,
+  onSwap,
+  onClear,
+  onClose,
+}: {
+  /** The week; null = closed. */
+  week: number | null
+  weeks: number
+  /** Days in this week with a workout or a weigh-in. */
+  filled: number
+  onCopy: () => void
+  onSwap: () => void
+  onClear: () => void
+  onClose: () => void
+}) {
+  const run = (action: () => void) => () => {
+    onClose()
+    action()
+  }
+  return (
+    <Drawer
+      open={week !== null}
+      onClose={onClose}
+      title={week ? `Week ${week}` : 'Week'}
+      description={`${filled} of 7 days have a workout or a weigh-in.`}
+    >
+      <div className="flex flex-col gap-2">
+        <ActionRow
+          icon={<CopyCheck className="size-4" aria-hidden />}
+          title="Copy to every week"
+          sub={
+            weeks > 1 ? `All ${weeks} weeks become the same as this one.` : 'Add more weeks first.'
+          }
+          disabled={weeks <= 1}
+          onClick={run(onCopy)}
+        />
+        <ActionRow
+          icon={<ArrowLeftRight className="size-4" aria-hidden />}
+          title="Swap with another week"
+          sub={
+            weeks > 1
+              ? 'Then click any day in the week it should swap with.'
+              : 'Add more weeks first.'
+          }
+          disabled={weeks <= 1}
+          onClick={run(onSwap)}
+        />
+        <ActionRow
+          icon={<Eraser className="size-4" aria-hidden />}
+          title="Clear this week"
+          sub={
+            filled > 0
+              ? 'Every day becomes a rest day, weigh-ins off.'
+              : 'It’s already all rest days.'
+          }
+          disabled={filled === 0}
+          onClick={run(onClear)}
+        />
+        <p className="mt-2 text-[13px] text-ink-muted">
+          Undo is in the message that pops up, and nothing changes for clients until you save.
+        </p>
+      </div>
+    </Drawer>
+  )
+}
+
+function ActionRow({
+  icon,
+  title,
+  sub,
+  disabled = false,
+  onClick,
+}: {
+  icon: ReactNode
+  title: string
+  sub: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex min-h-14 w-full items-center gap-3 rounded-md bg-surface-raised px-4 py-3 text-left transition hover:ring-[1.5px] hover:ring-border-strong hover:ring-inset active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50"
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface text-ink">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-semibold text-[15px] text-ink">{title}</span>
+        <span className="text-[13px] text-ink-muted">{sub}</span>
+      </span>
     </button>
   )
 }

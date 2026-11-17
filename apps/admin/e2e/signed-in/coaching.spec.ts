@@ -96,7 +96,7 @@ test('builds a program from that workout', async ({ page }) => {
 })
 
 test('adds a client on that program', async ({ page }) => {
-  await page.goto('/users')
+  await page.goto('/clients')
   await page.getByRole('button', { name: 'Add person' }).click()
   const wizard = page.getByRole('dialog', { name: 'Add a person' })
 
@@ -131,16 +131,15 @@ test('adds a client on that program', async ({ page }) => {
   await done.getByRole('button', { name: 'Done' }).click()
   await expect(done).toBeHidden()
 
-  const row = page.getByRole('main').getByRole('button', { name: new RegExp(`^E ${client.name}`) })
+  // The clients table: a row opens the client's page.
+  const row = page.getByRole('main').getByRole('link', { name: new RegExp(client.name) })
   await expect(row).toContainText(program)
-
-  // A row opens in place, with a link to their progress page.
   await row.click()
-  await expect(row).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByText('0 of 8 workouts done')).toBeVisible()
-  await page.getByRole('main').getByRole('link', { name: 'Progress' }).click()
-  await expect(page).toHaveURL(/\/users\/\d+$/)
-  await expect(page.getByRole('heading', { level: 1, name: 'E2E’s progress' })).toBeVisible()
+  await expect(page).toHaveURL(/\/clients\/\d+$/)
+  await expect(page.getByRole('heading', { level: 1, name: new RegExp(client.name) })).toBeVisible()
+  await expect(page.getByText('of 8 workouts done')).toBeVisible()
+  await page.getByRole('link', { name: 'Progress', exact: true }).click()
+  await expect(page).toHaveURL(/\/clients\/\d+\?tab=progress$/)
   // The weight typed in the wizard is their first weigh-in.
   await expect(
     page.getByRole('img', { name: /^Body weight, 1 points, from 80 to 80 kg/ }),

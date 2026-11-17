@@ -1,5 +1,5 @@
 import { users } from '@project180/db'
-import { isStaff } from '@project180/shared'
+import { canUseAdmin, isPlatform, isStaff } from '@project180/shared'
 import { eq } from 'drizzle-orm'
 import { createMiddleware } from 'hono/factory'
 import type { AppEnv } from './env'
@@ -37,7 +37,10 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const session = result.response
   if (!session) return c.json({ error: 'Not signed in' }, 401)
   const me = toMe(session.user)
-  if (c.var.appKind === 'admin' && !isStaff(me.role)) return c.json({ error: 'Not signed in' }, 401)
+  if (c.var.appKind === 'admin' && !canUseAdmin(me.role))
+    return c.json({ error: 'Not signed in' }, 401)
+  // The platform admin's account is for the dashboard only, never the phone app.
+  if (c.var.appKind === 'app' && isPlatform(me.role)) return c.json({ error: 'Not signed in' }, 401)
   // Blocked: their sessions were deleted, but a cached cookie could still hold one for a moment.
   if (session.user.blockedAt) return c.json({ error: 'Not signed in' }, 401)
   c.set('user', me)
@@ -68,8 +71,17 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   for (const cookie of result.headers.getSetCookie()) c.res.headers.append('set-cookie', cookie)
 })
 
-/** 403 unless the signed-in user is staff (an owner or a coach). Use after requireUser. */
+/**
+ * 403 unless the signed-in user is staff (an owner or a coach). Use after requireUser. The
+ * platform admin is not staff, so every gym route refuses them.
+ */
 export const requireAdmin = createMiddleware<AppEnv>(async (c, next) => {
   if (!isStaff(c.var.user.role)) return c.json({ error: 'Admins only' }, 403)
+  await next()
+})
+
+/** 403 unless the signed-in user is the platform admin. Use after requireUser. */
+export const requirePlatform = createMiddleware<AppEnv>(async (c, next) => {
+  if (!isPlatform(c.var.user.role)) return c.json({ error: 'Not found' }, 404)
   await next()
 })

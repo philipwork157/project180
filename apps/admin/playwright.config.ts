@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // End-to-end tests for the dashboard. The admin dev server proxies /api to the phone app's
-// Worker, so both run (the root `bun run dev`), with the local D1 database.
+// Worker, so both run, with the local D1 database.
 // `setup` signs the e2e coach in; `teardown` removes everything the run made.
 const signedIn = { storageState: 'e2e/.auth/coach.json' }
 
@@ -40,10 +40,21 @@ export default defineConfig({
       use: { ...devices['Pixel 7'], ...signedIn },
     },
   ],
-  webServer: {
-    command: 'bun run --cwd ../.. dev',
-    url: 'http://localhost:5174/api/health',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // Both dev servers, each started (and stopped) by Playwright itself: the phone app's runs the
+  // API and the database; the dashboard's proxies /api to it.
+  webServer: [
+    {
+      command: 'bun run dev',
+      cwd: '../app',
+      url: 'http://localhost:5173/api/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command: 'bun run dev',
+      url: 'http://localhost:5174/api/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+  ],
 })

@@ -64,6 +64,10 @@ function text(value: unknown): string {
   return ''
 }
 
+const grams = (v: number | null) => (v === null ? null : roundGrams(v))
+const milligrams = (g: number | null) => (g === null ? null : Math.round(g * 1000))
+const divide = (v: number | null, by: number) => (v === null ? null : v / by)
+
 /** Name, brand and values per 100 g, or null when there's no nutrition to log. */
 function readProduct(p: OffProduct): ProviderProduct | null {
   const n = p.nutriments ?? {}
@@ -83,6 +87,10 @@ function readProduct(p: OffProduct): ProviderProduct | null {
       proteinG: roundGrams(protein ?? 0),
       carbsG: roundGrams(num(n.carbohydrates_100g) ?? 0),
       fatG: roundGrams(num(n.fat_100g) ?? 0),
+      fibreG: grams(num(n.fiber_100g)),
+      sugarG: grams(num(n.sugars_100g)),
+      // Sodium in g per 100 g; from salt (sodium x 2.5) when only that is given.
+      sodiumMg: milligrams(num(n.sodium_100g) ?? divide(num(n.salt_100g), 2.5)),
     },
     servingG: serving && serving > 0 ? roundGrams(serving) : null,
   }

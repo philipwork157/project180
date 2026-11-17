@@ -124,7 +124,9 @@ describe('Build a program with Claude', () => {
 
     const spy = claudeAnswers(reply(ids))
     const me = (await call<Json>('/me', { cookie: owner })).data.user
-    const result = await buildProgram(createDb(env.DB), keyed, me, '2 weeks, beginner, full body')
+    const result = await buildProgram(createDb(env.DB), keyed, me, '2 weeks, beginner, full body', {
+      model: 'claude-sonnet-5-5',
+    })
 
     expect(result.program).toMatchObject({ name: 'Beginner Full Body 2 Weeks', durationWeeks: 2 })
     expect(result.newWorkouts).toEqual([expect.objectContaining({ name: 'Upper A', exercises: 1 })])
@@ -165,7 +167,9 @@ describe('Build a program with Claude', () => {
       }),
     )
     const me = (await call<Json>('/me', { cookie: owner })).data.user
-    await expect(buildProgram(createDb(env.DB), keyed, me, 'Something odd')).rejects.toMatchObject({
+    await expect(
+      buildProgram(createDb(env.DB), keyed, me, 'Something odd', { model: 'claude-sonnet-5-5' }),
+    ).rejects.toMatchObject({
       status: 422,
     })
     expect(await snapshot()).toEqual(before)

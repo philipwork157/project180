@@ -41,3 +41,16 @@ export function parseId(value: string): number {
   if (!Number.isInteger(n) || n <= 0) notFound()
   return n
 }
+
+/** Query values checked like a body: 400 with the first problem. */
+export function parseQuery<S extends z.ZodType>(schema: S, value: unknown): z.output<S> {
+  const result = schema.safeParse(value)
+  if (!result.success) {
+    const issue = result.error.issues[0]
+    const field = issue?.path.join('.')
+    throw new HTTPException(400, {
+      message: field ? `${field}: ${issue?.message}` : (issue?.message ?? 'Invalid query'),
+    })
+  }
+  return result.data
+}

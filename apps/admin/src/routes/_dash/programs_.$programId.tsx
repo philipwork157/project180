@@ -7,7 +7,16 @@ import {
   workoutsQuery,
 } from '@project180/client'
 import type { ProgramCell, ProgramDetail, ProgramInput } from '@project180/shared'
-import { cellKey, EMPTY_CELL, isOwner, swapCells } from '@project180/shared'
+import {
+  cellKey,
+  clearWeek,
+  copyDayToAllWeeks,
+  EMPTY_CELL,
+  isOwner,
+  swapCells,
+  swapWeeks,
+  weekFilled,
+} from '@project180/shared'
 import {
   Button,
   Card,
@@ -24,6 +33,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import {
   Archive,
   ArrowLeft,
+  ArrowLeftRight,
   CopyCheck,
   GripVertical,
   ListPlus,
@@ -40,10 +50,22 @@ import { AssignForm } from '../../components/assign-form'
 import { Stepper } from '../../components/controls'
 import { DeleteForGood } from '../../components/delete-for-good'
 import { HistoryControls, useDraftBackup, useDraftHistory } from '../../components/draft-history'
-import { ProgramDayDrawer } from '../../components/program-day'
+import { ProgramDayDrawer, ProgramWeekDrawer } from '../../components/program-day'
+import { ProgramTips, ProgramTipsButton, useProgramTips } from '../../components/program-tips'
 import { useUnsavedChangesGuard } from '../../components/unsaved-changes'
 import { UpdateClientsDrawer } from '../../components/update-clients'
 import { WorkoutPalette } from '../../components/workout-palette'
+
+/**
+ * The pinned Week column. The table spaces its cells 6px apart and the card has padding on the
+ * left; on a phone the days scroll sideways under the column and would show through those gaps,
+ * so its background reaches over them (6px all round, and back over the card's padding). Only
+ * there, where the days really scroll, a 1px line at its edge marks it as pinned: it runs through
+ * the row gaps (4px up and down, so it never breaks) and keeps the same 6px gap to the days as
+ * everywhere else.
+ */
+const PINNED_FILL =
+  'shadow-[0_0_0_6px_var(--surface),-22px_0_0_6px_var(--surface)] max-md:after:absolute max-md:after:inset-y-[-4px] max-md:after:right-0 max-md:after:w-px max-md:after:bg-border'
 
 export const Route = createFileRoute('/_dash/programs_/$programId')({
   component: ProgramEditorPage,
@@ -161,6 +183,13 @@ function Builder({
   const [editing, setEditing] = useState<{ week: number; day: number } | null>(null)
   const [dragFrom, setDragFrom] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
+  const tips = useProgramTips()
+  // "Swap with…": the day (or week) waiting for the one it swaps with. Works by tap and by
+  // keyboard, where dragging doesn't.
+  const [picking, setPicking] = useState<
+    { kind: 'day'; week: number; day: number } | { kind: 'week'; week: number } | null
+  >(null)
+  const [weekOpen, setWeekOpen] = useState<number | null>(null)
   const [error, setError] = useState<string>()
   const [assignOpen, setAssignOpen] = useState(false)
   const [updateOpen, setUpdateOpen] = useState(false)
@@ -209,6 +238,37 @@ function Builder({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [brush])
+  useEffect(() => {
+    if (picking === null) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPicking(null)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [picking])
+  // A bulk change to the grid, with Undo in the toast.
+  const changeAll = (
+    title: string,
+    change: (cells: Record<string, Cell>) => Record<string, Cell>,
+  ) => {
+    const before = draft.cells
+    const after = change(before)
+    if (after === before) return
+    setDraft((d) => ({ ...d, cells: after }))
+    toast({
+      title,
+      description: 'Save to keep it.',
+      action: { label: 'Undo', onClick: () => setDraft((d) => ({ ...d, cells: before })) },
+    })
+  }
+  // The day (or week) clicked while picking: swap them.
+  const pickTarget = (week: number, day: number) => {
+    const from = picking
+    setPicking(null)
+    if (!from) return
+    if (from.kind === 'day') return swap(keyOf(from.week, from.day), keyOf(week, day))
+    changeAll(`Week ${from.week} and week ${week} swapped`, (c) => swapWeeks(c, from.week, week))
+  }
+  const isPickSource = (week: number, day: number) =>
+    picking !== null && picking.week === week && (picking.kind === 'week' || picking.day === day)
   const brushName =
     brush === 'rest' ? 'rest days' : brush !== null ? (names.get(brush) ?? 'this workout') : null
   const copyWeekToAll = (from: number) => {
@@ -399,9 +459,12 @@ function Builder({
           />
         </div>
         {canEdit && (
-          <p className="font-semibold text-[13px] text-ink-muted sm:ml-auto">
-            Click a day to change it. Drag a day onto another to swap them.
-          </p>
+          <div className="flex items-center gap-2 sm:ml-auto">
+            <p className="font-semibold text-[13px] text-ink-muted">
+              Click a day to change it. Drag a day onto another to swap them.
+            </p>
+            <ProgramTipsButton onClick={tips.show} />
+          </div>
         )}
       </div>
       {canEdit && workouts.data?.length === 0 && (
@@ -432,12 +495,41 @@ function Builder({
         </div>
       )}
 
+      {picking && (
+        <div
+          role="status"
+          className="-mt-2 flex flex-wrap items-center gap-3 rounded-md bg-brand-soft px-4 py-2.5 font-semibold text-[14px] text-brand-text"
+        >
+          <ArrowLeftRight className="size-4 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">
+            {picking.kind === 'day' ? (
+              <>
+                Click the day to swap with{' '}
+                <b>
+                  week {picking.week} · day {picking.day}
+                </b>
+                .
+              </>
+            ) : (
+              <>
+                Click any day in the week to swap with <b>week {picking.week}</b>.
+              </>
+            )}
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => setPicking(null)}>
+            Cancel
+          </Button>
+        </div>
+      )}
+
+      {canEdit && <ProgramTips open={tips.open} onClose={tips.hide} />}
+
       <section aria-label="Schedule" className="flex min-w-0 flex-col gap-3">
         <div className="overflow-x-auto rounded-lg bg-surface p-3 shadow-card md:p-4">
           <table className="w-full min-w-[640px] table-fixed border-separate border-spacing-1.5">
             <thead>
               <tr>
-                <th className="sticky left-0 z-20 w-14 bg-surface" />
+                <th className={cn('sticky left-0 z-30 w-14 bg-surface', PINNED_FILL)} />
                 {[1, 2, 3, 4, 5, 6, 7].map((day) => (
                   <th
                     key={day}
@@ -456,16 +548,37 @@ function Builder({
                     scope="row"
                     // Stays in view while the days scroll sideways on a phone; solid so days
                     // pass cleanly underneath.
-                    className="sticky left-0 z-20 bg-surface pr-2 text-left align-middle"
+                    className={cn(
+                      'sticky left-0 z-30 bg-surface pr-2 text-left align-middle',
+                      PINNED_FILL,
+                    )}
                   >
-                    <span className="flex flex-col">
-                      <span className="font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.08em]">
-                        Week
+                    {canEdit ? (
+                      <Tooltip label={`Week ${week}: copy, swap or clear`}>
+                        <button
+                          type="button"
+                          aria-label={`Week ${week}: copy, swap or clear`}
+                          onClick={() => setWeekOpen(week)}
+                          className="-ml-2 flex min-h-11 flex-col rounded-md px-2 py-1 text-left transition hover:bg-surface-raised hover:text-brand-text active:scale-[0.97]"
+                        >
+                          <span className="font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.08em]">
+                            Week
+                          </span>
+                          <span className="tabular font-display font-extrabold text-[18px] leading-6">
+                            {week}
+                          </span>
+                        </button>
+                      </Tooltip>
+                    ) : (
+                      <span className="flex flex-col">
+                        <span className="font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.08em]">
+                          Week
+                        </span>
+                        <span className="tabular font-display font-extrabold text-[18px] leading-6">
+                          {week}
+                        </span>
                       </span>
-                      <span className="tabular font-display font-extrabold text-[18px] leading-6">
-                        {week}
-                      </span>
-                    </span>
+                    )}
                   </th>
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => {
                     const k = keyOf(week, day)
@@ -474,7 +587,7 @@ function Builder({
                     const label = hasWorkout
                       ? (names.get(cell.workoutId ?? 0) ?? 'Archived workout')
                       : 'Rest'
-                    const canDrag = canEdit && brush === null
+                    const canDrag = canEdit && brush === null && picking === null
                     return (
                       <td key={day} className="p-0 align-top">
                         {/* biome-ignore lint/a11y/noStaticElementInteractions: dragging is a mouse shortcut; the day's button below does the same by keyboard */}
@@ -508,6 +621,7 @@ function Builder({
                             canEdit && 'hover:ring-2 hover:ring-brand/50',
                             canDrag && 'cursor-grab active:cursor-grabbing',
                             dragFrom === k && 'opacity-40',
+                            isPickSource(week, day) && 'ring-2 ring-brand',
                             dragOver === k && dragFrom !== k && 'scale-[1.03] ring-2 ring-brand',
                           )}
                         >
@@ -520,26 +634,53 @@ function Builder({
                           >
                             {label}
                           </span>
+                          {picking !== null && !isPickSource(week, day) && (
+                            <span className="pointer-events-none absolute inset-0 z-30 hidden place-items-center rounded-md bg-brand-soft/80 group-hover:grid">
+                              <span className="rounded-pill bg-brand px-3 py-1 font-bold text-[12px] text-on-brand">
+                                {picking.kind === 'week' ? `Swap with week ${week}` : 'Swap here'}
+                              </span>
+                            </span>
+                          )}
+                          {dragOver === k && dragFrom !== null && dragFrom !== k && (
+                            // Where it lands: the two days swap.
+                            <span className="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-md bg-brand-soft/80">
+                              <span className="rounded-pill bg-brand px-3 py-1 font-bold text-[12px] text-on-brand">
+                                Swap
+                              </span>
+                            </span>
+                          )}
                           {/* Click anywhere on the day: fill it (brush) or open it to change. */}
                           <button
                             type="button"
                             disabled={!canEdit}
                             aria-label={
-                              brush !== null
-                                ? `Fill week ${week} day ${day}`
-                                : `Week ${week} day ${day}: ${label}. Change`
+                              picking !== null
+                                ? `Swap with week ${week} day ${day}`
+                                : brush !== null
+                                  ? `Fill week ${week} day ${day}`
+                                  : `Week ${week} day ${day}: ${label}. Change`
                             }
                             onClick={() =>
-                              brush !== null
-                                ? setCell(week, day, { workoutId: brush === 'rest' ? null : brush })
-                                : setEditing({ week, day })
+                              picking !== null
+                                ? pickTarget(week, day)
+                                : brush !== null
+                                  ? setCell(week, day, {
+                                      workoutId: brush === 'rest' ? null : brush,
+                                    })
+                                  : setEditing({ week, day })
                             }
                             className={cn(
                               'absolute inset-0 z-10 rounded-md outline-none disabled:cursor-default',
-                              brush !== null ? 'cursor-copy' : 'cursor-[inherit]',
+                              picking !== null
+                                ? 'cursor-pointer'
+                                : brush !== null
+                                  ? 'cursor-copy'
+                                  : 'cursor-[inherit]',
                             )}
                           />
-                          <div className="relative z-20 flex items-end justify-between gap-2">
+                          {/* Clicks anywhere on this row (the pencil included) go through to the day's button;
+                              only the scale takes its own. */}
+                          <div className="pointer-events-none relative z-20 flex items-end justify-between gap-2">
                             <Tooltip
                               label={
                                 cell.checkinRequired
@@ -556,7 +697,7 @@ function Builder({
                                   setCell(week, day, { checkinRequired: !cell.checkinRequired })
                                 }
                                 className={cn(
-                                  'grid size-7 place-items-center rounded-sm transition',
+                                  'pointer-events-auto grid size-7 place-items-center rounded-sm transition',
                                   cell.checkinRequired
                                     ? 'bg-sand/25 text-sand-text'
                                     : 'text-ink-muted/50 hover:bg-surface hover:text-ink disabled:hidden',
@@ -565,12 +706,13 @@ function Builder({
                                 <Scale className="size-3.5" aria-hidden />
                               </button>
                             </Tooltip>
-                            {canEdit && (
+                            {canEdit && picking === null && (
                               <span
                                 aria-hidden
-                                className="pointer-events-none flex items-center gap-1 text-ink-muted opacity-0 transition group-hover:opacity-100"
+                                className="pointer-events-none flex items-center gap-1 text-ink-muted opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-60"
                               >
-                                <GripVertical className="size-3.5" />
+                                {/* Phones swap from the day's panel, so no drag handle there. */}
+                                <GripVertical className="size-3.5 [@media(hover:none)]:hidden" />
                                 <Pencil className="size-3.5" />
                               </span>
                             )}
@@ -641,7 +783,26 @@ function Builder({
             checkinRequired: !cellAt(editing.week, editing.day).checkinRequired,
           })
         }
+        weeks={draft.durationWeeks}
+        onSwap={() => editing && setPicking({ kind: 'day', ...editing })}
+        onCopyToAllWeeks={() =>
+          editing &&
+          changeAll(`Day ${editing.day} copied to every week`, (c) =>
+            copyDayToAllWeeks(c, draft.durationWeeks, editing.week, editing.day),
+          )
+        }
         onClose={() => setEditing(null)}
+      />
+      <ProgramWeekDrawer
+        week={weekOpen}
+        weeks={draft.durationWeeks}
+        filled={weekOpen ? weekFilled(draft.cells, weekOpen) : 0}
+        onCopy={() => weekOpen && copyWeekToAll(weekOpen)}
+        onSwap={() => weekOpen && setPicking({ kind: 'week', week: weekOpen })}
+        onClear={() =>
+          weekOpen && changeAll(`Week ${weekOpen} cleared`, (c) => clearWeek(c, weekOpen))
+        }
+        onClose={() => setWeekOpen(null)}
       />
       {id && <AssignDrawer programId={id} open={assignOpen} onClose={() => setAssignOpen(false)} />}
       {libraryId !== null && (

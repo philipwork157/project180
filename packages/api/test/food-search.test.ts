@@ -72,7 +72,15 @@ describe('food search providers', () => {
         barcode: eggs.code,
         name: 'Large Free Range Eggs',
         brand: 'Nulaid',
-        per100g: { kcal: 143, proteinG: 12.6, carbsG: 0.7, fatG: 9.5 },
+        per100g: {
+          kcal: 143,
+          proteinG: 12.6,
+          carbsG: 0.7,
+          fatG: 9.5,
+          fibreG: null,
+          sugarG: null,
+          sodiumMg: null,
+        },
         servingG: 50,
         source: {
           provider: 'openfoodfacts',

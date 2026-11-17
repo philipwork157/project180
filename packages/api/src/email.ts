@@ -87,6 +87,12 @@ async function sesSendEmail(env: Bindings, body: unknown): Promise<string | unde
 }
 
 /** Local and dev addresses: never the live site. */
+/** Running on this computer (localhost), never a public site. */
+export function isLocalSite(env: Bindings) {
+  const url = env.APP_URL || env.BETTER_AUTH_URL || ''
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(url)
+}
+
 export function isTestSite(env: Bindings) {
   const url = env.APP_URL || env.BETTER_AUTH_URL || ''
   return /localhost|127\.0\.0\.1|\/\/dev\.|admin-dev\.|\.workers\.dev/.test(url)
@@ -200,6 +206,73 @@ To help your coach support you, Project 180 records when you use the app, roughl
 
 TRAIN. FUEL. FEEL. LIVE.`
   return { subject: `Welcome to Project 180, ${first}`, html, text }
+}
+
+const button = (href: string, label: string) =>
+  `<a href="${escapeHtml(href)}" style="display:inline-block;background:#b6e63b;color:#202321;text-decoration:none;font:700 16px/1 Helvetica,Arial,sans-serif;padding:16px 26px;border-radius:14px">${escapeHtml(label)}</a>`
+const small = (text: string) =>
+  `<p style="margin:18px 0 0;font:500 13px/20px Helvetica,Arial,sans-serif;color:#5b605c">${text}</p>`
+
+/** "Confirm your email": sent when someone creates their own account. */
+export function verifyEmailEmail(input: {
+  name: string
+  link: string
+  hours: number
+  coach: boolean
+}): Omit<EmailMessage, 'to'> {
+  const first = input.name.split(' ')[0] ?? input.name
+  const lead = input.coach
+    ? 'Confirm your email to open your coaching dashboard.'
+    : 'Confirm your email to start training, logging food and tracking your progress.'
+  const html = layout(
+    `Welcome, ${escapeHtml(first)}`,
+    [
+      p(lead),
+      button(input.link, 'Confirm my email'),
+      small(
+        `The link works for ${input.hours} hours. If you didn’t create a Project 180 account, ignore this email and nothing happens.`,
+      ),
+    ].join('\n'),
+  )
+  const text = `Welcome, ${first}
+
+${lead}
+
+Confirm: ${input.link}
+
+The link works for ${input.hours} hours. If you didn’t create a Project 180 account, ignore this email and nothing happens.
+
+TRAIN. FUEL. FEEL. LIVE.`
+  return { subject: 'Confirm your email for Project 180', html, text }
+}
+
+/** "Reset your password": a one-time link, for anyone who forgot theirs. */
+export function resetPasswordEmail(input: {
+  name: string
+  link: string
+  minutes: number
+}): Omit<EmailMessage, 'to'> {
+  const first = input.name.split(' ')[0] ?? input.name
+  const html = layout(
+    `Reset your password, ${escapeHtml(first)}`,
+    [
+      p('Someone asked to reset the password for your Project 180 account. Choose a new one here:'),
+      button(input.link, 'Choose a new password'),
+      small(
+        `The link works for ${input.minutes} minutes and only once. If it wasn’t you, ignore this email: your password stays the same.`,
+      ),
+    ].join('\n'),
+  )
+  const text = `Reset your password, ${first}
+
+Someone asked to reset the password for your Project 180 account. Choose a new one here:
+
+${input.link}
+
+The link works for ${input.minutes} minutes and only once. If it wasn’t you, ignore this email: your password stays the same.
+
+TRAIN. FUEL. FEEL. LIVE.`
+  return { subject: 'Reset your Project 180 password', html, text }
 }
 
 /** A new password set by their coach. */

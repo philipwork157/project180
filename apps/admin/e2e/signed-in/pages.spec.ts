@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test'
 import { APP_URL, expectNoSidewaysScroll } from '../support'
 
 const PAGES = [
-  { link: 'Overview', path: '/', heading: 'Hi, E2E' },
-  { link: 'Exercises', path: '/exercises', heading: 'Exercises' },
-  { link: 'Workouts', path: '/workouts', heading: 'Workouts' },
+  { link: 'Today', path: '/', heading: 'Hi, E2E' },
+  { link: 'Clients', path: '/clients', heading: 'Clients' },
   { link: 'Programs', path: '/programs', heading: 'Programs' },
-  { link: 'Users', path: '/users', heading: 'My clients' },
-  { link: 'Messages', path: '/messages', heading: 'Messages' },
+  { link: 'Workouts', path: '/workouts', heading: 'Workouts' },
+  { link: 'Exercises', path: '/exercises', heading: 'Exercises' },
+  { link: 'Recipes', path: '/recipes', heading: 'Recipes' },
 ]
 
 // Runs on a laptop and on a phone (see playwright.config.ts).

@@ -71,6 +71,9 @@ async function remember(
     proteinG: p?.per100g.proteinG ?? null,
     carbsG: p?.per100g.carbsG ?? null,
     fatG: p?.per100g.fatG ?? null,
+    fibreG: p?.per100g.fibreG ?? null,
+    sugarG: p?.per100g.sugarG ?? null,
+    sodiumMg: p?.per100g.sodiumMg ?? null,
     servingG: p?.servingG ?? null,
     fetchedAt: new Date(),
   }
@@ -102,6 +105,9 @@ export async function lookupBarcode(
           proteinG: saved.proteinG ?? 0,
           carbsG: saved.carbsG ?? 0,
           fatG: saved.fatG ?? 0,
+          fibreG: saved.fibreG,
+          sugarG: saved.sugarG,
+          sodiumMg: saved.sodiumMg,
         },
         servingG: saved.servingG,
       })

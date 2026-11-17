@@ -1,8 +1,9 @@
 import { addDays, daysBetween, formatWeight, weightChange } from '@project180/shared'
-import { Button, cn } from '@project180/ui'
 import { Scale } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
+import { Button } from './button'
+import { cn } from './cn'
 
 interface Point {
   date: string
@@ -43,12 +44,20 @@ export function WeightChart({
   today,
   goalKg,
   onLog,
+  embedded = false,
+  emptyText,
 }: {
   points: Point[]
   today: string
   goalKg: number | null
-  onLog: () => void
+  /** The phone's "Log weight" button; left out where you can't log (the coach's view). */
+  onLog?: () => void
+  /** Inside another card (the coach's progress page): no card of its own. */
+  embedded?: boolean
+  /** What to say before there are two weigh-ins. */
+  emptyText?: { none: string; one: string }
 }) {
+  const box = cn('flex flex-col', !embedded && 'rounded-lg bg-surface p-5 shadow-card md:p-6')
   const span = all.length > 1 ? daysBetween(all[0]?.date ?? today, today) : 0
   const [range, setRange] = useState<number>(span > 90 ? 90 : 0)
   const from = range ? addDays(today, -range) : ''
@@ -83,33 +92,35 @@ export function WeightChart({
           </p>
         )}
       </div>
-      <Button
-        variant="secondary"
-        size="sm"
-        className="h-11 shrink-0"
-        icon={<Scale className="size-4" aria-hidden />}
-        onClick={onLog}
-      >
-        Log weight
-      </Button>
+      {onLog && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-11 shrink-0"
+          icon={<Scale className="size-4" aria-hidden />}
+          onClick={onLog}
+        >
+          Log weight
+        </Button>
+      )}
     </div>
   )
 
   if (all.length < 2) {
     return (
-      <div className="flex flex-col gap-4 rounded-lg bg-surface p-5 shadow-card md:p-6">
+      <div className={cn(box, 'gap-4')}>
         {header}
         <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
           {all.length === 0
-            ? 'Log your weight on weigh-in days and your trend shows up here.'
-            : 'One more weigh-in and your trend line shows up here.'}
+            ? (emptyText?.none ?? 'Log your weight on weigh-in days and your trend shows up here.')
+            : (emptyText?.one ?? 'One more weigh-in and your trend line shows up here.')}
         </p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-5 rounded-lg bg-surface p-5 shadow-card md:p-6">
+    <div className={cn(box, 'gap-5')}>
       {header}
       {span > 30 && (
         <fieldset className="flex w-fit gap-1 rounded-pill bg-surface-raised p-1">

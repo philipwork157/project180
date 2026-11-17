@@ -1,37 +1,28 @@
-import { claudeFeatureInput, foodPhotoSettingsInput, isOwner } from '@project180/shared'
+import { foodPhotoSettingsInput, isOwner } from '@project180/shared'
 import { Hono } from 'hono'
 import type { AppEnv } from '../env'
 import { forbidden, parseBody } from '../errors'
 import { requireAdmin, requireUser } from '../middleware'
-import {
-  foodPhotoSettings,
-  setFoodPhotoLimit,
-  setFoodPhotos,
-  setWorkoutBuilder,
-  workoutBuilderSettings,
-} from '../settings'
+import { builderSettings, foodPhotoSettings, setFoodPhotoLimit } from '../settings'
 
-/** Site-wide switches. Every coach can see them; only an owner can change them. */
+/**
+ * The business's own settings. Every coach can see them; only an owner can change its default
+ * photo limit. Switching Claude features on or off, models and hard limits are the platform admin's
+ * (routes/platform.ts), so these only report them.
+ */
 export const adminSettingsRoutes = new Hono<AppEnv>()
   .use(requireUser, requireAdmin)
   .get('/food-photos', async (c) =>
-    c.json({ foodPhotos: await foodPhotoSettings(c.var.db, c.env) }),
+    c.json({ foodPhotos: await foodPhotoSettings(c.var.db, c.env, c.var.user.businessId) }),
   )
   .put('/food-photos', async (c) => {
     const { db, user } = c.var
     if (!isOwner(user.role)) forbidden('Only an owner can change this')
-    const { enabled, perDay } = await parseBody(c.req.raw, foodPhotoSettingsInput)
-    if (enabled !== undefined) await setFoodPhotos(db, enabled, user.id)
-    if (perDay !== undefined) await setFoodPhotoLimit(db, perDay, user.id)
-    return c.json({ foodPhotos: await foodPhotoSettings(db, c.env) })
+    const { perDay } = await parseBody(c.req.raw, foodPhotoSettingsInput)
+    if (user.businessId === null) forbidden('Only an owner can change this')
+    await setFoodPhotoLimit(db, user.businessId, perDay)
+    return c.json({ foodPhotos: await foodPhotoSettings(db, c.env, user.businessId) })
   })
   .get('/workout-builder', async (c) =>
-    c.json({ workoutBuilder: await workoutBuilderSettings(c.var.db, c.env) }),
+    c.json({ workoutBuilder: await builderSettings(c.var.db, c.env) }),
   )
-  .put('/workout-builder', async (c) => {
-    const { db, user } = c.var
-    if (!isOwner(user.role)) forbidden('Only an owner can change this')
-    const { enabled } = await parseBody(c.req.raw, claudeFeatureInput)
-    await setWorkoutBuilder(db, enabled, user.id)
-    return c.json({ workoutBuilder: await workoutBuilderSettings(db, c.env) })
-  })

@@ -65,6 +65,14 @@ export function createAuth(env: Bindings, kind: AppKind = 'app') {
         },
         weightUnit: { type: 'string', required: false, input: false, defaultValue: 'kg' },
         coachId: { type: 'number', required: false, input: false },
+        // Which business they belong to: every owner and coach list is scoped to it.
+        businessId: { type: 'number', required: false, input: false },
+        needsOnboarding: {
+          type: 'boolean',
+          required: false,
+          input: false,
+          defaultValue: false,
+        },
         mustChangePassword: { type: 'boolean', required: false, input: false, defaultValue: false },
         lastSeenAt: { type: 'date', required: false, input: false },
         blockedAt: { type: 'date', required: false, input: false },

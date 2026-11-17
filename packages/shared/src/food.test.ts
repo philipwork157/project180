@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   addFoodInput,
   energySplit,
+  foodReminderNotification,
   foodSearchInput,
+  foodStreak,
   mealForHour,
   normalizeFoodQuery,
   nutritionTargetsInput,
   rankFoodResults,
   scaleLabel,
+  sumExtras,
   sumMacros,
   targetShare,
   updateFoodInput,
@@ -152,5 +155,36 @@ describe('food search', () => {
       food('Egg shells', null, 0, 0),
     ]
     expect(rankFoodResults('egg', list).map((f) => f.brand)).toEqual(['Nulaid', 'Other brand'])
+  })
+})
+
+describe('extras and streaks', () => {
+  it('adds up fibre, sugar and sodium, leaving unknowns out', () => {
+    expect(
+      sumExtras([
+        { fibreG: 3.2, sugarG: null, sodiumMg: 120.4 },
+        { fibreG: 1.1, sodiumMg: 300 },
+        {},
+      ]),
+    ).toEqual({ fibreG: 4.3, sugarG: null, sodiumMg: 420 })
+    expect(sumExtras([])).toEqual({ fibreG: null, sugarG: null, sodiumMg: null })
+  })
+
+  it('counts days in a row, not breaking on a today with nothing yet', () => {
+    const days = ['2026-11-13', '2026-11-14', '2026-11-15']
+    expect(foodStreak(days, '2026-11-16')).toBe(3)
+    expect(foodStreak([...days, '2026-11-16'], '2026-11-16')).toBe(4)
+    expect(foodStreak(['2026-11-14'], '2026-11-16')).toBe(0)
+    expect(foodStreak([], '2026-11-16')).toBe(0)
+  })
+})
+
+describe('food reminder in the bell', () => {
+  const base = { on: true, today: '2026-11-16', hour: 19, mealsToday: 1 }
+  it('shows from 19:00 when fewer than two meals are logged', () => {
+    expect(foodReminderNotification(base)?.id).toBe('food:2026-11-16')
+    expect(foodReminderNotification({ ...base, hour: 18 })).toBeNull()
+    expect(foodReminderNotification({ ...base, mealsToday: 2 })).toBeNull()
+    expect(foodReminderNotification({ ...base, on: false })).toBeNull()
   })
 })

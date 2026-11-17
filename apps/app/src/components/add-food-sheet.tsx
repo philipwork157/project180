@@ -1,4 +1,4 @@
-import { ApiError, foodRecentQuery, foodSetupQuery } from '@project180/client'
+import { ApiError, foodRecentQuery, foodSetupQuery, savedMealsQuery } from '@project180/client'
 import {
   type BarcodeProduct,
   type FoodPhotoDraft,
@@ -9,13 +9,16 @@ import {
   type Meal,
   normalizeFoodQuery,
   type RecentFood,
+  type SavedMeal,
+  scaleExtras,
   scaleLabel,
   sumMacros,
 } from '@project180/shared'
-import { Button, Chip, cn, Field, IconButton, Input, Spinner } from '@project180/ui'
+import { Button, Chip, ConfirmDialog, cn, Field, IconButton, Input, Spinner } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  Bookmark,
   Camera,
   History,
   PenLine,
@@ -24,6 +27,7 @@ import {
   Search,
   Trash2,
   X,
+  Zap,
 } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import {
@@ -33,7 +37,9 @@ import {
   SEARCH_MIN_CHARS,
   useAddFood,
   useBarcodeLookup,
+  useDeleteSavedMeal,
   useFoodSearch,
+  useLogSavedMeal,
   usePhotoEstimate,
 } from '../lib/food'
 import { BarcodeScanner } from './barcode-scanner'
@@ -46,6 +52,7 @@ type ReviewDraft = Omit<FoodPhotoDraft, 'photosLeft'> & { photosLeft?: number }
 type Step =
   | { kind: 'menu' }
   | { kind: 'form'; initial?: Partial<FoodDraftItem> }
+  | { kind: 'quick' }
   | { kind: 'reading' }
   | { kind: 'scan'; error?: string }
   | { kind: 'looking'; code: string }
@@ -118,6 +125,8 @@ function AddFood({
   const estimate = usePhotoEstimate()
   const lookup = useBarcodeLookup()
   const add = useAddFood(onDone)
+  const meals = useQuery(savedMealsQuery).data ?? []
+  const logMeal = useLogSavedMeal(onDone)
 
   // Frees the preview photo's memory when it changes or the sheet closes.
   useEffect(
@@ -258,10 +267,34 @@ function AddFood({
                 : 'Couldn’t send the photo. Check your signal and try again.'}
             </p>
           )}
+          <Button
+            variant="ghost"
+            className="self-start"
+            icon={<Zap className="size-4" aria-hidden />}
+            onClick={() => setStep({ kind: 'quick' })}
+          >
+            Quick add calories
+          </Button>
+          {meals.length > 0 && (
+            <SavedMealsList
+              meals={meals}
+              busyId={logMeal.isPending ? (logMeal.variables?.id ?? null) : null}
+              error={logMeal.isError ? 'Couldn’t add it. Check your signal and try again.' : null}
+              onPick={(m) => logMeal.mutate({ id: m.id, date, meal })}
+            />
+          )}
           {recent.length > 0 && (
             <RecentList foods={recent} onPick={(f) => setStep({ kind: 'form', initial: f })} />
           )}
         </>
+      )}
+
+      {step.kind === 'quick' && (
+        <QuickAdd
+          saving={add.isPending}
+          error={add.isError ? 'Couldn’t save. Check your signal and try again.' : null}
+          onSubmit={(food) => add.mutate({ date, meal, source: 'manual', entries: [food] })}
+        />
       )}
 
       {step.kind === 'form' && (
@@ -828,7 +861,22 @@ function PhotoReview({
           {error}
         </p>
       )}
-      <Button size="lg" block loading={saving} disabled={!named} onClick={() => onSave(items)}>
+      <Button
+        size="lg"
+        block
+        loading={saving}
+        disabled={!named}
+        onClick={() =>
+          // A label also knows fibre, sugar and sodium: scaled to what was eaten.
+          onSave(
+            label
+              ? items.map((it, n) =>
+                  n === 0 ? { ...it, ...scaleExtras(label.per100g, it.grams ?? 100) } : it,
+                )
+              : items,
+          )
+        }
+      >
         Save {items.length === 1 ? 'food' : `${items.length} foods`}
       </Button>
       {credit && (
@@ -879,5 +927,148 @@ function SmallAmount({
       </label>
       <AmountInput id={id} value={value} onChange={onChange} />
     </div>
+  )
+}
+
+/** Your saved meals: one tap logs the whole meal. */
+function SavedMealsList({
+  meals,
+  busyId,
+  error,
+  onPick,
+}: {
+  meals: SavedMeal[]
+  busyId: number | null
+  error: string | null
+  onPick: (m: SavedMeal) => void
+}) {
+  const [deleting, setDeleting] = useState<SavedMeal | null>(null)
+  const remove = useDeleteSavedMeal()
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="inline-flex items-center gap-2 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+        <Bookmark className="size-3.5" aria-hidden />
+        My meals
+      </h3>
+      <ul className="flex w-full flex-col">
+        {meals.map((m) => (
+          <li key={m.id} className="flex items-center gap-2 border-border border-b">
+            <button
+              type="button"
+              disabled={busyId !== null}
+              onClick={() => onPick(m)}
+              className="group flex min-h-14 min-w-0 flex-1 items-center gap-3 py-2.5 text-left transition active:scale-[0.99]"
+            >
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate font-semibold text-[15px]">{m.name}</span>
+                <span className="tabular truncate text-[13px] text-ink-muted">
+                  {m.items.length} {m.items.length === 1 ? 'food' : 'foods'} · {kcalLabel(m.kcal)}{' '}
+                  kcal · {gramsLabel(m.proteinG)} g protein
+                </span>
+              </span>
+              <span
+                aria-hidden
+                className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-soft text-brand-text transition group-hover:bg-brand group-hover:text-on-brand"
+              >
+                {busyId === m.id ? <Spinner /> : <Plus className="size-5" />}
+              </span>
+            </button>
+            <IconButton
+              label={`Delete ${m.name}`}
+              icon={<Trash2 aria-hidden />}
+              tone="danger"
+              className="size-11"
+              onClick={() => setDeleting(m)}
+            />
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <p role="alert" className="font-semibold text-[14px] text-danger">
+          {error}
+        </p>
+      )}
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete ${deleting?.name ?? 'this meal'}?`}
+        confirmLabel="Delete"
+        onConfirm={() => {
+          if (deleting) remove.mutate(deleting.id)
+          setDeleting(null)
+        }}
+        onClose={() => setDeleting(null)}
+      >
+        <p>It comes off My meals. Foods you already logged with it stay.</p>
+      </ConfirmDialog>
+    </section>
+  )
+}
+
+/** Just a number of calories (and protein, if known): for when you don't know the details. */
+function QuickAdd({
+  saving,
+  error,
+  onSubmit,
+}: {
+  saving: boolean
+  error: string | null
+  onSubmit: (food: FoodDraftItem) => void
+}) {
+  const [kcal, setKcal] = useState('')
+  const [protein, setProtein] = useState('')
+  const [name, setName] = useState('')
+  const [clientUuid] = useState(() => crypto.randomUUID())
+  const k = parseAmount(kcal)
+  return (
+    <form
+      className="flex flex-col gap-5"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (k === null || k <= 0) return
+        onSubmit({
+          clientUuid,
+          name: name.trim() || 'Quick add',
+          grams: null,
+          kcal: k,
+          proteinG: parseAmount(protein) ?? 0,
+          carbsG: null,
+          fatG: null,
+        })
+      }}
+    >
+      <p className="text-[14px] text-ink-muted">
+        Don’t know the details? Add the calories and move on.
+      </p>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Calories (kcal)">
+          {(id) => <AmountInput id={id} value={kcal} onChange={setKcal} />}
+        </Field>
+        <Field label="Protein (g)" hint="Optional">
+          {(id) => <AmountInput id={id} value={protein} onChange={setProtein} />}
+        </Field>
+      </div>
+      <Field label="What was it?" hint="Optional">
+        {(id) => (
+          <Input
+            id={id}
+            maxLength={120}
+            placeholder="Quick add"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        )}
+      </Field>
+      {error && (
+        <p
+          role="alert"
+          className="rounded-md bg-danger/10 p-3 font-semibold text-[14px] text-danger"
+        >
+          {error}
+        </p>
+      )}
+      <Button type="submit" size="lg" block loading={saving} disabled={k === null || k <= 0}>
+        Add {k ? `${kcalLabel(k)} kcal` : 'calories'}
+      </Button>
+    </form>
   )
 }

@@ -25,6 +25,8 @@ export const Route = createFileRoute('/_app')({
     const me = await context.queryClient.ensureQueryData(meQuery)
     if (!me) throw redirect({ to: '/login' })
     if (me.mustChangePassword) throw redirect({ to: '/choose-password' })
+    // Signed up themselves and hasn't seen the welcome wizard yet (never for coach-added clients).
+    if (me.needsOnboarding) throw redirect({ to: '/welcome' })
     return { me }
   },
   component: AppLayout,
@@ -44,7 +46,8 @@ const tabs = [
 function AppLayout() {
   const { me } = Route.useRouteContext()
   const { pathname } = useLocation()
-  const client = isClient(me.role)
+  // The Coach tab is for clients who have a coach (not staff, not people on their own).
+  const client = isClient(me.role) && me.coachId !== null
   const shown = tabs.filter((t) => t.to !== '/chat' || client)
   const unreadChat = useQuery({ ...myChatUnreadQuery, enabled: client }).data?.unread ?? 0
   useHeartbeat()
@@ -92,12 +95,9 @@ function AppLayout() {
     <div
       className={cn('flex w-full flex-col bg-bg', inChat ? 'h-dvh overflow-hidden' : 'min-h-dvh')}
     >
-      {/* New tab shows at once with a short slide in; no waiting for the old one to leave. */}
-      <motion.main
-        key={pathname}
-        initial={{ opacity: 0.4, x: 12 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+      {/* Tabs switch like a native tab bar: the new screen is simply there. No remount, fade or
+          slide of the layout, so the tab bar (and anything behind its blur) never flickers. */}
+      <main
         className={cn(
           'w-full px-4 pt-safe md:px-8 lg:px-12',
           // Chat: a fixed height, not flex-1, or the column grows to fit every message and
@@ -109,7 +109,7 @@ function AppLayout() {
         style={inChat ? { paddingBottom: hideNav ? 0 : navHeight } : undefined}
       >
         <Outlet />
-      </motion.main>
+      </main>
       <nav
         ref={nav}
         aria-label="Main"
@@ -157,25 +157,38 @@ function AppLayout() {
           )}
         >
           {shown.map(({ to, label, icon: Icon }) => {
-            const active = to === '/' ? pathname === '/' : pathname.startsWith(to)
+            // Recipes open from Fuel, so Fuel stays lit there.
+            const active =
+              to === '/'
+                ? pathname === '/'
+                : pathname.startsWith(to) || (to === '/fuel' && pathname.startsWith('/recipes'))
             return (
               <li key={to}>
                 <Link
                   to={to}
                   className={cn(
-                    'flex flex-col items-center gap-1 rounded-md py-1.5 font-bold text-[12px] transition',
+                    'flex flex-col items-center gap-1 rounded-md py-1.5 font-bold text-[12px] transition-transform active:scale-95',
                     active ? 'text-ink' : 'text-ink-muted',
                   )}
                 >
                   <span
                     className={cn(
                       // Six tabs on a 375px phone: a slightly narrower pill keeps a gap between them.
-                      'relative grid h-8 place-items-center rounded-pill transition',
+                      'relative grid h-8 place-items-center rounded-pill',
                       shown.length === 6 ? 'w-12' : 'w-14',
-                      active && 'bg-brand-soft text-brand-text',
+                      active && 'text-brand-text',
                     )}
                   >
-                    <Icon className="size-6" strokeWidth={2.2} aria-hidden />
+                    {/* One pill that glides to the tapped tab, instead of every tab re-fading. */}
+                    {active && (
+                      <motion.span
+                        layoutId="tab-pill"
+                        transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                        className="absolute inset-0 rounded-pill bg-brand-soft"
+                        aria-hidden
+                      />
+                    )}
+                    <Icon className="relative size-6" strokeWidth={2.2} aria-hidden />
                     {to === '/' && active && (
                       <span className="absolute top-1 right-3 size-2.5 rounded-full bg-clay ring-2 ring-surface" />
                     )}

@@ -32,7 +32,7 @@ export function ExerciseThumb({
 }
 
 /** Shrinks a photo in the browser (longest side 1200px, WebP) so uploads stay small and quick. */
-async function shrink(file: File): Promise<File> {
+export async function shrink(file: File): Promise<File> {
   try {
     const bitmap = await createImageBitmap(file)
     const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height))

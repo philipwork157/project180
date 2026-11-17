@@ -49,7 +49,7 @@ for (const d of PHILIP_PROGRAM.days) {
 }
 
 const exerciseId = (name: string) =>
-  `(SELECT id FROM exercises WHERE lower(name) = lower(${q(name)}) ORDER BY archived_at IS NOT NULL, id LIMIT 1)`
+  `(SELECT id FROM exercises WHERE lower(name) = lower(${q(name)}) AND business_id = (SELECT business_id FROM users WHERE id = ${admin}) ORDER BY archived_at IS NOT NULL, id LIMIT 1)`
 // Library rows only (client_id IS NULL): clients' copies carry the same names.
 const workoutId = (name: string) =>
   `(SELECT id FROM workouts WHERE name = ${q(name)} AND client_id IS NULL ORDER BY id LIMIT 1)`

@@ -19,6 +19,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppEnv } from '../env'
 import { notFound } from '../errors'
+import { inMyBusiness } from '../library'
 import { requireUser } from '../middleware'
 
 /** Results are shared by everyone and kept this long; a search costs 1% of the daily free quota. */
@@ -50,12 +51,18 @@ const decodeHtml = (s: string) =>
  * Without YOUTUBE_API_KEY it answers configured: false and the app opens YouTube instead.
  */
 /**
- * Staff may look up any exercise. A client only exercises in their own workouts (their program
- * copies, or a workout they've started, swaps included), so nobody can walk through every id
- * and use up the day's YouTube searches.
+ * Staff may look up any exercise in their business's library. A client only exercises in their
+ * own workouts (their program copies, or a workout they've started, swaps included), so nobody
+ * can walk through every id and use up the day's YouTube searches.
  */
 async function mayWatch(db: Db, user: Me, exerciseId: number) {
-  if (isStaff(user.role)) return true
+  if (isStaff(user.role)) {
+    const [row] = await db
+      .select({ id: exercises.id })
+      .from(exercises)
+      .where(and(eq(exercises.id, exerciseId), inMyBusiness(exercises.businessId, user)))
+    return Boolean(row)
+  }
   const [[inProgram], [inSession]] = await Promise.all([
     db
       .select({ id: workoutExercises.id })

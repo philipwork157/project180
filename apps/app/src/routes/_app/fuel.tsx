@@ -1,8 +1,15 @@
-import { foodDayQuery, foodSummaryQuery, waterDayQuery } from '@project180/client'
+import {
+  ApiError,
+  foodDayQuery,
+  foodStreakQuery,
+  foodSummaryQuery,
+  waterDayQuery,
+} from '@project180/client'
 import {
   addDays,
   type FoodEntry,
   gramsLabel,
+  isClient,
   kcalLabel,
   MEAL_LABELS,
   MEALS,
@@ -11,17 +18,33 @@ import {
   sumMacros,
   todayIn,
 } from '@project180/shared'
-import { Button, cn, IconButton } from '@project180/ui'
+import { Button, cn, Field, IconButton, Input, MacroWeekChart } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Camera, ChevronLeft, ChevronRight, Plus, ScanBarcode, Search } from 'lucide-react'
+import {
+  Bookmark,
+  Camera,
+  ChefHat,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Flame,
+  Plus,
+  ScanBarcode,
+  Search,
+  Target,
+} from 'lucide-react'
 import { useState } from 'react'
 import { AddFoodSheet } from '../../components/add-food-sheet'
 import { EditFoodSheet } from '../../components/edit-food-sheet'
+import { ExerciseCard } from '../../components/exercise-card'
 import { FuelTotals, FuelWeek } from '../../components/fuel-totals'
-import { MacroWeekChart } from '../../components/macro-week-chart'
+import { MyTargetsSheet } from '../../components/my-targets'
+import { RecipesEntryCard } from '../../components/recipe-card'
 import { ScreenHeader } from '../../components/screen-header'
+import { Sheet } from '../../components/sheet'
 import { WaterCard } from '../../components/water-card'
+import { useCopyMeal, useSaveMeal } from '../../lib/food'
 
 export const Route = createFileRoute('/_app/fuel')({
   component: FuelPage,
@@ -43,6 +66,9 @@ const longDay = (date: string) =>
 
 function FuelPage() {
   const { me } = Route.useRouteContext()
+  // A client without a coach sets their own daily targets.
+  const onOwn = isClient(me.role) && me.coachId === null
+  const [targeting, setTargeting] = useState(false)
   const today = todayIn(me.timezone)
   const [date, setDate] = useState(today)
   const [adding, setAdding] = useState<Meal | null>(null)
@@ -51,6 +77,10 @@ function FuelPage() {
   const week = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
   const sunday = week[6] ?? monday
   const day = useQuery(foodDayQuery(date))
+  // The day before, for "Copy yesterday's breakfast" on an empty meal.
+  const dayBefore = useQuery(foodDayQuery(addDays(date, -1)))
+  const streak = useQuery(foodStreakQuery).data ?? 0
+  const [savingMeal, setSavingMeal] = useState<Meal | null>(null)
   const water = useQuery(waterDayQuery(date))
   const summary = useQuery(foodSummaryQuery(monday, sunday))
   const targets = day.data?.targets ?? summary.data?.targets ?? null
@@ -89,12 +119,24 @@ function FuelPage() {
         today={today}
         days={summary.data?.days ?? []}
         proteinTarget={targets?.proteinG ?? null}
+        kcalTarget={targets?.kcal ?? null}
+        burned={summary.data?.burned ?? []}
         onSelect={setDate}
       />
-      {date !== today && (
-        <Button variant="ghost" className="self-start" onClick={() => setDate(today)}>
-          Back to today
-        </Button>
+      {(date !== today || streak >= 2) && (
+        <div className="flex flex-wrap items-center gap-3">
+          {streak >= 2 && (
+            <span className="inline-flex min-h-9 items-center gap-2 rounded-pill bg-lime/20 px-3 font-bold text-[13px] text-lime-text">
+              <Flame className="size-4" aria-hidden />
+              {streak} days in a row
+            </span>
+          )}
+          {date !== today && (
+            <Button variant="ghost" onClick={() => setDate(today)}>
+              Back to today
+            </Button>
+          )}
+        </div>
       )}
 
       {day.isError ? (
@@ -104,12 +146,33 @@ function FuelPage() {
       ) : !day.data ? (
         <div className="h-64 animate-pulse rounded-xl bg-surface" />
       ) : (
-        // Phone: totals, Add food, water, the meals, then the week. Laptop: totals, Add food and
-        // water on the left, the meals filling the rest of that row, and the week full width
-        // underneath, so neither column runs on while the other sits empty.
+        // What you tap all day sits near the top. Phone: totals, Add food, water and exercise,
+        // the meals, recipes, then the week. Laptop: totals, Add food and recipes on the left;
+        // water and exercise side by side above the meals on the right, so both columns end
+        // level and nothing you use daily hides under the fold. The week runs full width below.
         <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <div className="flex flex-col gap-5">
-            <FuelTotals totals={day.data.totals} targets={day.data.targets} />
+            <FuelTotals
+              totals={day.data.totals}
+              targets={day.data.targets}
+              burnedKcal={day.data.burned.kcal}
+              extras={day.data.extras}
+              showGoal
+              noTargetsText={
+                onOwn ? 'Set your daily targets to see how each day compares.' : undefined
+              }
+            />
+            {/* On your own, you set your own targets (with a coach, they do). */}
+            {onOwn && (
+              <Button
+                variant="secondary"
+                block
+                icon={<Target className="size-5" aria-hidden />}
+                onClick={() => setTargeting(true)}
+              >
+                {day.data.targets ? 'Change my daily targets' : 'Set my daily targets'}
+              </Button>
+            )}
             <Button
               size="lg"
               block
@@ -120,6 +183,11 @@ function FuelPage() {
             >
               Add food
             </Button>
+            <div className="hidden lg:block">
+              <RecipesEntryCard />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
             {water.data ? (
               <WaterCard water={water.data} isToday={date === today} />
             ) : (
@@ -132,17 +200,28 @@ function FuelPage() {
                 {water.isError && 'Couldn’t load your water. Check your signal and try again.'}
               </div>
             )}
-          </div>
-          <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+            <ExerciseCard
+              burned={day.data.burned}
+              date={date}
+              hasTarget={day.data.targets !== null}
+            />
             {MEALS.map((meal) => (
               <MealCard
                 key={meal}
                 meal={meal}
                 entries={day.data.entries.filter((e) => e.meal === meal)}
+                yesterday={
+                  dayBefore.data?.entries.some((e) => e.meal === meal) ? addDays(date, -1) : null
+                }
+                date={date}
                 onAdd={() => setAdding(meal)}
                 onOpen={setEditing}
+                onSave={() => setSavingMeal(meal)}
               />
             ))}
+          </div>
+          <div className="lg:hidden">
+            <RecipesEntryCard />
           </div>
           <div className="lg:col-span-2">
             <MacroWeekChart
@@ -164,6 +243,8 @@ function FuelPage() {
         onClose={() => setAdding(null)}
       />
       <EditFoodSheet entry={editing} onClose={() => setEditing(null)} />
+      <MyTargetsSheet open={targeting} onClose={() => setTargeting(false)} timezone={me.timezone} />
+      <SaveMealSheet meal={savingMeal} date={date} onClose={() => setSavingMeal(null)} />
     </div>
   )
 }
@@ -171,15 +252,23 @@ function FuelPage() {
 function MealCard({
   meal,
   entries,
+  yesterday,
+  date,
   onAdd,
   onOpen,
+  onSave,
 }: {
   meal: Meal
   entries: FoodEntry[]
+  /** The day before, when it had this meal (offers to copy it into an empty meal). */
+  yesterday: string | null
+  date: string
   onAdd: () => void
   onOpen: (entry: FoodEntry) => void
+  onSave: () => void
 }) {
   const totals = sumMacros(entries)
+  const copy = useCopyMeal()
   return (
     <section
       aria-label={MEAL_LABELS[meal]}
@@ -225,6 +314,12 @@ function MealCard({
                         aria-label="From a barcode"
                       />
                     )}
+                    {e.source === 'recipe' && (
+                      <ChefHat
+                        className="size-3.5 shrink-0 text-ink-muted"
+                        aria-label="From a recipe"
+                      />
+                    )}
                     {e.source === 'search' && (
                       <Search
                         className="size-3.5 shrink-0 text-ink-muted"
@@ -247,6 +342,91 @@ function MealCard({
           ))}
         </ul>
       )}
+      {entries.length === 0 && yesterday && (
+        <Button
+          variant="ghost"
+          className="self-start"
+          icon={<Copy className="size-4" aria-hidden />}
+          loading={copy.isPending}
+          onClick={() => copy.mutate({ fromDate: yesterday, fromMeal: meal, date, meal })}
+        >
+          Copy yesterday’s {MEAL_LABELS[meal].toLowerCase()}
+        </Button>
+      )}
+      {entries.length > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-11 self-start text-ink-muted hover:text-ink"
+          icon={<Bookmark className="size-4" aria-hidden />}
+          onClick={onSave}
+        >
+          Save as a meal
+        </Button>
+      )}
+      {copy.isError && (
+        <p role="alert" className="font-semibold text-[13px] text-danger">
+          Couldn’t copy it. Try again.
+        </p>
+      )}
     </section>
+  )
+}
+
+/** Name a meal to log again in one tap (My meals, in Add food). */
+function SaveMealSheet({
+  meal,
+  date,
+  onClose,
+}: {
+  meal: Meal | null
+  date: string
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const save = useSaveMeal(() => close())
+  function close() {
+    setName('')
+    save.reset()
+    onClose()
+  }
+  const label = meal ? MEAL_LABELS[meal] : 'meal'
+  return (
+    <Sheet open={meal !== null} onClose={close} label="Save as a meal">
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (meal) save.mutate({ name: name.trim() || `My ${label.toLowerCase()}`, date, meal })
+        }}
+      >
+        <div className="flex flex-col gap-1 pr-12">
+          <h2 className="font-bold text-[22px]">Save as a meal</h2>
+          <p className="text-[14px] text-ink-muted">
+            Saves this {label.toLowerCase()} so you can add it again in one tap, from My meals in
+            Add food.
+          </p>
+        </div>
+        <Field label="Name">
+          {(id) => (
+            <Input
+              id={id}
+              maxLength={60}
+              placeholder={`My ${label.toLowerCase()}`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+        </Field>
+        {save.isError && (
+          <p role="alert" className="font-semibold text-[14px] text-danger">
+            {save.error instanceof ApiError ? save.error.message : 'Couldn’t save it. Try again.'}
+          </p>
+        )}
+        <Button type="submit" size="lg" block loading={save.isPending}>
+          Save meal
+        </Button>
+      </form>
+    </Sheet>
   )
 }

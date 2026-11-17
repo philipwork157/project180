@@ -3,6 +3,8 @@ import type {
   ChatSummary,
   ChatThread,
   ChatUnread,
+  ClaudeConfig,
+  ClaudeCosts,
   ClaudeFeatureSettings,
   ClientProfile,
   EnrollmentSummary,
@@ -21,12 +23,23 @@ import type {
   PersonPrograms,
   PersonStats,
   PhotoLimit,
+  PlatformCoach,
+  PlatformHealth,
+  PlatformPeople,
   ProgramCopySummary,
   ProgramDetail,
   ProgramSummary,
+  QuickWorkoutOptions,
+  QuickWorkoutsAccess,
   RecentFood,
+  Recipe,
+  RecipeListQuery,
+  RecipePage,
+  SavedMeal,
   SessionDetail,
   SessionFeedback,
+  StarterLibrary,
+  StarterProgram,
   SwapOptions,
   UserSummary,
   VideoSearch,
@@ -35,7 +48,7 @@ import type {
   WorkoutDetail,
   WorkoutSummary,
 } from '@project180/shared'
-import { type QueryClient, queryOptions } from '@tanstack/react-query'
+import { keepPreviousData, type QueryClient, queryOptions } from '@tanstack/react-query'
 import { ApiError, api } from './api'
 
 /** The signed-in user, or null when signed out. */
@@ -234,6 +247,24 @@ export const clientProfileQuery = (userId: number) =>
       (await api<{ profile: ClientProfile }>(`/admin/users/${userId}/profile`)).profile,
   })
 
+/** On your own (no coach): ready-made programs you can start (app). */
+export const starterProgramsQuery = queryOptions({
+  queryKey: ['me', 'starter-programs'],
+  queryFn: async () => (await api<{ programs: StarterProgram[] }>('/me/starter-programs')).programs,
+})
+
+/** Platform admin: everyone at a glance, sign-ups per week, and every business. */
+export const platformPeopleQuery = queryOptions({
+  queryKey: ['platform', 'people'],
+  queryFn: async () => (await api<{ people: PlatformPeople }>('/platform/people')).people,
+})
+
+/** Platform admin: which business is the starter library, and every business's counts. */
+export const platformStarterQuery = queryOptions({
+  queryKey: ['platform', 'starter'],
+  queryFn: async () => (await api<{ starter: StarterLibrary }>('/platform/starter')).starter,
+})
+
 /** Your own goals and body basics (app). */
 export const myProfileQuery = queryOptions({
   queryKey: ['me', 'profile'],
@@ -274,6 +305,8 @@ export const usersQuery = queryOptions({
 export interface PlanResponse {
   plan: MyPlan | null
   activeSession: { id: number; workoutName: string | null; startedAt: string } | null
+  /** May build their own quick workout (staff always; clients when their coach allows it). */
+  quickWorkouts: boolean
 }
 
 export const planQuery = queryOptions({
@@ -299,6 +332,13 @@ export const swapOptionsQuery = queryOptions({
   queryKey: ['swap-options'],
   queryFn: () => api<SwapOptions>('/sessions/swap-options'),
   staleTime: 10 * 60_000,
+})
+
+/** The quick-workout builder: your own workouts to start from (exercises: swapOptionsQuery). */
+export const quickWorkoutOptionsQuery = queryOptions({
+  queryKey: ['quick-workouts'],
+  queryFn: () => api<QuickWorkoutOptions>('/sessions/quick'),
+  staleTime: 5 * 60_000,
 })
 
 /** A coach's suggested swaps for one exercise (admin). */
@@ -374,6 +414,26 @@ export const foodSummaryQuery = (from: string, to: string) =>
       (await api<{ summary: FoodSummary }>(`/me/food/summary?from=${from}&to=${to}`)).summary,
   })
 
+/** Days in a row with food logged (phone app). */
+export const foodStreakQuery = queryOptions({
+  queryKey: ['food', 'streak'],
+  queryFn: async () => (await api<{ days: number }>('/me/food/streak')).days,
+})
+
+/** Your saved meals ("My meals"). */
+export const savedMealsQuery = queryOptions({
+  queryKey: ['food', 'meals'],
+  queryFn: async () => (await api<{ meals: SavedMeal[] }>('/me/food/meals')).meals,
+  staleTime: 5 * 60_000,
+})
+
+/** Whether the evening food reminder is on (Profile). */
+export const foodRemindersQuery = queryOptions({
+  queryKey: ['food', 'reminders'],
+  queryFn: async () => (await api<{ on: boolean }>('/me/food/reminders')).on,
+  staleTime: 5 * 60_000,
+})
+
 /** Foods you logged lately, to add again quickly. */
 export const foodRecentQuery = queryOptions({
   queryKey: ['food', 'recent'],
@@ -415,6 +475,15 @@ export const personFoodSummaryQuery = (userId: number, from: string, to: string)
 
 /** The owner's switch for food photo estimates, and whether the site has a Claude key (admin). */
 /** A client's daily photo limit and today's use (admin). */
+/** Whether a client may build their own quick workouts (admin). */
+export const personQuickWorkoutsQuery = (userId: number) =>
+  queryOptions({
+    queryKey: ['admin', 'users', userId, 'quick-workouts'],
+    queryFn: async () =>
+      (await api<{ quickWorkouts: QuickWorkoutsAccess }>(`/admin/users/${userId}/quick-workouts`))
+        .quickWorkouts,
+  })
+
 export const personPhotoLimitQuery = (userId: number) =>
   queryOptions({
     queryKey: ['admin', 'users', userId, 'food', 'photo-limit'],
@@ -442,3 +511,72 @@ export const workoutBuilderQuery = queryOptions({
   queryFn: () => api<{ available: boolean }>('/workout-builder'),
   staleTime: 5 * 60_000,
 })
+
+/** Is "Build with Claude" for programs shown? (its own switch and daily limit). */
+export const programBuilderQuery = queryOptions({
+  queryKey: ['admin', 'program-builder'],
+  queryFn: () => api<{ available: boolean }>('/program-builder'),
+})
+
+/** Platform admin: every Claude feature's switch, model and hard daily limit. */
+export const platformClaudeQuery = queryOptions({
+  queryKey: ['platform', 'claude'],
+  queryFn: async () => (await api<{ claude: ClaudeConfig }>('/platform/claude')).claude,
+})
+
+/** Platform admin: what Claude costs (this month, last month, 30 days, top users, failures). */
+export const platformCostsQuery = queryOptions({
+  queryKey: ['platform', 'costs'],
+  queryFn: async () => (await api<{ costs: ClaudeCosts }>('/platform/costs')).costs,
+})
+
+/** Platform admin: every coach and owner, their clients and this month's Claude spend. */
+export const platformCoachesQuery = queryOptions({
+  queryKey: ['platform', 'coaches'],
+  queryFn: async () => (await api<{ coaches: PlatformCoach[] }>('/platform/coaches')).coaches,
+})
+
+/** Platform admin: which keys this site has, and the newest migration. */
+export const platformHealthQuery = queryOptions({
+  queryKey: ['platform', 'health'],
+  queryFn: async () => (await api<{ health: PlatformHealth }>('/platform/health')).health,
+})
+
+/** The query string for a page of recipes; empty values left out. */
+function recipeSearch(params: RecipeListQuery): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') q.set(k, String(v))
+  const text = q.toString()
+  return text ? `?${text}` : ''
+}
+
+/**
+ * A page of recipes (staff: archived: '1' for archived ones) with the counts for each chip,
+ * and whether you saved each. The last page stays on screen while the next one loads.
+ */
+export const recipePageQuery = (params: RecipeListQuery) =>
+  queryOptions({
+    queryKey: ['recipes', 'page', params],
+    queryFn: () => api<RecipePage>(`/recipes${recipeSearch(params)}`),
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+  })
+
+export const recipeQuery = (id: number) =>
+  queryOptions({
+    queryKey: ['recipes', id],
+    queryFn: async () => (await api<{ recipe: Recipe }>(`/recipes/${id}`)).recipe,
+    staleTime: 5 * 60_000,
+  })
+
+/**
+ * Puts a recipe the server just sent back into the cache: the recipe itself, and its card on
+ * any page already loaded. The pages refresh in the background (a recipe may move pages).
+ */
+export function putRecipe(queryClient: QueryClient, recipe: Recipe) {
+  queryClient.setQueryData(recipeQuery(recipe.id).queryKey, recipe)
+  queryClient.setQueriesData<RecipePage>({ queryKey: ['recipes', 'page'] }, (page) =>
+    page ? { ...page, recipes: page.recipes.map((r) => (r.id === recipe.id ? recipe : r)) } : page,
+  )
+  void queryClient.invalidateQueries({ queryKey: ['recipes', 'page'] })
+}

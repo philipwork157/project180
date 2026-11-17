@@ -1,7 +1,9 @@
 // Who may see and manage whom. Owners see everyone; a coach (role admin) sees
 // themselves and the clients they coach; a client sees only themselves.
 // A person's programs and workouts are stricter: only they and their own coach see them,
-// owners included (coachedPerson / coachedUsers).
+// owners included (coachedPerson / coachedUsers). Owners see only their own business: nobody in
+// another business is theirs to see or manage. The platform admin's own account belongs to no
+// business, so no owner ever sees it, and they see nobody (they're not staff).
 import { type Db, users } from '@project180/db'
 import { isOwner, isStaff, type Me, type Role } from '@project180/shared'
 import { and, eq, or } from 'drizzle-orm'
@@ -13,17 +15,24 @@ export interface Person {
   timezone: string
   role: Role
   coachId: number | null
+  businessId: number | null
 }
 
-export function canManage(me: Me, person: { id: number; coachId: number | null }): boolean {
+export function canManage(
+  me: Me,
+  person: { id: number; coachId: number | null; role?: Role; businessId: number | null },
+): boolean {
   if (person.id === me.id) return true
-  if (isOwner(me.role)) return true
+  if (person.role === 'platform') return false
+  if (isOwner(me.role)) return me.businessId !== null && person.businessId === me.businessId
   return isStaff(me.role) && person.coachId === me.id
 }
 
 /** SQL filter on `users` for the people `me` may see. */
 export function managedUsers(me: Me) {
-  if (isOwner(me.role)) return undefined
+  // Owners see everyone in their own business (never the platform admin, who has none).
+  if (isOwner(me.role))
+    return me.businessId === null ? eq(users.id, me.id) : eq(users.businessId, me.businessId)
   if (isStaff(me.role)) return or(eq(users.id, me.id), eq(users.coachId, me.id))
   return eq(users.id, me.id)
 }
@@ -75,6 +84,7 @@ async function findPerson(db: Db, id: number): Promise<Person | undefined> {
       timezone: users.timezone,
       role: users.role,
       coachId: users.coachId,
+      businessId: users.businessId,
     })
     .from(users)
     .where(eq(users.id, id))

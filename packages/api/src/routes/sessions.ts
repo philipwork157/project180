@@ -6,16 +6,20 @@ import {
   programDays,
   sessionExercises,
   setLogs,
+  workoutExercises,
+  workoutGroups,
   workoutSessions,
   workouts,
 } from '@project180/db'
 import {
+  estimateQuickMinutes,
   type FinishResult,
   finishSessionInput,
   type LoggedSet,
   type Me,
   mergeTargets,
   type PreviousSet,
+  quickWorkoutInput,
   type SessionDetail,
   type SwapOptions,
   setLogInput,
@@ -46,8 +50,14 @@ import { insertMany, runAll } from '../batch'
 import type { AppEnv } from '../env'
 import { conflict, notFound, parseBody, parseId } from '../errors'
 import { loadFeedback } from '../feedback'
-import { iso, visibleTo } from '../library'
+import { inMyBusiness, iso, visibleTo } from '../library'
 import { requireUser } from '../middleware'
+import {
+  assertCanQuickWorkout,
+  assertExercisesActive,
+  assertQuickSource,
+  quickWorkoutOptions,
+} from '../quick'
 import {
   cancelWorkout,
   closeIdleWorkout,
@@ -55,7 +65,7 @@ import {
   completedBy,
   sessionSummaries,
 } from '../sessions'
-import { loadWorkoutExercises, loadWorkoutGroups } from './workouts'
+import { exerciseRows, groupRows, loadWorkoutExercises, loadWorkoutGroups } from './workouts'
 
 type SessionRow = typeof workoutSessions.$inferSelect
 
@@ -100,14 +110,16 @@ async function assertCanDoWorkout(db: Db, user: Me, workoutId: number) {
 /**
  * The enrollment (if given) is yours, and the program day (if given) is a day of that program,
  * or of your current one. Otherwise a session could mark a day "done" in someone else's plan.
+ * Returns the enrollment the session belongs to: a program day sent without one (an older copy
+ * of the app) still counts towards the current program, in the plan and on the coach's page.
  */
 async function assertOwnPlanDay(
   db: Db,
   user: Me,
   enrollmentId: number | null,
   programDayId: number | null,
-) {
-  if (enrollmentId === null && programDayId === null) return
+): Promise<number | null> {
+  if (enrollmentId === null && programDayId === null) return null
   const [enrollment] = await db
     .select({ id: enrollments.id, programId: enrollments.programId })
     .from(enrollments)
@@ -120,12 +132,13 @@ async function assertOwnPlanDay(
     .limit(1)
   if (!enrollment)
     notFound(enrollmentId === null ? 'Program day not found' : 'Enrollment not found')
-  if (programDayId === null) return
+  if (programDayId === null) return enrollment.id
   const [day] = await db
     .select({ id: programDays.id })
     .from(programDays)
     .where(and(eq(programDays.id, programDayId), eq(programDays.programId, enrollment.programId)))
   if (!day) notFound('Program day not found')
+  return enrollment.id
 }
 
 async function previousSets(db: Db, userId: number, sessionId: number, exerciseIds: number[]) {
@@ -360,7 +373,10 @@ export async function sessionDetail(db: Db, row: SessionRow): Promise<SessionDet
   }
 }
 
-/** Everything the app's swap sheet needs: every exercise in use, the coach's picks and your past swaps. */
+/**
+ * Everything the app's swap sheet needs: every exercise in use in their business's library, the
+ * coach's picks and your past swaps.
+ */
 async function swapOptions(db: Db, user: Me): Promise<SwapOptions> {
   const alt = alias(exercises, 'alt')
   const [list, picks, past] = await Promise.all([
@@ -375,7 +391,7 @@ async function swapOptions(db: Db, user: Me): Promise<SwapOptions> {
         imageKey: exercises.imageKey,
       })
       .from(exercises)
-      .where(isNull(exercises.archivedAt))
+      .where(and(isNull(exercises.archivedAt), inMyBusiness(exercises.businessId, user)))
       .orderBy(asc(exercises.name)),
     db
       .select({
@@ -384,7 +400,7 @@ async function swapOptions(db: Db, user: Me): Promise<SwapOptions> {
       })
       .from(exerciseAlternatives)
       .innerJoin(alt, eq(alt.id, exerciseAlternatives.alternativeId))
-      .where(isNull(alt.archivedAt))
+      .where(and(isNull(alt.archivedAt), inMyBusiness(alt.businessId, user)))
       .orderBy(asc(exerciseAlternatives.exerciseId), asc(exerciseAlternatives.position)),
     db
       .select({
@@ -422,6 +438,7 @@ const targetsOf = (r: typeof sessionExercises.$inferSelect) => ({
  */
 async function swapExercise(
   db: Db,
+  user: Me,
   session: SessionRow,
   input: { exerciseId: number; replacementId: number },
 ) {
@@ -438,7 +455,13 @@ async function swapExercise(
     db
       .select({ id: exercises.id, equipment: exercises.equipment })
       .from(exercises)
-      .where(and(eq(exercises.id, input.replacementId), isNull(exercises.archivedAt))),
+      .where(
+        and(
+          eq(exercises.id, input.replacementId),
+          isNull(exercises.archivedAt),
+          inMyBusiness(exercises.businessId, user),
+        ),
+      ),
     db
       .select({ n: count() })
       .from(setLogs)
@@ -506,6 +529,60 @@ async function swapExercise(
   ])
 }
 
+type NewSession = Pick<
+  typeof workoutSessions.$inferInsert,
+  'clientUuid' | 'workoutId' | 'enrollmentId' | 'programDayId' | 'scheduledDate'
+>
+
+/** A session already started with this clientUuid (a retry). Someone else's answers 409. */
+async function sessionByUuid(db: Db, user: Me, clientUuid: string) {
+  const [existing] = await db
+    .select()
+    .from(workoutSessions)
+    .where(eq(workoutSessions.clientUuid, clientUuid))
+  if (existing && existing.userId !== user.id)
+    throw new HTTPException(409, { message: 'Session id in use' })
+  return existing
+}
+
+/**
+ * Starts a session. One workout at a time: an unfinished one is closed when a new one starts.
+ * Both in one batch (all or nothing), and the database allows only one in progress per person.
+ * created = false when the same start arrived twice at once and the other one won.
+ */
+async function insertSession(
+  db: Db,
+  user: Me,
+  values: NewSession,
+): Promise<{ row: SessionRow; created: boolean }> {
+  try {
+    // The open one is stopped early if anything was logged in it, otherwise cancelled.
+    const [closeStopped, closeCancelled] = closeOpenWorkouts(
+      db,
+      eq(workoutSessions.userId, user.id),
+      new Date(),
+    )
+    const [, , inserted] = await db.batch([
+      closeStopped,
+      closeCancelled,
+      db
+        .insert(workoutSessions)
+        .values({ ...values, userId: user.id, startedAt: new Date() })
+        .returning(),
+    ])
+    const row = inserted[0]
+    if (!row) throw new Error('Insert returned no row')
+    return { row, created: true }
+  } catch (err) {
+    const [same] = await db
+      .select()
+      .from(workoutSessions)
+      .where(eq(workoutSessions.clientUuid, values.clientUuid))
+    if (same?.userId === user.id) return { row: same, created: false }
+    throw err
+  }
+}
+
 export const sessionRoutes = new Hono<AppEnv>()
   .use(requireUser)
   .get('/', async (c) => {
@@ -516,57 +593,71 @@ export const sessionRoutes = new Hono<AppEnv>()
   .post('/', async (c) => {
     const { db, user } = c.var
     const input = await parseBody(c.req.raw, startSessionInput)
-    const [existing] = await db
-      .select()
-      .from(workoutSessions)
-      .where(eq(workoutSessions.clientUuid, input.clientUuid))
-    if (existing) {
-      if (existing.userId !== user.id)
-        throw new HTTPException(409, { message: 'Session id in use' })
-      return c.json({ session: await sessionDetail(db, existing) })
-    }
-    await Promise.all([
+    const existing = await sessionByUuid(db, user, input.clientUuid)
+    if (existing) return c.json({ session: await sessionDetail(db, existing) })
+    const [, enrollmentId] = await Promise.all([
       assertCanDoWorkout(db, user, input.workoutId),
       assertOwnPlanDay(db, user, input.enrollmentId ?? null, input.programDayId ?? null),
     ])
-    // One workout at a time: an unfinished one is closed when a new one starts. Both in one
-    // batch (all or nothing), and the database allows only one in progress per person.
-    let row: SessionRow | undefined
-    try {
-      // The open one is stopped early if anything was logged in it, otherwise cancelled.
-      const [closeStopped, closeCancelled] = closeOpenWorkouts(
-        db,
-        eq(workoutSessions.userId, user.id),
-        new Date(),
-      )
-      const [, , inserted] = await db.batch([
-        closeStopped,
-        closeCancelled,
-        db
-          .insert(workoutSessions)
-          .values({
-            clientUuid: input.clientUuid,
-            userId: user.id,
-            workoutId: input.workoutId,
-            enrollmentId: input.enrollmentId ?? null,
-            programDayId: input.programDayId ?? null,
-            scheduledDate: input.scheduledDate ?? null,
-            startedAt: new Date(),
-          })
-          .returning(),
-      ])
-      row = inserted[0]
-    } catch (err) {
-      // The same start sent twice at once: the first one won, so answer with it.
-      const [same] = await db
-        .select()
-        .from(workoutSessions)
-        .where(eq(workoutSessions.clientUuid, input.clientUuid))
-      if (same?.userId === user.id) return c.json({ session: await sessionDetail(db, same) })
-      throw err
-    }
-    if (!row) throw new Error('Insert returned no row')
+    const { row, created } = await insertSession(db, user, {
+      clientUuid: input.clientUuid,
+      workoutId: input.workoutId,
+      enrollmentId,
+      programDayId: input.programDayId ?? null,
+      scheduledDate: input.scheduledDate ?? null,
+    })
+    if (!created) return c.json({ session: await sessionDetail(db, row) })
     await snapshotTargets(db, row.id, input.workoutId)
+    return c.json({ session: await sessionDetail(db, row) }, 201)
+  })
+  /**
+   * Quick workout: build your own and start it at once. It's saved as your own workout
+   * (quick, never in a library or program) and runs like any other. Staff always; clients
+   * when their coach turned it on.
+   */
+  .post('/quick', async (c) => {
+    const { db, user } = c.var
+    const input = await parseBody(c.req.raw, quickWorkoutInput)
+    const existing = await sessionByUuid(db, user, input.clientUuid)
+    if (existing) return c.json({ session: await sessionDetail(db, existing) })
+    await assertCanQuickWorkout(db, user)
+    await Promise.all([
+      assertExercisesActive(
+        db,
+        user,
+        input.exercises.map((e) => e.exerciseId),
+      ),
+      input.sourceWorkoutId ? assertQuickSource(db, user, input.sourceWorkoutId) : null,
+    ])
+    const [workout] = await db
+      .insert(workouts)
+      .values({
+        name: input.name,
+        estimatedMinutes: estimateQuickMinutes(input.exercises),
+        createdBy: user.id,
+        clientId: user.id,
+        sourceWorkoutId: input.sourceWorkoutId ?? null,
+        quick: true,
+      })
+      .returning({ id: workouts.id })
+    if (!workout) throw new Error('Insert returned no row')
+    await runAll(db, [
+      ...insertMany(db, workoutExercises, exerciseRows(workout.id, input)),
+      ...insertMany(db, workoutGroups, groupRows(workout.id, input)),
+    ])
+    const { row, created } = await insertSession(db, user, {
+      clientUuid: input.clientUuid,
+      workoutId: workout.id,
+      enrollmentId: null,
+      programDayId: null,
+      scheduledDate: null,
+    })
+    if (!created) {
+      // The same start sent twice at once: the other one won, so this copy isn't needed.
+      await db.delete(workouts).where(eq(workouts.id, workout.id))
+      return c.json({ session: await sessionDetail(db, row) })
+    }
+    await snapshotTargets(db, row.id, workout.id)
     return c.json({ session: await sessionDetail(db, row) }, 201)
   })
   .get('/active', async (c) => {
@@ -589,6 +680,8 @@ export const sessionRoutes = new Hono<AppEnv>()
   })
   /** For the swap sheet: loaded when a workout opens so it works with poor signal. */
   .get('/swap-options', async (c) => c.json(await swapOptions(c.var.db, c.var.user)))
+  /** What the quick-workout builder can start from (your own workouts), and whether it's on. */
+  .get('/quick', async (c) => c.json(await quickWorkoutOptions(c.var.db, c.var.user)))
   .get('/:id', async (c) => {
     const row = await findOwn(c.var.db, c.var.user, parseId(c.req.param('id')))
     return c.json({ session: await sessionDetail(c.var.db, row) })
@@ -687,7 +780,7 @@ export const sessionRoutes = new Hono<AppEnv>()
     const { db, user } = c.var
     const session = await findOwn(db, user, parseId(c.req.param('id')))
     const input = await parseBody(c.req.raw, swapExerciseInput)
-    await swapExercise(db, session, input)
+    await swapExercise(db, user, session, input)
     return c.json({ session: await sessionDetail(db, session) })
   })
   /** Started by accident: close it without counting it. The coach still sees it, as cancelled. */

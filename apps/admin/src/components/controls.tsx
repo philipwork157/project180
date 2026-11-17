@@ -15,31 +15,33 @@ export function Segmented<T extends string>({
   label: string
 }) {
   return (
-    // Phones: scrolls sideways rather than running off the screen.
-    <fieldset
-      aria-label={label}
-      className="no-scrollbar inline-flex min-w-0 max-w-full gap-1 overflow-x-auto rounded-md bg-surface-raised p-1"
-    >
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          aria-pressed={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            'flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-sm px-3 font-bold text-[14px] transition sm:px-4',
-            value === o.value ? 'bg-surface text-ink shadow-card' : 'text-ink-muted hover:text-ink',
-          )}
-        >
-          {o.label}
-          {o.count !== undefined && (
-            <span className="tabular rounded-pill bg-surface-raised px-1.5 text-[12px]">
-              {o.count}
-            </span>
-          )}
-        </button>
-      ))}
-    </fieldset>
+    // Phones: scrolls sideways rather than running off the screen. The scroller wraps the box, so
+    // the room it keeps under the row for a phone's scroll indicator stays outside the grey box.
+    <div className="no-scrollbar min-w-0 max-w-full overflow-x-auto">
+      <fieldset aria-label={label} className="inline-flex gap-1 rounded-md bg-surface-raised p-1">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            aria-pressed={value === o.value}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              'flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-sm px-3 font-bold text-[14px] transition sm:px-4',
+              value === o.value
+                ? 'bg-surface text-ink shadow-card'
+                : 'text-ink-muted hover:text-ink',
+            )}
+          >
+            {o.label}
+            {o.count !== undefined && (
+              <span className="tabular rounded-pill bg-surface-raised px-1.5 text-[12px]">
+                {o.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </fieldset>
+    </div>
   )
 }
 

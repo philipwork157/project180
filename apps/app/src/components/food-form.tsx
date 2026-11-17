@@ -1,5 +1,6 @@
 import { MEAL_LABELS, MEALS, type Meal } from '@project180/shared'
 import { Button, ChoiceChips, Field, Input } from '@project180/ui'
+import { Plus } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { amountText, type FoodDraftItem, parseAmount } from '../lib/food'
 
@@ -58,6 +59,9 @@ interface FormValues {
   proteinG: string
   carbsG: string
   fatG: string
+  fibreG: string
+  sugarG: string
+  sodiumMg: string
 }
 
 const toValues = (food?: Partial<FoodDraftItem>): FormValues => ({
@@ -67,6 +71,9 @@ const toValues = (food?: Partial<FoodDraftItem>): FormValues => ({
   proteinG: amountText(food?.proteinG),
   carbsG: amountText(food?.carbsG),
   fatG: amountText(food?.fatG),
+  fibreG: amountText(food?.fibreG),
+  sugarG: amountText(food?.sugarG),
+  sodiumMg: amountText(food?.sodiumMg),
 })
 
 /**
@@ -93,6 +100,10 @@ export function FoodForm({
   const [values, setValues] = useState(() => toValues(initial))
   const [clientUuid] = useState(() => initial?.clientUuid ?? crypto.randomUUID())
   const [tried, setTried] = useState(false)
+  // Fibre, sugar and sodium tucked away unless the food already has some.
+  const [more, setMore] = useState(
+    () => initial?.fibreG != null || initial?.sugarG != null || initial?.sodiumMg != null,
+  )
   const set = (key: keyof FormValues) => (value: string) =>
     setValues((v) => ({ ...v, [key]: value }))
   const kcal = parseAmount(values.kcal)
@@ -117,6 +128,9 @@ export function FoodForm({
           proteinG: proteinG ?? 0,
           carbsG: parseAmount(values.carbsG),
           fatG: parseAmount(values.fatG),
+          fibreG: parseAmount(values.fibreG),
+          sugarG: parseAmount(values.sugarG),
+          sodiumMg: parseAmount(values.sodiumMg),
         })
       }}
     >
@@ -152,6 +166,28 @@ export function FoodForm({
           {(id) => <AmountInput id={id} value={values.fatG} onChange={set('fatG')} />}
         </Field>
       </div>
+      {more ? (
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <Field label="Fibre (g)" hint="Optional">
+            {(id) => <AmountInput id={id} value={values.fibreG} onChange={set('fibreG')} />}
+          </Field>
+          <Field label="Sugar (g)" hint="Optional">
+            {(id) => <AmountInput id={id} value={values.sugarG} onChange={set('sugarG')} />}
+          </Field>
+          <Field label="Sodium (mg)" hint="Optional">
+            {(id) => <AmountInput id={id} value={values.sodiumMg} onChange={set('sodiumMg')} />}
+          </Field>
+        </div>
+      ) : (
+        <Button
+          variant="ghost"
+          className="self-start"
+          icon={<Plus className="size-4" aria-hidden />}
+          onClick={() => setMore(true)}
+        >
+          Fibre, sugar and sodium
+        </Button>
+      )}
       {extra}
       {error && (
         <p

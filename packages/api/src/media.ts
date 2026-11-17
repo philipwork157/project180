@@ -21,7 +21,15 @@ export async function savePhotos(
   exerciseId: number,
   files: File[],
 ): Promise<string> {
-  if (files.length === 0) throw new HTTPException(400, { message: 'Choose a start photo' })
+  return await saveUploads(env, `exercises/${exerciseId}`, files)
+}
+
+/**
+ * Saves photos under `uploads/<folder>/<random>/<n>` and returns the image key,
+ * `uploads/<folder>/<random>:<count>`. Every upload gets a new key, so it's cached forever.
+ */
+export async function saveUploads(env: Bindings, folder: string, files: File[]): Promise<string> {
+  if (files.length === 0) throw new HTTPException(400, { message: 'Choose a photo' })
   for (const f of files) {
     if (!TYPES.has(f.type))
       throw new HTTPException(400, { message: 'Photos must be JPG, PNG or WebP' })
@@ -29,7 +37,7 @@ export async function savePhotos(
       throw new HTTPException(400, { message: 'Each photo must be under 5 MB' })
   }
   const bucket = mediaBucket(env)
-  const prefix = `${UPLOADS}exercises/${exerciseId}/${crypto.randomUUID()}`
+  const prefix = `${UPLOADS}${folder}/${crypto.randomUUID()}`
   for (const [i, f] of files.entries()) {
     await bucket.put(`${prefix}/${i}`, await f.arrayBuffer(), {
       httpMetadata: { contentType: f.type, cacheControl: 'public, max-age=31536000, immutable' },

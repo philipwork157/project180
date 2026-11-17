@@ -1,8 +1,9 @@
 import { type Db, users } from '@project180/db'
-import { isOwner, isStaff, type Me } from '@project180/shared'
+import { isClient, isOwner, isStaff, type Me } from '@project180/shared'
 import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core'
 import { forbidden } from './errors'
+import { starterBusinessSql } from './starter'
 
 /** The columns every library table (exercises, workouts, programs) shares. */
 export interface LibraryColumns {
@@ -10,6 +11,18 @@ export interface LibraryColumns {
   createdBy: AnySQLiteColumn
   /** Workouts and programs: set on a client's personal copy. */
   clientId?: AnySQLiteColumn
+  /** Exercises: the business whose library it's in. */
+  businessId?: AnySQLiteColumn
+}
+
+/**
+ * Rows of this person's own business (exercises, recipes). Clients without a business (using
+ * the app on their own) read the starter library the platform admin picked; anyone else
+ * without a business (the platform admin) sees none.
+ */
+export function inMyBusiness(column: AnySQLiteColumn, user: Me) {
+  if (user.businessId !== null) return eq(column, user.businessId)
+  return isClient(user.role) ? sql`${column} = ${starterBusinessSql}` : sql`0`
 }
 
 /** Client copies a user may see: their own, or (coaches) their clients'. */
@@ -26,7 +39,7 @@ function copiesFor(table: LibraryColumns, user: Me) {
 
 /**
  * Library rows a user may see. The library is for staff only:
- * - everyone on staff sees every exercise;
+ * - staff see every exercise in their own business's library;
  * - workouts and programs are private, owners included: staff see the ones they made, plus
  *   the personal copies of the clients they coach themselves (never another coach's clients');
  * - clients see only the personal copies made for them (through their plan), never the library.
@@ -39,7 +52,10 @@ export function visibleTo(table: LibraryColumns, user: Me, archived: boolean | '
       : archived
         ? isNotNull(table.archivedAt)
         : isNull(table.archivedAt)
-  if (!table.clientId) return isStaff(user.role) ? state : and(state, sql`0`)
+  if (!table.clientId)
+    return isStaff(user.role) && table.businessId
+      ? and(state, inMyBusiness(table.businessId, user))
+      : and(state, sql`0`)
   return and(
     state,
     or(isStaff(user.role) ? eq(table.createdBy, user.id) : undefined, copiesFor(table, user)),
@@ -56,10 +72,14 @@ export function libraryOnly(
     : isNull(table.clientId)
 }
 
-/** Only the creator or an owner may change a library row. Coaches can duplicate exercises they see. */
-export function assertCanEdit(user: Me, row: { createdBy: number }) {
-  if (row.createdBy !== user.id && !isOwner(user.role))
-    forbidden('Only its creator can change this')
+/**
+ * Only the creator or an owner of the same business may change a library row (exercises,
+ * recipes). Coaches can duplicate exercises they see.
+ */
+export function assertCanEdit(user: Me, row: { createdBy: number; businessId: number | null }) {
+  if (row.createdBy === user.id) return
+  if (isOwner(user.role) && user.businessId !== null && row.businessId === user.businessId) return
+  forbidden('Only its creator can change this')
 }
 
 /**

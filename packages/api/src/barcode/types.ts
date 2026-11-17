@@ -1,11 +1,11 @@
-import type { MacroTotals } from '@project180/shared'
+import type { MacroTotals, NutrientExtras } from '@project180/shared'
 import type { Bindings } from '../env'
 
 /** What a provider found for a barcode, values per 100 g. */
 export interface ProviderProduct {
   name: string
   brand: string | null
-  per100g: MacroTotals
+  per100g: MacroTotals & Partial<NutrientExtras>
   servingG: number | null
 }
 

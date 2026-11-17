@@ -1,5 +1,10 @@
 import { accounts, type Db, sessions, users } from '@project180/db'
-import { isStaff, TEMP_PASSWORD_DAYS, tempPasswordExpired } from '@project180/shared'
+import {
+  canUseAdmin,
+  isPlatform,
+  TEMP_PASSWORD_DAYS,
+  tempPasswordExpired,
+} from '@project180/shared'
 import { and, eq } from 'drizzle-orm'
 
 export const TEMP_PASSWORD_EXPIRED_MESSAGE = `Your temporary password has expired (they last ${TEMP_PASSWORD_DAYS} days). Ask your coach for a new one.`
@@ -42,6 +47,9 @@ export async function refuseBlocked(db: Db, email: string, token: string | null)
 export const STAFF_ONLY_MESSAGE =
   'This sign-in is for coaches and owners. Clients sign in on the Project 180 app.'
 
+export const DASHBOARD_ONLY_MESSAGE =
+  'This account is for the dashboard. Sign in there instead of the app.'
+
 /**
  * Admin Worker only (STAFF_ONLY): after a right password, if the person isn't staff, removes
  * the session that was just made (by its token, so their phone stays signed in) and answers true.
@@ -51,7 +59,21 @@ export async function refuseNonStaff(db: Db, email: string, token: string | null
     .select({ id: users.id, role: users.role })
     .from(users)
     .where(eq(users.email, email.trim().toLowerCase()))
-  if (!row || isStaff(row.role)) return false
+  if (!row || canUseAdmin(row.role)) return false
+  if (token) await db.delete(sessions).where(eq(sessions.token, token))
+  return true
+}
+
+/**
+ * Phone app only: the platform admin's right password gets no session there (their account is
+ * for the dashboard). Removes the session that was just made and answers true.
+ */
+export async function refusePlatformInApp(db: Db, email: string, token: string | null) {
+  const [row] = await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.email, email.trim().toLowerCase()))
+  if (!row || !isPlatform(row.role)) return false
   if (token) await db.delete(sessions).where(eq(sessions.token, token))
   return true
 }

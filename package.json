@@ -31,6 +31,9 @@
     "db:migrate:dev": "bun run --filter @project180/app db:migrate:dev",
     "db:migrate:live": "bun run --filter @project180/app db:migrate:remote",
     "db:seed:dev": "bun packages/db/scripts/seed-library.ts --env dev",
+    "db:recipes": "bun packages/db/scripts/seed-recipes.ts",
+    "db:recipes:dev": "bun packages/db/scripts/seed-recipes.ts --env dev",
+    "db:recipes:remote": "bun packages/db/scripts/seed-recipes.ts --remote",
     "db:philip": "bun packages/db/scripts/seed-philip.ts",
     "db:philip:dev": "bun packages/db/scripts/seed-philip.ts --env dev",
     "prepare": "lefthook install || true"

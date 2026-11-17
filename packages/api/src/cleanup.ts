@@ -2,6 +2,7 @@
 import {
   createDb,
   type Db,
+  emailTokens,
   foodPhotoUses,
   pushSubscriptions,
   sessions,
@@ -22,7 +23,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * - workouts left "in progress" with nothing logged for 4 hours: stopped early if any set was
  *   logged (the sets stay), otherwise cancelled. The app also checks this as it opens;
  * - phones' notifications whose sign-in has ended (they're no longer sent anyway);
- * - photo-estimate counters from before yesterday (only today's count is ever read).
+ * - photo-estimate counters from before yesterday (only today's count is ever read);
+ * - email links (confirm email, reset password) that have expired.
  * Then queued programs whose start date has come take over from the current ones.
  */
 export async function dailyCleanup(db: Db, now = Date.now()) {
@@ -60,6 +62,8 @@ export async function dailyCleanup(db: Db, now = Date.now()) {
       .delete(foodPhotoUses)
       .where(lt(foodPhotoUses.date, new Date(now - 2 * DAY_MS).toISOString().slice(0, 10)))
       .returning({ userId: foodPhotoUses.userId }),
+    // Email links (confirm email, reset password) that have run out.
+    db.delete(emailTokens).where(lt(emailTokens.expiresAt, at)),
   ])
   // Queued programs whose start date has come take over (the plan also does this when read).
   const programsStarted = await startDuePrograms(db, 'everyone', at)

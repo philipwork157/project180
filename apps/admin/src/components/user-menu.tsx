@@ -1,8 +1,17 @@
 import { getThemePreference, setThemePreference, type ThemePreference } from '@project180/client'
-import { type Me, ROLE_LABELS } from '@project180/shared'
+import { isStaff, type Me, ROLE_LABELS } from '@project180/shared'
 import { cn } from '@project180/ui'
 import { Link } from '@tanstack/react-router'
-import { ChevronsUpDown, LogOut, Monitor, Moon, Settings, Smartphone, Sun } from 'lucide-react'
+import {
+  ChevronsUpDown,
+  Dumbbell,
+  LogOut,
+  Monitor,
+  Moon,
+  Settings,
+  Smartphone,
+  Sun,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -130,6 +139,18 @@ export function UserMenu({
                 <ThemeSwitch compact />
               </div>
               <div className="border-border border-t pt-1">
+                {/* The platform admin has no training and no phone app. */}
+                {isStaff(me.role) && (
+                  <Link
+                    to="/my-training"
+                    role="menuitem"
+                    className={menuItem}
+                    onClick={() => setOpen(false)}
+                  >
+                    <Dumbbell className="size-4 text-ink-muted" aria-hidden />
+                    My training
+                  </Link>
+                )}
                 <Link
                   to="/settings"
                   role="menuitem"
@@ -139,10 +160,12 @@ export function UserMenu({
                   <Settings className="size-4 text-ink-muted" aria-hidden />
                   Settings
                 </Link>
-                <a href={APP_URL} role="menuitem" className={menuItem}>
-                  <Smartphone className="size-4 text-ink-muted" aria-hidden />
-                  Open the phone app
-                </a>
+                {isStaff(me.role) && (
+                  <a href={APP_URL} role="menuitem" className={menuItem}>
+                    <Smartphone className="size-4 text-ink-muted" aria-hidden />
+                    Open the phone app
+                  </a>
+                )}
                 <button
                   type="button"
                   role="menuitem"

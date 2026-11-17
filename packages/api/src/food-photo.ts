@@ -8,18 +8,18 @@ import {
   type FoodPhotoItem,
   MAX_FOODS_PER_ADD,
   PHOTO_CONFIDENCE,
+  readClaudeUsage,
   roundGrams,
   roundKcal,
 } from '@project180/shared'
 import { and, eq, lt, sql } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
+import type { ClaudeMeter } from './claude-calls'
 import { isTestSite } from './email'
 import type { Bindings } from './env'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
-/** Override with FOOD_MODEL (wrangler vars) to try another model without a code change. */
-export const DEFAULT_FOOD_MODEL = 'claude-sonnet-5-5'
 const TIMEOUT_MS = 30_000
 
 export const PHOTO_TYPES = new Set(['image/jpeg', 'image/webp', 'image/png'])
@@ -187,24 +187,40 @@ interface ClaudeResponse {
  * a friendly 502. On local and dev sites the reason is added to the message, so it shows in the
  * app. Never logs the photo or the person's note.
  */
-function unreadable(env: Bindings, reason: string, detail?: unknown): HTTPException {
+function unreadable(
+  env: Bindings,
+  meter: ClaudeMeter,
+  reason: string,
+  detail?: unknown,
+): HTTPException {
   console.error(`[food-photo] ${reason}`, detail ?? '')
+  meter.outcome = 'failed'
+  meter.failReason = reason.slice(0, 300)
   const message = 'Couldn’t read that photo. Try again or type it in.'
   return new HTTPException(502, {
     message: isTestSite(env) ? `${message} (${reason})` : message,
   })
 }
 
-/** Asks Claude what's in the photo. Throws a friendly 502/503 when it can't answer. */
+/**
+ * Asks Claude what's in the photo. Throws a friendly 502/503 when it can't answer. `meter` is
+ * filled in as it goes (tokens, time, outcome) so the call can be saved either way.
+ */
 export async function estimateFoodPhoto(
   env: Bindings,
   photo: { bytes: Uint8Array; type: string },
   hint: string,
+  meter: ClaudeMeter,
 ): Promise<Omit<FoodPhotoDraft, 'photosLeft'>> {
   const key = env.ANTHROPIC_API_KEY
   if (!key) throw new HTTPException(503, { message: 'Photo estimates aren’t set up yet.' })
-  const model = env.FOOD_MODEL || DEFAULT_FOOD_MODEL
+  const { model } = meter
+  meter.hadNote = Boolean(hint)
   const started = Date.now()
+  const fail = (reason: string, detail?: unknown) => {
+    meter.durationMs = Date.now() - started
+    return unreadable(env, meter, reason, detail)
+  }
   let res: Response
   try {
     res = await fetch(API_URL, {
@@ -240,8 +256,7 @@ export async function estimateFoodPhoto(
     })
   } catch (err) {
     const timedOut = err instanceof Error && err.name === 'TimeoutError'
-    throw unreadable(
-      env,
+    throw fail(
       timedOut ? `Claude took longer than ${TIMEOUT_MS / 1000}s` : 'could not reach Claude',
       err,
     )
@@ -252,27 +267,34 @@ export async function estimateFoodPhoto(
       error?: { type?: string; message?: string }
     } | null
     const why = body?.error?.message ?? res.statusText
-    throw unreadable(env, `Claude answered ${res.status} ${body?.error?.type ?? ''}: ${why}`, {
+    meter.requestId = res.headers.get('request-id')
+    throw fail(`Claude answered ${res.status} ${body?.error?.type ?? ''}: ${why}`, {
       model,
       requestId: res.headers.get('request-id'),
     })
   }
+  meter.requestId = res.headers.get('request-id')
   const data = (await res.json().catch(() => null)) as ClaudeResponse | null
+  meter.usage = readClaudeUsage(data?.usage)
   const text = data?.content?.find((b) => b.type === 'text')?.text
   if (!text)
-    throw unreadable(env, `no answer from Claude (stop: ${data?.stop_reason ?? 'none'})`, {
+    throw fail(`no answer from Claude (stop: ${data?.stop_reason ?? 'none'})`, {
       model,
       blocks: data?.content?.map((b) => b.type),
     })
   if (data?.stop_reason === 'max_tokens')
-    throw unreadable(env, 'Claude’s answer was cut off (max_tokens)', { model, usage: data.usage })
+    throw fail('Claude’s answer was cut off (max_tokens)', { model, usage: data.usage })
   const draft = parseFoodPhotoReply(text)
   if (!draft)
-    throw unreadable(env, 'Claude’s answer wasn’t in the expected shape', {
+    throw fail('Claude’s answer wasn’t in the expected shape', {
       model,
       // Only on local and dev sites: the start of what came back, to see what went wrong.
       answer: isTestSite(env) ? text.slice(0, 500) : undefined,
     })
+  meter.durationMs = Date.now() - started
+  meter.outcome = draft.kind === 'not_food' ? 'not_food' : 'ok'
+  meter.kind = draft.kind
+  meter.items = draft.items.length
   console.log(
     `[food-photo] read ${draft.items.length} food(s) with ${model} in ${Date.now() - started} ms`,
     data?.usage ?? '',

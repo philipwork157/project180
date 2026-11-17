@@ -1,4 +1,4 @@
-import type { FoodEntry } from '@project180/shared'
+import { type FoodEntry, roundGrams, roundKcal } from '@project180/shared'
 import { Button, ConfirmDialog } from '@project180/ui'
 import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
@@ -23,6 +23,9 @@ export function EditFoodSheet({
 
 function EditFood({ entry, onDone }: { entry: FoodEntry; onDone: () => void }) {
   const [meal, setMeal] = useState(entry.meal)
+  // Ate more or less than logged: scale every number at once (the form restarts with them).
+  const [portion, setPortion] = useState(1)
+  const scaled = scaleEntry(entry, portion)
   const [confirming, setConfirming] = useState(false)
   const update = useUpdateFood(onDone)
   const remove = useDeleteFood(onDone)
@@ -35,8 +38,25 @@ function EditFood({ entry, onDone }: { entry: FoodEntry; onDone: () => void }) {
         )}
       </div>
       <MealPicker value={meal} onChange={setMeal} />
+      <div className="flex flex-col gap-2">
+        <p className="font-bold text-[14px]">How much did you have?</p>
+        <div className="no-scrollbar flex gap-2 overflow-x-auto">
+          {PORTIONS.map((p) => (
+            <Button
+              key={p}
+              size="sm"
+              variant={p === portion ? 'primary' : 'secondary'}
+              className="h-11 min-w-16 shrink-0 whitespace-nowrap"
+              onClick={() => setPortion(p)}
+            >
+              {portionLabel(p)}
+            </Button>
+          ))}
+        </div>
+      </div>
       <FoodForm
-        initial={entry}
+        key={portion}
+        initial={scaled}
         submitLabel="Save changes"
         saving={update.isPending}
         error={update.isError ? 'Couldn’t save. Check your signal and try again.' : null}
@@ -68,4 +88,25 @@ function EditFood({ entry, onDone }: { entry: FoodEntry; onDone: () => void }) {
       </ConfirmDialog>
     </div>
   )
+}
+
+const PORTIONS = [0.5, 0.75, 1, 1.5, 2, 3]
+const portionLabel = (p: number) =>
+  p === 1 ? 'As logged' : p === 0.5 ? 'Half' : p === 0.75 ? '¾' : `${p}×`
+
+/** A food's numbers for a portion of what was logged (1 = unchanged). */
+function scaleEntry(entry: FoodEntry, portion: number): FoodEntry {
+  if (portion === 1) return entry
+  const g = (v: number | null) => (v === null ? null : roundGrams(v * portion))
+  return {
+    ...entry,
+    grams: g(entry.grams),
+    kcal: roundKcal(entry.kcal * portion),
+    proteinG: roundGrams(entry.proteinG * portion),
+    carbsG: g(entry.carbsG),
+    fatG: g(entry.fatG),
+    fibreG: g(entry.fibreG),
+    sugarG: g(entry.sugarG),
+    sodiumMg: entry.sodiumMg === null ? null : Math.round(entry.sodiumMg * portion),
+  }
 }

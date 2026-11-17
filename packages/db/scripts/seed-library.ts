@@ -5,9 +5,10 @@
  *   bun run db:seed:dev        the Cloudflare dev environment's database
  *   bun run db:seed:remote     live D1 database on Cloudflare
  *
- * Safe to run again: anything that already exists (by name) is skipped, and
- * nothing you've added or changed is touched. Everything is owned by the
- * first owner, so create your account first.
+ * Add `-- --business "Starter library"` to fill one business by its exact name (every business
+ * has its own library); without it, the first owner's business. Safe to run again: anything that
+ * already exists there (by name) is skipped, and nothing you've added or changed is touched.
+ * Everything is owned by that business's first owner, so create that account first.
  */
 import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -18,6 +19,7 @@ import { MORE_EXERCISES } from '../seed/exercises-more'
 import { EXERCISE_IMAGES } from '../seed/images'
 import { keywordsFor } from '../seed/keywords'
 import { WORKOUTS } from '../seed/workouts'
+import { seedTarget } from './target'
 
 const dev =
   process.argv.includes('--env') && process.argv[process.argv.indexOf('--env') + 1] === 'dev'
@@ -30,9 +32,9 @@ const sqlFile = path.join(here, '../seed/library.sql')
 const q = (v: string | number | null) =>
   v === null ? 'NULL' : typeof v === 'number' ? String(v) : `'${v.replaceAll("'", "''")}'`
 const now = Date.now()
-// Owned by the first owner (or coach, if there's no owner yet).
-const admin = `(SELECT id FROM users WHERE role IN ('owner', 'admin') ORDER BY role = 'owner' DESC, id LIMIT 1)`
-const hasAdmin = `EXISTS (SELECT 1 FROM users WHERE role IN ('owner', 'admin'))`
+// The business to fill (--business "Name", or the first owner's), owned by its first owner.
+const target = seedTarget(process.argv)
+const { admin, business, hasAdmin, inBusiness, workoutsOfBusiness } = target
 
 const ALL = [...EXERCISES, ...MORE_EXERCISES, ...EXTRA_EXERCISES, ...MOBILITY]
 
@@ -56,14 +58,14 @@ for (const [name, group, equipment, tracking, cue, kind] of ALL) {
   const category = kind ?? (group === 'cardio' ? 'cardio' : 'strength')
   const keywords = keywordsFor(name)
   sql.push(
-    `INSERT INTO exercises (name, muscle_group, category, equipment, tracking_type, instructions, keywords, created_by, created_at, updated_at)
-SELECT ${q(name)}, ${q(group)}, ${q(category)}, ${q(equipment)}, ${q(tracking)}, ${q(cue)}, ${q(keywords)}, ${admin}, ${now}, ${now}
-WHERE ${hasAdmin} AND NOT EXISTS (SELECT 1 FROM exercises WHERE lower(name) = lower(${q(name)}));`,
+    `INSERT INTO exercises (name, muscle_group, category, equipment, tracking_type, instructions, keywords, created_by, business_id, created_at, updated_at)
+SELECT ${q(name)}, ${q(group)}, ${q(category)}, ${q(equipment)}, ${q(tracking)}, ${q(cue)}, ${q(keywords)}, ${admin}, ${business}, ${now}, ${now}
+WHERE ${hasAdmin} AND NOT EXISTS (SELECT 1 FROM exercises WHERE lower(name) = lower(${q(name)}) AND ${inBusiness});`,
   )
   // Exercises added before search words existed get them too (never overwrites words you typed).
   if (keywords) {
     sql.push(
-      `UPDATE exercises SET keywords = ${q(keywords)} WHERE lower(name) = lower(${q(name)}) AND keywords IS NULL;`,
+      `UPDATE exercises SET keywords = ${q(keywords)} WHERE lower(name) = lower(${q(name)}) AND keywords IS NULL AND ${inBusiness};`,
     )
   }
 }
@@ -72,14 +74,14 @@ WHERE ${hasAdmin} AND NOT EXISTS (SELECT 1 FROM exercises WHERE lower(name) = lo
 for (const [name, id] of Object.entries(EXERCISE_IMAGES)) {
   if (!names.has(name.toLowerCase())) throw new Error(`Photo for unknown exercise "${name}"`)
   sql.push(
-    `UPDATE exercises SET image_key = ${q(`exercise-images/${id}`)} WHERE lower(name) = lower(${q(name)}) AND image_key IS NULL;`,
+    `UPDATE exercises SET image_key = ${q(`exercise-images/${id}`)} WHERE lower(name) = lower(${q(name)}) AND image_key IS NULL AND ${inBusiness};`,
   )
 }
 
 const exerciseId = (name: string) =>
-  `(SELECT id FROM exercises WHERE lower(name) = lower(${q(name)}) ORDER BY archived_at IS NOT NULL, id LIMIT 1)`
+  `(SELECT id FROM exercises WHERE lower(name) = lower(${q(name)}) AND ${inBusiness} ORDER BY archived_at IS NOT NULL, id LIMIT 1)`
 const workoutId = (name: string) =>
-  `(SELECT id FROM workouts WHERE name = ${q(name)} ORDER BY id LIMIT 1)`
+  `(SELECT id FROM workouts WHERE name = ${q(name)} AND ${workoutsOfBusiness} ORDER BY id LIMIT 1)`
 
 for (const w of WORKOUTS) {
   // Its exercises are only added when this run created the workout (same timestamp),
@@ -87,20 +89,20 @@ for (const w of WORKOUTS) {
   sql.push(
     `INSERT INTO workouts (name, description, estimated_minutes, created_by, created_at, updated_at)
 SELECT ${q(w.name)}, ${q(w.description)}, ${w.minutes}, ${admin}, ${now}, ${now}
-WHERE ${hasAdmin} AND NOT EXISTS (SELECT 1 FROM workouts WHERE name = ${q(w.name)});`,
+WHERE ${hasAdmin} AND NOT EXISTS (SELECT 1 FROM workouts WHERE name = ${q(w.name)} AND ${workoutsOfBusiness});`,
   )
   w.items.forEach(([name, sets, min, max, seconds, rest], position) => {
     sql.push(
       `INSERT INTO workout_exercises (workout_id, exercise_id, position, target_sets, target_reps_min, target_reps_max, target_seconds, rest_seconds)
 SELECT ${workoutId(w.name)}, ${exerciseId(name)}, ${position}, ${sets}, ${q(min)}, ${q(max)}, ${q(seconds)}, ${rest}
-WHERE EXISTS (SELECT 1 FROM workouts WHERE name = ${q(w.name)} AND created_at = ${now});`,
+WHERE EXISTS (SELECT 1 FROM workouts WHERE name = ${q(w.name)} AND created_at = ${now} AND ${workoutsOfBusiness});`,
     )
   })
 }
 
 writeFileSync(sqlFile, `${sql.join('\n\n')}\n`)
 console.log(
-  `Seed: ${names.size} exercises, ${WORKOUTS.length} workouts → ${dev ? 'Cloudflare DEV' : remote ? 'LIVE (remote)' : 'local'} database`,
+  `Seed: ${names.size} exercises, ${WORKOUTS.length} workouts → ${target.label}, ${dev ? 'Cloudflare DEV' : remote ? 'LIVE (remote)' : 'local'} database`,
 )
 
 const args = [

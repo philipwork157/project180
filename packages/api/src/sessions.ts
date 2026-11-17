@@ -37,6 +37,7 @@ export async function sessionSummaries(
       id: workoutSessions.id,
       status: workoutSessions.status,
       workoutName: workouts.name,
+      quick: sql<number>`coalesce(${workouts.quick}, 0)`,
       startedAt: workoutSessions.startedAt,
       durationSeconds: workoutSessions.durationSeconds,
       feeling: workoutSessions.feeling,
@@ -56,6 +57,7 @@ export async function sessionSummaries(
   )
   return rows.map((r) => ({
     ...r,
+    quick: Boolean(r.quick),
     startedAt: r.startedAt.toISOString(),
     volumeKg: Math.round(Number(r.volumeKg) * 10) / 10,
     setCount: Number(r.setCount),

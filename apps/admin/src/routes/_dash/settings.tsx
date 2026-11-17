@@ -4,13 +4,12 @@ import {
   authClient,
   foodPhotoSettingsQuery,
   meQuery,
-  workoutBuilderQuery,
   workoutBuilderSettingsQuery,
 } from '@project180/client'
 import {
-  type ClaudeFeatureSettings,
   type FoodPhotoSettings,
   isOwner,
+  isStaff,
   MAX_FOOD_PHOTOS_PER_DAY,
   type Me,
   ROLE_LABELS,
@@ -18,9 +17,8 @@ import {
 import { Button, Card, Field, Input, PasswordInput, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { Camera, Mail, Send, Sparkles } from 'lucide-react'
+import { Camera, Sparkles } from 'lucide-react'
 import { type FormEvent, type ReactNode, useState } from 'react'
-import { Segmented } from '../../components/controls'
 import { PageHeader } from '../../components/page-header'
 import { PersonActivityPanel } from '../../components/person-activity'
 
@@ -59,7 +57,7 @@ function SettingsPage() {
       <Card className="divide-y divide-border">
         <Section
           title="Profile"
-          description={`How your name shows to your clients and team. You're signed in as ${ROLE_LABELS[me.role].toLowerCase()} with ${me.email}.`}
+          description={`${isStaff(me.role) ? 'How your name shows to your clients and team.' : 'How your name shows on the dashboard.'} You're signed in as ${ROLE_LABELS[me.role].toLowerCase()} with ${me.email}.`}
         >
           <NameForm me={me} />
         </Section>
@@ -75,24 +73,22 @@ function SettingsPage() {
         >
           <PersonActivityPanel userId={me.id} name={me.name} isMe defaultOpen />
         </Section>
-        <Section
-          title="Email"
-          description="Where the app's emails (new passwords, welcome emails) actually go on this site. On the dev site they all go to one test inbox."
-        >
-          <EmailSettings />
-        </Section>
-        <Section
-          title="Food photos"
-          description="Lets clients take a photo of a meal or a nutrition label in the app's Fuel tab and get the calories and protein estimated. Typing food in always works."
-        >
-          <FoodPhotoSwitch canChange={isOwner(me.role)} />
-        </Section>
-        <Section
-          title="Build with Claude"
-          description="Lets coaches describe a workout or a program in words and get a new one built from your library. It only ever creates new workouts and programs; nothing existing is changed."
-        >
-          <WorkoutBuilderSwitch canChange={isOwner(me.role)} />
-        </Section>
+        {isStaff(me.role) && (
+          <>
+            <Section
+              title="Food photos"
+              description="Lets clients take a photo of a meal or a nutrition label in the app's Fuel tab and get the calories and protein estimated. Typing food in always works."
+            >
+              <FoodPhotoStatus canChange={isOwner(me.role)} />
+            </Section>
+            <Section
+              title="Build with Claude"
+              description="Lets coaches describe a workout or a program in words and get a new one built from your library. It only ever creates new workouts and programs; nothing existing is changed."
+            >
+              <BuilderStatus />
+            </Section>
+          </>
+        )}
       </Card>
     </>
   )
@@ -239,105 +235,12 @@ function PasswordForm() {
   )
 }
 
-interface EmailMode {
-  mode: 'off' | 'redirect' | 'blocked' | 'live'
-  redirectTo: string | null
-  from: string | null
-}
-
-const EMAIL_MODES: Record<
-  EmailMode['mode'],
-  { label: string; tone: string; text: (e: EmailMode) => string }
-> = {
-  redirect: {
-    label: 'Test inbox',
-    tone: 'bg-sand/20 text-ink',
-    text: (e) =>
-      `Every email goes to ${e.redirectTo}, never to clients. The subject says who it was meant for.`,
-  },
-  live: {
-    label: 'Live',
-    tone: 'bg-brand-soft text-brand-text',
-    text: () => 'Emails go to the real people they’re meant for.',
-  },
-  blocked: {
-    label: 'Held back',
-    tone: 'bg-surface-raised text-ink-muted',
-    text: () =>
-      'This is a test site with no test inbox set (EMAIL_REDIRECT_TO), so nothing is sent. Emails are only written to the server log.',
-  },
-  off: {
-    label: 'Not set up',
-    tone: 'bg-surface-raised text-ink-muted',
-    text: () =>
-      'No email account is connected (AWS keys and EMAIL_FROM), so emails are only written to the server log.',
-  },
-}
-
-function EmailSettings() {
-  const status = useQuery({
-    queryKey: ['admin', 'email'],
-    queryFn: async () => (await api<{ email: EmailMode }>('/admin/email')).email,
-  })
-  const test = useMutation({
-    mutationFn: () =>
-      api<{ email: { status: 'sent' | 'logged' | 'failed'; to: string; error?: string } }>(
-        '/admin/email/test',
-        { method: 'POST' },
-      ),
-    onSuccess: ({ email }) =>
-      toast(
-        email.status === 'sent'
-          ? { title: 'Test email sent', description: `Check ${email.to}` }
-          : email.status === 'failed'
-            ? { tone: 'error', title: 'Amazon refused it', description: email.error }
-            : {
-                tone: 'info',
-                title: 'Not sent',
-                description: 'Email isn’t set up here, so it was only written to the server log.',
-              },
-      ),
-    onError: (err) =>
-      toast({
-        tone: 'error',
-        title: 'Couldn’t send it',
-        description: err instanceof ApiError ? err.message : undefined,
-      }),
-  })
-  const e = status.data
-  if (!e) return <div className="h-24 animate-pulse rounded-md bg-surface-raised" />
-  const m = EMAIL_MODES[e.mode]
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-start gap-3 rounded-md bg-surface-raised p-4">
-        <Mail className="mt-0.5 size-5 shrink-0 text-ink-muted" aria-hidden />
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className={`self-start rounded-full px-2.5 py-0.5 font-bold text-[12px] ${m.tone}`}>
-            {m.label}
-          </span>
-          <p className="text-[14px]">{m.text(e)}</p>
-          {e.from && <p className="truncate text-[13px] text-ink-muted">Sent from {e.from}</p>}
-        </div>
-      </div>
-      <Button
-        variant="secondary"
-        className="self-start"
-        icon={<Send className="size-4" aria-hidden />}
-        loading={test.isPending}
-        onClick={() => test.mutate()}
-      >
-        Send a test email
-      </Button>
-    </div>
-  )
-}
-
 function foodPhotoStatus(f: FoodPhotoSettings): { label: string; tone: string; text: string } {
   if (!f.enabled)
     return {
       label: 'Off',
       tone: 'bg-surface-raised text-ink-muted',
-      text: 'Clients don’t see the photo button. They can still type food in.',
+      text: 'Turned off for now. Clients don’t see the photo button; they can still type food in.',
     }
   if (!f.configured)
     return {
@@ -352,27 +255,9 @@ function foodPhotoStatus(f: FoodPhotoSettings): { label: string; tone: string; t
   }
 }
 
-/** The owner turns photo estimates on or off for everyone. Coaches see the status only. */
-function FoodPhotoSwitch({ canChange }: { canChange: boolean }) {
-  const queryClient = useQueryClient()
+/** Whether photo estimates are on, and the default daily limit (the owner changes it). */
+function FoodPhotoStatus({ canChange }: { canChange: boolean }) {
   const status = useQuery(foodPhotoSettingsQuery)
-  const save = useMutation({
-    mutationFn: (enabled: boolean) =>
-      api<{ foodPhotos: FoodPhotoSettings }>('/admin/settings/food-photos', {
-        method: 'PUT',
-        body: { enabled },
-      }),
-    onSuccess: ({ foodPhotos }) => {
-      queryClient.setQueryData(foodPhotoSettingsQuery.queryKey, foodPhotos)
-      toast({ title: foodPhotos.enabled ? 'Food photos turned on' : 'Food photos turned off' })
-    },
-    onError: (err) =>
-      toast({
-        tone: 'error',
-        title: 'Couldn’t change it',
-        description: err instanceof ApiError ? err.message : undefined,
-      }),
-  })
   const f = status.data
   if (status.isError)
     return (
@@ -395,20 +280,7 @@ function FoodPhotoSwitch({ canChange }: { canChange: boolean }) {
         </div>
       </div>
       {canChange ? (
-        <>
-          <div className="self-start">
-            <Segmented
-              label="Food photos"
-              value={f.enabled ? 'on' : 'off'}
-              onChange={(v) => v !== (f.enabled ? 'on' : 'off') && save.mutate(v === 'on')}
-              options={[
-                { value: 'on', label: 'On' },
-                { value: 'off', label: 'Off' },
-              ]}
-            />
-          </div>
-          <PhotoLimitForm perDay={f.perDay} />
-        </>
+        <PhotoLimitForm perDay={f.perDay} />
       ) : (
         <p className="text-[13px] text-ink-muted">
           Up to {f.perDay} photos a day per client. Only an owner can change this.
@@ -480,32 +352,9 @@ function PhotoLimitForm({ perDay }: { perDay: number }) {
   )
 }
 
-/** The owner turns "Build with Claude" on or off for every coach. Coaches see the status only. */
-function WorkoutBuilderSwitch({ canChange }: { canChange: boolean }) {
-  const queryClient = useQueryClient()
+/** Whether "Build with Claude" is on for coaches (read only here). */
+function BuilderStatus() {
   const status = useQuery(workoutBuilderSettingsQuery)
-  const save = useMutation({
-    mutationFn: (enabled: boolean) =>
-      api<{ workoutBuilder: ClaudeFeatureSettings }>('/admin/settings/workout-builder', {
-        method: 'PUT',
-        body: { enabled },
-      }),
-    onSuccess: ({ workoutBuilder }) => {
-      queryClient.setQueryData(workoutBuilderSettingsQuery.queryKey, workoutBuilder)
-      void queryClient.invalidateQueries({ queryKey: workoutBuilderQuery.queryKey })
-      toast({
-        title: workoutBuilder.enabled
-          ? 'Build with Claude turned on'
-          : 'Build with Claude turned off',
-      })
-    },
-    onError: (err) =>
-      toast({
-        tone: 'error',
-        title: 'Couldn’t change it',
-        description: err instanceof ApiError ? err.message : undefined,
-      }),
-  })
   const f = status.data
   if (status.isError)
     return (
@@ -518,7 +367,7 @@ function WorkoutBuilderSwitch({ canChange }: { canChange: boolean }) {
     ? {
         label: 'Off',
         tone: 'bg-surface-raised text-ink-muted',
-        text: 'Coaches don’t see the Build with Claude button on Workouts and Programs.',
+        text: 'Turned off for now. Coaches don’t see the Build with Claude button on Workouts and Programs.',
       }
     : !f.configured
       ? {
@@ -542,21 +391,6 @@ function WorkoutBuilderSwitch({ canChange }: { canChange: boolean }) {
           <p className="text-[14px]">{m.text}</p>
         </div>
       </div>
-      {canChange ? (
-        <div className="self-start">
-          <Segmented
-            label="Build with Claude"
-            value={f.enabled ? 'on' : 'off'}
-            onChange={(v) => v !== (f.enabled ? 'on' : 'off') && save.mutate(v === 'on')}
-            options={[
-              { value: 'on', label: 'On' },
-              { value: 'off', label: 'Off' },
-            ]}
-          />
-        </div>
-      ) : (
-        <p className="text-[13px] text-ink-muted">Only an owner can change this.</p>
-      )}
     </div>
   )
 }

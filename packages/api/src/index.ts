@@ -4,8 +4,10 @@ import { csrf } from 'hono/csrf'
 import { HTTPException } from 'hono/http-exception'
 import { secureHeaders } from 'hono/secure-headers'
 import { appKindOf, createAuth } from './auth'
-import type { AppEnv, Bindings } from './env'
+import type { AppEnv } from './env'
 import { mountMedia } from './media'
+import { allowedOrigins, sameOrigin } from './origins'
+import { accountRoutes, EMAIL_NOT_VERIFIED_MESSAGE, refuseUnverified } from './routes/account'
 import { adminChatRoutes } from './routes/admin-chat'
 import { adminEmailRoutes } from './routes/admin-email'
 import { adminOverviewRoutes } from './routes/admin-overview'
@@ -14,8 +16,10 @@ import { adminUserRoutes } from './routes/admin-users'
 import { enrollmentRoutes } from './routes/enrollments'
 import { exerciseRoutes } from './routes/exercises'
 import { meRoutes } from './routes/me'
+import { platformRoutes } from './routes/platform'
 import { programBuilderRoutes } from './routes/program-builder'
 import { programRoutes } from './routes/programs'
+import { recipeRoutes } from './routes/recipes'
 import { sessionRoutes } from './routes/sessions'
 import { videoRoutes } from './routes/videos'
 import { workoutBuilderRoutes } from './routes/workout-builder'
@@ -23,31 +27,18 @@ import { workoutRoutes } from './routes/workouts'
 import { clearFailures, minutesLocked, recordFailure } from './sign-in-limit'
 import {
   BLOCKED_MESSAGE,
+  DASHBOARD_ONLY_MESSAGE,
   refuseBlocked,
   refuseExpiredTempPassword,
   refuseNonStaff,
+  refusePlatformInApp,
   STAFF_ONLY_MESSAGE,
   TEMP_PASSWORD_EXPIRED_MESSAGE,
 } from './temp-password'
 
 export { dailyCleanup, runDailyCleanup } from './cleanup'
 export type { Bindings } from './env'
-
-const originOf = (url: string) => {
-  try {
-    return new URL(url.trim()).origin
-  } catch {
-    return null
-  }
-}
-
-const sameOrigin = (origin: string, requestUrl: string) => origin === originOf(requestUrl)
-
-/** Sites allowed to send us forms: our own address and the ones Better Auth trusts. */
-function allowedOrigins(env: Bindings) {
-  const list = [env.BETTER_AUTH_URL, ...(env.TRUSTED_ORIGINS?.split(',') ?? [])]
-  return new Set(list.map((u) => (u ? originOf(u) : null)).filter((o): o is string => o !== null))
-}
+export { runFoodReminders, sendFoodReminders } from './food-reminders'
 
 /** The whole API, mounted at /api. The web app's Worker serves it. */
 export function createApp() {
@@ -116,11 +107,23 @@ export function createApp() {
         const message = BLOCKED_MESSAGE
         return c.json({ code: 'BLOCKED', message, error: message }, 403)
       }
+      // Signed up themselves but hasn't confirmed their email yet.
+      if (keys.email && (await refuseUnverified(db, keys.email, token))) {
+        const message = EMAIL_NOT_VERIFIED_MESSAGE
+        return c.json({ code: 'EMAIL_NOT_VERIFIED', message, error: message }, 403)
+      }
       // The admin lets only staff in: a client's right password gets no session there.
       if (c.var.appKind === 'admin' && keys.email) {
         if (await refuseNonStaff(db, keys.email, token)) {
           const message = STAFF_ONLY_MESSAGE
           return c.json({ code: 'STAFF_ONLY', message, error: message }, 403)
+        }
+      }
+      // The platform admin signs in to the dashboard only.
+      if (c.var.appKind === 'app' && keys.email) {
+        if (await refusePlatformInApp(db, keys.email, token)) {
+          const message = DASHBOARD_ONLY_MESSAGE
+          return c.json({ code: 'DASHBOARD_ONLY', message, error: message }, 403)
         }
       }
     }
@@ -153,17 +156,22 @@ export function createApp() {
     }
   })
   mountMedia(app)
+  // Signing up, confirming an email and resetting a password: no sign-in needed.
+  app.route('/account', accountRoutes)
   app.route('/me', meRoutes)
   app.route('/exercises', exerciseRoutes)
   app.route('/workouts', workoutRoutes)
   app.route('/programs', programRoutes)
   app.route('/enrollments', enrollmentRoutes)
   app.route('/sessions', sessionRoutes)
+  app.route('/recipes', recipeRoutes)
   app.route('/admin/users', adminUserRoutes)
   app.route('/admin/overview', adminOverviewRoutes)
   app.route('/admin/email', adminEmailRoutes)
   app.route('/admin/chat', adminChatRoutes)
   app.route('/admin/settings', adminSettingsRoutes)
+  // The platform admin's page: Claude switches, models, limits and costs; coaches; site health.
+  app.route('/platform', platformRoutes)
   app.route('/videos', videoRoutes)
   app.route('/workout-builder', workoutBuilderRoutes)
   app.route('/program-builder', programBuilderRoutes)

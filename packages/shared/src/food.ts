@@ -1,7 +1,12 @@
 // Food logging: what someone ate, their coach's daily targets, and the photo estimate.
 // Calories and protein always have a number; carbs, fat and grams may be left empty.
 import { z } from 'zod'
+import type { DayBurn } from './burn'
+import { addDays } from './dates'
+import { MAX_WEEKLY_CHANGE_KG, MIN_WEEKLY_CHANGE_KG } from './energy'
+import { ACTIVITY_LEVELS, SEXES } from './enums'
 import { isoDate } from './validators'
+import type { AppNotification } from './weigh-in'
 
 /** The four meals of a day, in the order they show. */
 export const MEALS = ['breakfast', 'lunch', 'dinner', 'snack'] as const
@@ -14,17 +19,16 @@ export const MEAL_LABELS: Record<Meal, string> = {
 }
 
 /** How a food was added. */
-export const FOOD_SOURCES = ['manual', 'photo', 'barcode', 'search'] as const
+export const FOOD_SOURCES = ['manual', 'photo', 'barcode', 'search', 'recipe'] as const
 export type FoodSource = (typeof FOOD_SOURCES)[number]
 
 /**
  * Photo estimates per person per day, so a bug or a keen tester can't run up the Claude bill.
  * Clients get the site default (the owner changes it in Settings) unless their coach set their
- * own number. Owners aren't held to it, but still have a safety net.
+ * own number. Nobody goes past the platform admin's hard limit (owners get exactly that).
  */
 export const DEFAULT_FOOD_PHOTOS_PER_DAY = 10
-export const OWNER_FOOD_PHOTOS_PER_DAY = 100
-/** The highest daily limit anyone can be given. */
+/** The highest default or own number an owner or coach can set (the hard limit still applies). */
 export const MAX_FOOD_PHOTOS_PER_DAY = 50
 /** Most foods one request may add (one photo rarely shows more than a handful). */
 export const MAX_FOODS_PER_ADD = 12
@@ -38,6 +42,16 @@ export interface MacroTotals {
   fatG: number
 }
 
+/** Optional extras some foods carry (barcodes, the food database, typed in). */
+export interface NutrientExtras {
+  fibreG: number | null
+  sugarG: number | null
+  sodiumMg: number | null
+}
+
+/** A day's extras added up; null when no food that day had any. */
+export type ExtrasTotals = { [K in keyof NutrientExtras]: number | null }
+
 export interface FoodEntry {
   id: number
   clientUuid: string
@@ -49,6 +63,9 @@ export interface FoodEntry {
   proteinG: number
   carbsG: number | null
   fatG: number | null
+  fibreG: number | null
+  sugarG: number | null
+  sodiumMg: number | null
   source: FoodSource
   createdAt: string
 }
@@ -59,6 +76,11 @@ export interface NutritionTargets {
   proteinG: number
   carbsG: number | null
   fatG: number | null
+  /** The weight the calculator worked them out on (null when typed in by hand). */
+  basisWeightKg: number | null
+  /** Their goal from their profile, for the line on Fuel. */
+  goalWeightKg: number | null
+  weeklyChangeKg: number | null
   updatedAt: string
 }
 
@@ -67,7 +89,11 @@ export interface FoodDay {
   date: string
   entries: FoodEntry[]
   totals: MacroTotals
+  /** Fibre, sugar and sodium, from the foods that had them. */
+  extras: ExtrasTotals
   targets: NutritionTargets | null
+  /** Exercise that day: added to the calorie target (Target + Exercise − Food = left). */
+  burned: DayBurn
 }
 
 export interface FoodDayTotals extends MacroTotals {
@@ -81,10 +107,12 @@ export interface FoodSummary {
   to: string
   days: FoodDayTotals[]
   targets: NutritionTargets | null
+  /** kcal burned per day (only days with some), added to that day's target. */
+  burned: { date: string; kcal: number }[]
 }
 
 /** A food logged lately, to add again in two taps. */
-export interface RecentFood {
+export interface RecentFood extends Partial<NutrientExtras> {
   name: string
   grams: number | null
   kcal: number
@@ -112,7 +140,7 @@ export interface FoodPhotoDraft {
   kind: 'meal' | 'label' | 'not_food'
   items: FoodPhotoItem[]
   /** A nutrition label: its values per 100 g and the serving printed on it. */
-  label: { per100g: MacroTotals; servingG: number | null } | null
+  label: { per100g: MacroTotals & Partial<NutrientExtras>; servingG: number | null } | null
   /** A short note from Claude, e.g. "Oil and sauce are hard to see". */
   note: string | null
   photosLeft: number
@@ -133,7 +161,8 @@ export interface BarcodeProduct {
   barcode: string
   name: string
   brand: string | null
-  per100g: MacroTotals
+  /** Per 100 g. Fibre, sugar and sodium when the provider has them (older saved copies don't). */
+  per100g: MacroTotals & Partial<NutrientExtras>
   /** The serving printed on the pack, in grams, when the provider knows it. */
   servingG: number | null
   /** Where the data came from, shown under the numbers (some licences require a credit). */
@@ -199,6 +228,17 @@ export const barcodeInput = z
   .trim()
   .regex(/^(\d{8}|\d{12,14})$/, 'Not a product barcode')
 
+/** Adds up fibre, sugar and sodium; each stays null when no food had it. */
+export function sumExtras(items: ReadonlyArray<Partial<NutrientExtras>>): ExtrasTotals {
+  const add = (key: keyof NutrientExtras) => {
+    const known = items.map((i) => i[key]).filter((v): v is number => v != null)
+    if (known.length === 0) return null
+    const total = known.reduce((a, b) => a + b, 0)
+    return key === 'sodiumMg' ? Math.round(total) : roundGrams(total)
+  }
+  return { fibreG: add('fibreG'), sugarG: add('sugarG'), sodiumMg: add('sodiumMg') }
+}
+
 /** Rounds kcal to whole numbers and grams of anything to one decimal. */
 export const roundKcal = (n: number) => Math.round(n)
 export const roundGrams = (n: number) => Math.round(n * 10) / 10
@@ -238,6 +278,18 @@ export function scaleLabel(per100g: MacroTotals, grams: number): MacroTotals {
     proteinG: roundGrams(per100g.proteinG * f),
     carbsG: roundGrams(per100g.carbsG * f),
     fatG: roundGrams(per100g.fatG * f),
+  }
+}
+
+/** Fibre, sugar and sodium for an amount, from values per 100 g (unknowns stay null). */
+export function scaleExtras(per100g: Partial<NutrientExtras>, grams: number): NutrientExtras {
+  const f = Math.max(0, grams) / 100
+  const at = (v: number | null | undefined, round: (n: number) => number) =>
+    v == null ? null : round(v * f)
+  return {
+    fibreG: at(per100g.fibreG, roundGrams),
+    sugarG: at(per100g.sugarG, roundGrams),
+    sodiumMg: at(per100g.sodiumMg, Math.round),
   }
 }
 
@@ -289,6 +341,9 @@ export const foodItemInput = z.object({
   proteinG: z.number().min(0).max(500),
   carbsG: optionalAmount(1000),
   fatG: optionalAmount(500),
+  fibreG: optionalAmount(200),
+  sugarG: optionalAmount(500),
+  sodiumMg: optionalAmount(20000),
 })
 
 /** Adds one or more foods to a meal. Each carries an id made on the phone, so retries never save twice. */
@@ -311,14 +366,30 @@ export const nutritionTargetsInput = z.object({
   proteinG: z.number().int().min(20).max(400),
   carbsG: z.number().int().min(0).max(1000).nullish(),
   fatG: z.number().int().min(0).max(400).nullish(),
+  /** The weight the calculator used, when the coach used it. */
+  basisWeightKg: z.number().min(25).max(400).nullish(),
+  /** What the calculator was set to: saved on their profile with the targets. */
+  plan: z
+    .object({
+      activityLevel: z.enum(ACTIVITY_LEVELS).nullable(),
+      weeklyChangeKg: z.number().min(MIN_WEEKLY_CHANGE_KG).max(MAX_WEEKLY_CHANGE_KG).nullable(),
+      goalWeightKg: z.number().min(25).max(400).nullable(),
+      // Body basics typed into the calculator; left out = unchanged.
+      birthDate: isoDate.nullish(),
+      sex: z.enum(SEXES).nullish(),
+      heightCm: z.number().min(80).max(250).nullish(),
+      /** Their weight today: saved as today's weigh-in when it's new. */
+      weightKg: z.number().min(25).max(400).nullish(),
+    })
+    .optional(),
 })
 
 /** A hint typed with a photo, e.g. "200 g chicken, cooked in oil". */
 export const foodPhotoHint = z.string().trim().max(200)
 
-/** The owner's switch for photo estimates, and whether this site has a Claude key at all. */
+/** Photo estimates as the owner sees them, and whether this site has a Claude key at all. */
 export interface FoodPhotoSettings {
-  /** The owner's choice (on unless an owner turned it off). */
+  /** The platform admin's switch (on unless they turned it off). */
   enabled: boolean
   /** ANTHROPIC_API_KEY is set on this site. Photos work only when both are true. */
   configured: boolean
@@ -329,10 +400,8 @@ export interface FoodPhotoSettings {
 
 const photosPerDay = z.number().int().min(0).max(MAX_FOOD_PHOTOS_PER_DAY)
 
-/** The owner changes the switch, the default daily limit, or both. */
-export const foodPhotoSettingsInput = z
-  .object({ enabled: z.boolean().optional(), perDay: photosPerDay.optional() })
-  .refine((v) => v.enabled !== undefined || v.perDay !== undefined, 'Nothing to change')
+/** The owner changes the default daily limit (the on/off switch is the platform admin's). */
+export const foodPhotoSettingsInput = z.object({ perDay: photosPerDay })
 
 /** One person's photo limit, as their coach sees it. */
 export interface PhotoLimit {
@@ -340,11 +409,97 @@ export interface PhotoLimit {
   perDay: number | null
   /** The site default. */
   defaultPerDay: number
-  /** What applies to them now (owners always get OWNER_FOOD_PHOTOS_PER_DAY). */
+  /** What applies to them now, never past the platform's hard limit (owners get that limit). */
   effective: number
   /** Photos they've taken today. */
   usedToday: number
+  /** Owners aren't held to the default or their own number, only the hard limit. */
+  owner: boolean
 }
 
 /** A coach sets a client's own daily limit, or null to go back to the site default. */
 export const photoLimitInput = z.object({ perDay: photosPerDay.nullable() })
+
+/** One food in a saved meal (values for the amount eaten). */
+export interface SavedMealItem {
+  name: string
+  grams: number | null
+  kcal: number
+  proteinG: number
+  carbsG: number | null
+  fatG: number | null
+  fibreG: number | null
+  sugarG: number | null
+  sodiumMg: number | null
+  source: FoodSource
+}
+
+/** Most foods a saved meal can hold, and saved meals per person. */
+export const MAX_SAVED_MEAL_ITEMS = 30
+export const MAX_SAVED_MEALS = 50
+
+export interface SavedMeal {
+  id: number
+  name: string
+  items: SavedMealItem[]
+  kcal: number
+  proteinG: number
+}
+
+/** Saves the foods of one logged meal under a name. */
+export const saveMealInput = z.object({
+  name: z.string().trim().min(1, 'Give it a name').max(60),
+  date: isoDate,
+  meal: z.enum(MEALS),
+})
+
+/** Logs a saved meal, or copies a logged meal to another day. The id makes retries safe. */
+export const logSavedMealInput = z.object({
+  clientUuid: z.uuid(),
+  date: isoDate,
+  meal: z.enum(MEALS),
+})
+export const copyMealInput = logSavedMealInput.extend({
+  fromDate: isoDate,
+  fromMeal: z.enum(MEALS),
+})
+
+/**
+ * Days in a row with food logged, up to `today`. Today not logged yet doesn't break it: the
+ * streak runs to yesterday. `days` are the logged days (any order).
+ */
+export function foodStreak(days: readonly string[], today: string): number {
+  const logged = new Set(days)
+  let day = logged.has(today) ? today : addDays(today, -1)
+  let n = 0
+  while (logged.has(day)) {
+    n += 1
+    day = addDays(day, -1)
+  }
+  return n
+}
+
+/** Food logging reminders: one evening push when little is logged that day. */
+export const FOOD_REMINDER_HOUR = 19
+/** A day with fewer meals than this logged gets the reminder. */
+export const FOOD_REMINDER_MIN_MEALS = 2
+
+/**
+ * The bell's copy of the evening food reminder: from 19:00, when it's on and fewer than two
+ * meals are logged today. It clears itself once they log.
+ */
+export function foodReminderNotification(input: {
+  on: boolean
+  today: string
+  hour: number
+  mealsToday: number
+}): AppNotification | null {
+  if (!input.on || input.hour < FOOD_REMINDER_HOUR) return null
+  if (input.mealsToday >= FOOD_REMINDER_MIN_MEALS) return null
+  return {
+    id: `food:${input.today}`,
+    kind: 'food',
+    title: 'Log today’s food',
+    body: 'A minute now keeps your calories right.',
+  }
+}

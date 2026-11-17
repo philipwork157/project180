@@ -64,7 +64,7 @@ export function weightChange(fromKg: number, toKg: number): string {
 export interface AppNotification {
   /** Stable per thing and day, so "seen" can be remembered. */
   id: string
-  kind: 'weigh_in' | 'workout' | 'program' | 'feedback' | 'chat'
+  kind: 'weigh_in' | 'workout' | 'program' | 'feedback' | 'chat' | 'food'
   title: string
   body: string
   /** Feedback: the workout it's on. */

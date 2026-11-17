@@ -55,8 +55,9 @@
     { "name": "API_LIMIT", "namespace_id": "1801", "simple": { "limit": 300, "period": 60 } },
     { "name": "SEND_LIMIT", "namespace_id": "1802", "simple": { "limit": 20, "period": 60 } }
   ],
-  // Daily cleanup at 02:00 UTC (expired sign-ins, forgotten workouts): worker/index.ts.
-  "triggers": { "crons": ["0 2 * * *"] },
+  // Daily cleanup at 02:00 UTC (expired sign-ins, forgotten workouts) and the food reminder at
+  // 17:30 UTC (19:30 in Johannesburg): worker/index.ts.
+  "triggers": { "crons": ["0 2 * * *", "30 17 * * *"] },
   "observability": {
     "enabled": true
   },
@@ -91,8 +92,8 @@
         { "name": "API_LIMIT", "namespace_id": "1811", "simple": { "limit": 300, "period": 60 } },
         { "name": "SEND_LIMIT", "namespace_id": "1812", "simple": { "limit": 20, "period": 60 } }
       ],
-      // Daily cleanup at 02:00 UTC (expired sign-ins, forgotten workouts): worker/index.ts.
-      "triggers": { "crons": ["0 2 * * *"] },
+      // Daily cleanup at 02:00 UTC and the food reminder at 17:30 UTC: worker/index.ts.
+      "triggers": { "crons": ["0 2 * * *", "30 17 * * *"] },
       "vars": {
         "BETTER_AUTH_URL": "https://dev.project180.co.za",
         "APP_URL": "https://dev.project180.co.za",

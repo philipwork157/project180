@@ -1,5 +1,5 @@
 import { adminChatUnreadQuery, authClient, forgetLocalData, meQuery } from '@project180/client'
-import { isStaff, type Me } from '@project180/shared'
+import { canUseAdmin, isPlatform, isStaff, type Me } from '@project180/shared'
 import { cn, IconButton, Logo, LogoMark, Tooltip } from '@project180/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -12,11 +12,12 @@ import {
 } from '@tanstack/react-router'
 import {
   CalendarRange,
+  ChefHat,
   Dumbbell,
+  Gauge,
   LayoutGrid,
   ListChecks,
   Menu,
-  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
   UsersRound,
@@ -28,11 +29,16 @@ import { Avatar, UserMenu } from '../components/user-menu'
 
 /** Dashboard for building the library. Users section is admin-only. */
 export const Route = createFileRoute('/_dash')({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, location }) => {
     const me = await context.queryClient.ensureQueryData(meQuery)
     // Clients can't use the admin, even with a valid sign-in (locally the two apps share one).
-    if (!me || !isStaff(me.role)) throw redirect({ to: '/login' })
+    if (!me || !canUseAdmin(me.role)) throw redirect({ to: '/login' })
     if (me.mustChangePassword) throw redirect({ to: '/choose-password' })
+    // The platform admin has only the Platform page and their own Settings; nobody else has Platform.
+    const path = location.pathname
+    if (isPlatform(me.role) && path !== '/platform' && path !== '/settings')
+      throw redirect({ to: '/platform' })
+    if (!isPlatform(me.role) && path === '/platform') throw redirect({ to: '/' })
     return { me }
   },
   component: AdminLayout,
@@ -48,23 +54,29 @@ type NavItem = {
   unread?: boolean
 }
 
+// Clients first: who needs you today, then the people you coach (their chats live on their
+// page, so the unread count sits on Clients). Below, what you build for them, most-used first.
 const sections: Array<{ title?: string; items: NavItem[] }> = [
-  { items: [{ to: '/', label: 'Overview', icon: LayoutGrid, exact: true }] },
   {
-    title: 'Library',
     items: [
-      { to: '/exercises', label: 'Exercises', icon: Dumbbell },
-      { to: '/workouts', label: 'Workouts', icon: ListChecks },
+      { to: '/', label: 'Today', icon: LayoutGrid, exact: true },
+      { to: '/clients', label: 'Clients', icon: UsersRound, adminOnly: true, unread: true },
+    ],
+  },
+  {
+    title: 'Build',
+    items: [
       { to: '/programs', label: 'Programs', icon: CalendarRange },
+      { to: '/workouts', label: 'Workouts', icon: ListChecks },
+      { to: '/exercises', label: 'Exercises', icon: Dumbbell },
+      { to: '/recipes', label: 'Recipes', icon: ChefHat },
     ],
   },
-  {
-    title: 'People',
-    items: [
-      { to: '/users', label: 'Users', icon: UsersRound, adminOnly: true },
-      { to: '/messages', label: 'Messages', icon: MessageCircle, unread: true },
-    ],
-  },
+]
+
+// The platform admin (the developer) sees only their own page.
+const platformSections: Array<{ title?: string; items: NavItem[] }> = [
+  { items: [{ to: '/platform', label: 'Platform', icon: Gauge, exact: true }] },
 ]
 
 const COLLAPSED_KEY = 'project180-sidebar-collapsed'
@@ -92,6 +104,7 @@ function Sidebar({
   onSignOut: () => void
 }) {
   const isAdmin = isStaff(me.role)
+  const home = isPlatform(me.role) ? '/platform' : '/'
   const unread = useQuery({ ...adminChatUnreadQuery, enabled: isAdmin }).data ?? 0
   return (
     <nav
@@ -104,7 +117,11 @@ function Sidebar({
           collapsed ? 'flex-col gap-3' : 'justify-between pl-3',
         )}
       >
-        <Link to="/" aria-label="Overview" className="rounded-sm">
+        <Link
+          to={home}
+          aria-label={isPlatform(me.role) ? 'Platform' : 'Today'}
+          className="rounded-sm"
+        >
           {collapsed ? (
             <LogoMark className="size-9 text-ink" title="Project 180" />
           ) : (
@@ -122,7 +139,7 @@ function Sidebar({
         )}
       </div>
 
-      {sections.map((section) => {
+      {(isPlatform(me.role) ? platformSections : sections).map((section) => {
         const items = section.items.filter((i) => isAdmin || !i.adminOnly)
         if (items.length === 0) return null
         return (

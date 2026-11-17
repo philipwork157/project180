@@ -56,12 +56,22 @@ export async function signIn(email: string, password: string): Promise<string> {
   return cookie
 }
 
+export const PLATFORM = {
+  name: 'Dev',
+  email: 'dev@example.com',
+  password: 'platform-password-1',
+}
+
 /** Creates an admin the way `bun run admin:create` does: straight into the database. */
 export async function createAdmin(
   person: { name: string; email: string; password: string } = ADMIN,
+  role: 'owner' | 'admin' | 'platform' = 'owner',
+  business = 'Project 180',
 ) {
   const statements = adminStatements({
     ...person,
+    role,
+    business,
     passwordHash: await hashPassword(person.password),
   })
   await env.DB.batch(statements.map((sql) => env.DB.prepare(sql)))
@@ -76,4 +86,20 @@ export async function setupHousehold(): Promise<{ admin: string; member: string 
     throw new Error(`Create member failed: ${JSON.stringify(created.data)}`)
   const member = await signIn(MEMBER.email, MEMBER.password)
   return { admin, member }
+}
+
+/** The platform admin (the developer), signed in to the dashboard, as `admin:create` makes them. */
+export async function signInPlatform(): Promise<string> {
+  await createAdmin(PLATFORM, 'platform')
+  const res = await call('/auth/sign-in/email', {
+    method: 'POST',
+    body: { email: PLATFORM.email, password: PLATFORM.password },
+    asAdminApp: true,
+  })
+  if (res.status !== 200)
+    throw new Error(`Platform sign-in failed (${res.status}): ${JSON.stringify(res.data)}`)
+  return (res.headers as unknown as { getSetCookie(): string[] })
+    .getSetCookie()
+    .map((c) => c.split(';')[0])
+    .join('; ')
 }

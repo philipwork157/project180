@@ -6,7 +6,7 @@ import {
   type MyStats,
   todayIn,
 } from '@project180/shared'
-import { cn, EmptyState, StatCard } from '@project180/ui'
+import { cn, EmptyState, StatCard, WeightChart } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
 import { ChevronRight, TrendingUp, Trophy } from 'lucide-react'
@@ -16,7 +16,6 @@ import { ScreenHeader } from '../../components/screen-header'
 import { SessionDetails } from '../../components/session-details'
 import { Sheet } from '../../components/sheet'
 import { WeighInSheet } from '../../components/weigh-in-card'
-import { WeightChart } from '../../components/weight-chart'
 
 export const Route = createFileRoute('/_app/progress')({
   // ?workout=<id> opens that workout (a coach's like or comment links here).

@@ -177,7 +177,7 @@ describe('deleting exercises', () => {
         cookie: admin,
       },
     )
-    expect(usage.data.usage).toEqual({ workouts: [], loggedSets: 0 })
+    expect(usage.data.usage).toEqual({ workouts: [], loggedSets: 0, pastWorkouts: 0 })
     expect(
       (await call(`/exercises/${id}/permanent`, { method: 'DELETE', cookie: admin })).status,
     ).toBe(204)

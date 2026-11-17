@@ -1,22 +1,25 @@
 import { Check } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { cn } from './cn'
-import { Select } from './field'
 
 export interface ChoiceOption<T extends string> {
   value: T
   label: string
+  /** Shown before the label (16px). When set it replaces the check; the fill shows it's picked. */
+  icon?: ReactNode
 }
 
 function Pill({
   on,
   multiple,
   label,
+  icon,
   onClick,
 }: {
   on: boolean
   multiple: boolean
   label: string
+  icon?: ReactNode
   onClick: () => void
 }) {
   return (
@@ -33,7 +36,13 @@ function Pill({
           : 'bg-surface-raised text-ink hover:ring-[1.5px] hover:ring-border-strong hover:ring-inset',
       )}
     >
-      {on && <Check className="size-4" strokeWidth={3} aria-hidden />}
+      {icon ? (
+        <span className="grid size-4 place-items-center [&_svg]:size-4" aria-hidden>
+          {icon}
+        </span>
+      ) : (
+        on && <Check className="size-4" strokeWidth={3} aria-hidden />
+      )}
       {label}
     </button>
   )
@@ -61,6 +70,7 @@ export function ChoiceChips<T extends string>({
           on={value === o.value}
           multiple={false}
           label={o.label}
+          icon={o.icon}
           onClick={() => onChange(value === o.value ? null : o.value)}
         />
       ))}
@@ -93,90 +103,11 @@ export function MultiChoiceChips<T extends string>({
             on={on}
             multiple
             label={o.label}
+            icon={o.icon}
             onClick={() => onChange(on ? value.filter((x) => x !== o.value) : [...value, o.value])}
           />
         )
       })}
-    </div>
-  )
-}
-
-function parseBirthDate(v: string | null) {
-  const [y, m, d] = v ? v.split('-').map(Number) : []
-  return { y: y ?? null, m: m ?? null, d: d ?? null }
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** Birth dates are years back, so three small selects beat a calendar. Value is YYYY-MM-DD or null. */
-export function BirthDateSelect({
-  id,
-  value,
-  onChange,
-}: {
-  id?: string
-  value: string | null
-  onChange: (value: string | null) => void
-}) {
-  const [parts, setParts] = useState(() => parseBirthDate(value))
-  useEffect(() => {
-    if (value) setParts(parseBirthDate(value))
-  }, [value])
-  const thisYear = new Date().getFullYear()
-  const years = Array.from({ length: 90 }, (_, i) => thisYear - 10 - i)
-
-  function set(patch: Partial<typeof parts>) {
-    const next = { ...parts, ...patch }
-    setParts(next)
-    if (next.y && next.m && next.d) {
-      const max = new Date(Date.UTC(next.y, next.m, 0)).getUTCDate()
-      onChange(
-        `${next.y}-${String(next.m).padStart(2, '0')}-${String(Math.min(next.d, max)).padStart(2, '0')}`,
-      )
-    } else if (value) {
-      onChange(null)
-    }
-  }
-
-  return (
-    <div className="grid grid-cols-[1fr_1.2fr_1.3fr] gap-2">
-      <Select
-        id={id}
-        aria-label="Day"
-        value={parts.d ?? ''}
-        onChange={(e) => set({ d: Number(e.target.value) || null })}
-      >
-        <option value="">Day</option>
-        {Array.from({ length: 31 }, (_, i) => i + 1).map((n) => (
-          <option key={n} value={n}>
-            {n}
-          </option>
-        ))}
-      </Select>
-      <Select
-        aria-label="Month"
-        value={parts.m ?? ''}
-        onChange={(e) => set({ m: Number(e.target.value) || null })}
-      >
-        <option value="">Month</option>
-        {MONTHS.map((name, i) => (
-          <option key={name} value={i + 1}>
-            {name}
-          </option>
-        ))}
-      </Select>
-      <Select
-        aria-label="Year"
-        value={parts.y ?? ''}
-        onChange={(e) => set({ y: Number(e.target.value) || null })}
-      >
-        <option value="">Year</option>
-        {years.map((n) => (
-          <option key={n} value={n}>
-            {n}
-          </option>
-        ))}
-      </Select>
     </div>
   )
 }

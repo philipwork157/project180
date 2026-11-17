@@ -5,6 +5,7 @@ import {
   EXPERIENCE_LEVELS,
   GOAL_LABELS,
   GOALS,
+  paceLabel,
   TRAINING_PLACE_LABELS,
   TRAINING_PLACES,
 } from '@project180/shared'
@@ -13,21 +14,23 @@ import {
   Chip,
   ChoiceChips,
   Field,
-  Input,
   MultiChoiceChips,
   PasswordInput,
   toast,
 } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Pencil, Target } from 'lucide-react'
+import { KeyRound, Pencil, Scale, Target } from 'lucide-react'
 import { useState } from 'react'
 import { claimPushForMe } from '../lib/push'
 import { Sheet } from './sheet'
 
 const goalOptions = GOALS.map((g) => ({ value: g, label: GOAL_LABELS[g] }))
 
-/** Your goals as your coach sees them, editable here. */
-export function MyGoals() {
+/**
+ * Your goals, editable here. With a coach: as your coach sees them (they set goal weight and
+ * calories). On your own: yours to change, with your body and calories in their own card.
+ */
+export function MyGoals({ onOwn = false }: { onOwn?: boolean }) {
   const profile = useQuery(myProfileQuery)
   const [editing, setEditing] = useState(false)
   const p = profile.data
@@ -76,10 +79,14 @@ export function MyGoals() {
             )}
           </>
         ) : (
-          <p className="text-[15px] text-ink-muted">Tell your coach what you’re working towards.</p>
+          <p className="text-[15px] text-ink-muted">
+            {onOwn
+              ? 'What are you working towards? Tap Add to pick your goals.'
+              : 'Tell your coach what you’re working towards.'}
+          </p>
         )}
       </div>
-      <GoalsSheet open={editing} onClose={() => setEditing(false)} profile={p} />
+      <GoalsSheet open={editing} onClose={() => setEditing(false)} profile={p} onOwn={onOwn} />
     </section>
   )
 }
@@ -88,22 +95,27 @@ function GoalsSheet({
   open,
   onClose,
   profile,
+  onOwn,
 }: {
   open: boolean
   onClose: () => void
   profile: ClientProfile
+  onOwn: boolean
 }) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState(profile)
-  const [goalWeight, setGoalWeight] = useState(profile.goalWeightKg?.toString() ?? '')
   const save = useMutation({
     mutationFn: () => {
-      const gw = Number.parseFloat(goalWeight.replace(',', '.'))
-      const { latestWeightKg: _ignored, ...rest } = draft
-      return api<{ profile: ClientProfile }>('/me/profile', {
-        method: 'PUT',
-        body: { ...rest, goalWeightKg: Number.isFinite(gw) ? gw : null },
-      })
+      // Goal weight, pace and activity level are saved with the daily targets (by your coach, or
+      // on your own in "Your body and calories"), never from here.
+      const {
+        latestWeightKg: _w,
+        goalWeightKg: _g,
+        activityLevel: _a,
+        weeklyChangeKg: _p,
+        ...rest
+      } = draft
+      return api<{ profile: ClientProfile }>('/me/profile', { method: 'PUT', body: rest })
     },
     onSuccess: ({ profile: saved }) => {
       // The server sends the saved profile back: use it, no second request.
@@ -169,16 +181,24 @@ function GoalsSheet({
             />
           )}
         </Field>
-        <Field label="Goal weight (kg)" hint="Optional">
-          {(id) => (
-            <Input
-              id={id}
-              inputMode="decimal"
-              value={goalWeight}
-              onChange={(e) => setGoalWeight(e.target.value)}
-            />
-          )}
-        </Field>
+        {(profile.goalWeightKg !== null || profile.weeklyChangeKg !== null) && (
+          <p className="flex items-start gap-3 rounded-md bg-surface-raised p-4 text-[14px]">
+            <Scale className="mt-0.5 size-4 shrink-0 text-sand-text" aria-hidden />
+            <span>
+              {[
+                profile.goalWeightKg !== null && `Goal weight ${profile.goalWeightKg} kg`,
+                profile.weeklyChangeKg !== null && paceLabel(profile.weeklyChangeKg),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              <span className="block text-ink-muted">
+                {onOwn
+                  ? 'Change it under Your body and calories.'
+                  : 'Set by your coach, with your daily calories.'}
+              </span>
+            </span>
+          </p>
+        )}
         <Button size="lg" block loading={save.isPending} onClick={() => save.mutate()}>
           Save goals
         </Button>

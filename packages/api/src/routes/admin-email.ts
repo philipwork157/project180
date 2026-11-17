@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { emailMode, escapeHtml, sendEmail } from '../email'
 import type { AppEnv } from '../env'
-import { requireAdmin, requireUser } from '../middleware'
+import { requirePlatform, requireUser } from '../middleware'
 
-/** Where this site's email goes, and a test email to yourself. */
+/** Where this site's email goes, and a test email to yourself. Platform admin only. */
 export const adminEmailRoutes = new Hono<AppEnv>()
-  .use(requireUser, requireAdmin)
+  .use(requireUser, requirePlatform)
   .get('/', (c) => c.json({ email: emailMode(c.env) }))
   .post('/test', async (c) => {
     const me = c.var.user

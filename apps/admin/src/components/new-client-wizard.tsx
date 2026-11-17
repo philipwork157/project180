@@ -84,7 +84,8 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState(() => generateTempPassword())
-  const [role, setRole] = useState<Role>('member')
+  // Owners add coaches, other owners or clients; never a platform admin (that's a script).
+  const [role, setRole] = useState<Exclude<Role, 'platform'>>('member')
   const [coachId, setCoachId] = useState<number>(me.id)
   const [profile, setProfile] = useState<ProfileDraft>(EMPTY_PROFILE)
   const [weightNow, setWeightNow] = useState('')
@@ -298,7 +299,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                           <Select
                             id={id}
                             value={role}
-                            onChange={(e) => setRole(e.target.value as Role)}
+                            onChange={(e) => setRole(e.target.value as Exclude<Role, 'platform'>)}
                           >
                             <option value="member">Client</option>
                             <option value="admin">Coach (sees only their own clients)</option>

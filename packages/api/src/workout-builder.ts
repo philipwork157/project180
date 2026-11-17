@@ -8,6 +8,7 @@ import { type Db, exercises } from '@project180/db'
 import {
   GROUP_KINDS,
   type Me,
+  readClaudeUsage,
   type TrackingType,
   WORKOUT_SECTIONS,
   type WorkoutBuildResult,
@@ -16,14 +17,13 @@ import {
 import { asc } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
+import type { ClaudeMeter } from './claude-calls'
 import { isTestSite } from './email'
 import type { Bindings } from './env'
 import { visibleTo } from './library'
 import { assertExercisesUsable, createWorkout, detail } from './routes/workouts'
 
 const API_URL = 'https://api.anthropic.com/v1/messages'
-/** Override with WORKOUT_MODEL (wrangler vars) to try another model without a code change. */
-export const DEFAULT_WORKOUT_MODEL = 'claude-sonnet-5-5'
 const TIMEOUT_MS = 90_000
 
 const INSTRUCTIONS = `You are a strength and conditioning coach building one workout for a coaching app in South Africa. The coach describes what they want; you build it ONLY from the exercise library you are given.
@@ -208,14 +208,25 @@ function failed(env: Bindings, tag: string, message: string, reason: string, det
   return new HTTPException(502, { message: isTestSite(env) ? `${message} (${reason})` : message })
 }
 
-/** Asks Claude for a JSON answer. Returns it checked; throws a friendly error otherwise. */
-export async function askClaude<T>(env: Bindings, req: ClaudeRequest<T>): Promise<T> {
+/**
+ * Asks Claude for a JSON answer. Returns it checked; throws a friendly error otherwise. `meter`
+ * carries the model to use and is filled in (tokens, time, outcome) so the call is saved either way.
+ */
+export async function askClaude<T>(
+  env: Bindings,
+  req: ClaudeRequest<T>,
+  meter: ClaudeMeter,
+): Promise<T> {
   const key = env.ANTHROPIC_API_KEY
   if (!key) throw new HTTPException(503, { message: 'Build with Claude isn’t set up yet.' })
-  const model = env.WORKOUT_MODEL || DEFAULT_WORKOUT_MODEL
-  const fail = (reason: string, detail?: unknown) =>
-    failed(env, req.tag, req.failMessage, reason, detail)
+  const { model } = meter
   const started = Date.now()
+  const fail = (reason: string, detail?: unknown) => {
+    meter.durationMs = Date.now() - started
+    meter.outcome = 'failed'
+    meter.failReason = reason.slice(0, 300)
+    return failed(env, req.tag, req.failMessage, reason, detail)
+  }
   let res: Response
   try {
     res = await fetch(API_URL, {
@@ -241,6 +252,7 @@ export async function askClaude<T>(env: Bindings, req: ClaudeRequest<T>): Promis
       err,
     )
   }
+  meter.requestId = res.headers.get('request-id')
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: { type?: string; message?: string }
@@ -255,6 +267,7 @@ export async function askClaude<T>(env: Bindings, req: ClaudeRequest<T>): Promis
     content?: Array<{ type: string; text?: string }>
     usage?: unknown
   } | null
+  meter.usage = readClaudeUsage(data?.usage)
   const text = data?.content?.find((b) => b.type === 'text')?.text
   if (!text) throw fail(`no answer from Claude (stop: ${data?.stop_reason ?? 'none'})`)
   if (data?.stop_reason === 'max_tokens') throw fail('Claude’s answer was cut off')
@@ -266,6 +279,8 @@ export async function askClaude<T>(env: Bindings, req: ClaudeRequest<T>): Promis
   }
   if (!parsed.success)
     throw fail('Claude’s answer wasn’t in the expected shape', parsed.error.issues[0])
+  meter.durationMs = Date.now() - started
+  meter.outcome = 'ok'
   console.log(
     `[${req.tag}] ${req.size(parsed.data)} with ${model} in ${Date.now() - started} ms`,
     data?.usage ?? '',
@@ -278,21 +293,26 @@ export function askClaudeForWorkout(
   env: Bindings,
   prompt: string,
   library: LibraryExercise[],
+  meter: ClaudeMeter,
 ): Promise<BuilderReply> {
-  return askClaude(env, {
-    tag: 'workout-builder',
-    failMessage: 'Claude couldn’t build that workout. Try again, or describe it differently.',
-    system: INSTRUCTIONS,
-    texts: [
-      `Exercise library (id | name | muscle group | equipment | tracked by):\n${libraryText(library)}`,
-      `The coach asks for:\n${prompt}`,
-    ],
-    schema: REPLY_SCHEMA,
-    check: replySchema,
-    maxTokens: 8000,
-    timeoutMs: TIMEOUT_MS,
-    size: (r) => `${r.exercises.length} exercises`,
-  })
+  return askClaude(
+    env,
+    {
+      tag: 'workout-builder',
+      failMessage: 'Claude couldn’t build that workout. Try again, or describe it differently.',
+      system: INSTRUCTIONS,
+      texts: [
+        `Exercise library (id | name | muscle group | equipment | tracked by):\n${libraryText(library)}`,
+        `The coach asks for:\n${prompt}`,
+      ],
+      schema: REPLY_SCHEMA,
+      check: replySchema,
+      maxTokens: 8000,
+      timeoutMs: TIMEOUT_MS,
+      size: (r) => `${r.exercises.length} exercises`,
+    },
+    meter,
+  )
 }
 
 /**
@@ -355,11 +375,14 @@ export async function buildWorkout(
   env: Bindings,
   user: Me,
   prompt: string,
+  meter: ClaudeMeter,
 ): Promise<WorkoutBuildResult> {
   const library = await libraryFor(db, user)
   if (library.length === 0)
     throw new HTTPException(409, { message: 'Add some exercises to the library first.' })
-  const reply = await askClaudeForWorkout(env, prompt, library)
+  const reply = await askClaudeForWorkout(env, prompt, library, meter)
+  meter.kind = 'workout'
+  meter.items = reply.exercises.length
   const input = toWorkoutInput(reply, library, prompt)
   if (!input)
     throw new HTTPException(422, {

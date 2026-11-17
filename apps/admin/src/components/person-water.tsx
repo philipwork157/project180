@@ -12,6 +12,7 @@ import { Button, ChoiceChips, Drawer, Field, Input, toast } from '@project180/ui
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Droplet } from 'lucide-react'
 import { useState } from 'react'
+import { SettingTile, TileValue } from './setting-tile'
 
 const DAYS = 7
 
@@ -30,29 +31,37 @@ export function WaterRow({ userId, name }: { userId: number; name: string }) {
   const onTarget = goalMl === null ? 0 : days.filter((d) => d.ml >= goalMl).length
   const first = name.split(' ')[0]
 
-  if (!day.data && !day.isError) return null
-  const summary = day.isError
-    ? 'Couldn’t load their water.'
-    : [
-        goalMl === null ? 'No daily goal yet.' : `Goal ${formatWater(goalMl)} a day.`,
-        `${formatWater(day.data?.ml ?? 0)} today.`,
-        goalMl === null
-          ? `Logged on ${days.length} of the last ${DAYS} days.`
-          : `Goal reached on ${onTarget} of the last ${DAYS} days.`,
-      ].join(' ')
-
+  if (!day.data && !day.isError)
+    return <div className="h-36 animate-pulse rounded-md bg-surface-raised" />
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md bg-surface-raised p-4">
-      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-steel/20 text-steel-text">
-        <Droplet className="size-5" aria-hidden />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="font-bold text-[14px]">Water</span>
-        <span className="text-[13px] text-ink-muted">{summary}</span>
-      </div>
-      <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
-        {goalMl === null ? 'Set goal' : 'Change'}
-      </Button>
+    <SettingTile
+      icon={<Droplet aria-hidden />}
+      iconClass="bg-steel/20 text-steel-text"
+      title="Water"
+      action={
+        <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
+          {goalMl === null ? 'Set goal' : 'Change'}
+        </Button>
+      }
+    >
+      {day.isError ? (
+        <p className="text-[13px] text-ink-muted">Couldn’t load their water.</p>
+      ) : (
+        <>
+          {goalMl === null ? (
+            <p className="font-semibold text-[15px] text-ink-muted">No daily goal</p>
+          ) : (
+            <TileValue value={formatWater(goalMl)} unit="a day" />
+          )}
+          <p className="text-[13px] text-ink-muted">
+            <span className="font-bold text-ink">{formatWater(day.data?.ml ?? 0)}</span> today
+            {' · '}
+            {goalMl === null
+              ? `logged on ${days.length} of the last ${DAYS} days`
+              : `goal reached ${onTarget} of the last ${DAYS} days`}
+          </p>
+        </>
+      )}
       <Drawer
         open={open}
         onClose={() => setOpen(false)}
@@ -68,7 +77,7 @@ export function WaterRow({ userId, name }: { userId: number; name: string }) {
           />
         )}
       </Drawer>
-    </div>
+    </SettingTile>
   )
 }
 

@@ -75,6 +75,22 @@ for (const app of APPS) {
     problems.push(`${config.name}: BETTER_AUTH_SECRET is not set (sign-in can't work).`)
   if (!names.includes('AWS_ACCESS_KEY_ID') || !names.includes('AWS_SECRET_ACCESS_KEY'))
     warnings.push(`${config.name}: no AWS keys, so emails are only logged, never sent.`)
+  // Sign-up is public: without Turnstile, bots could make accounts and send emails.
+  if (!names.includes('TURNSTILE_SECRET_KEY'))
+    problems.push(
+      `${config.name}: TURNSTILE_SECRET_KEY is not set (sign-up and email forms have no bot check).`,
+    )
+  const envFile = (() => {
+    try {
+      return readFileSync(`apps/${app}/.env.production`, 'utf8')
+    } catch {
+      return ''
+    }
+  })()
+  if (!/^VITE_TURNSTILE_SITE_KEY=\S+/m.test(envFile) && !process.env.VITE_TURNSTILE_SITE_KEY)
+    problems.push(
+      `apps/${app}/.env.production: VITE_TURNSTILE_SITE_KEY is missing, so the forms can't send the bot check.`,
+    )
   if (!names.includes('VAPID_PUBLIC_KEY') || !names.includes('VAPID_PRIVATE_KEY'))
     warnings.push(`${config.name}: no VAPID keys, so phones get no push notifications.`)
 }

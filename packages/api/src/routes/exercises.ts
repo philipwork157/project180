@@ -111,7 +111,7 @@ export const exerciseRoutes = new Hono<AppEnv>()
     const input = await parseBody(c.req.raw, exerciseInput)
     const [row] = await c.var.db
       .insert(exercises)
-      .values({ ...input, createdBy: c.var.user.id })
+      .values({ ...input, createdBy: c.var.user.id, businessId: c.var.user.businessId })
       .returning()
     if (!row) throw new Error('Insert returned no row')
     return c.json({ exercise: toExercise(row) }, 201)
@@ -162,7 +162,7 @@ export const exerciseRoutes = new Hono<AppEnv>()
       ? await db
           .select({ id: exercises.id })
           .from(exercises)
-          .where(and(inArray(exercises.id, ids), isNull(exercises.archivedAt)))
+          .where(and(inArray(exercises.id, ids), visibleTo(exercises, c.var.user)))
       : []
     if (found.length !== ids.length) notFound('Exercise not found')
     await runAll(db, [

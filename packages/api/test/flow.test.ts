@@ -184,7 +184,13 @@ describe('programs and the plan', () => {
       volumeKg: 320,
       avgFeeling: 4,
     })
-    expect(before.data.progress.impact).toEqual({ sessions: 1, loggedSets: 1, checkins: 0 })
+    expect(before.data.progress.impact).toEqual({
+      sessions: 1,
+      loggedSets: 1,
+      checkins: 0,
+      likes: 0,
+      comments: 0,
+    })
 
     const reset = await call(`/admin/users/${userId}/reset-program`, {
       method: 'POST',
@@ -194,7 +200,13 @@ describe('programs and the plan', () => {
     expect(reset.status).toBe(204)
     const after = await call<Json>(`/admin/users/${userId}/progress`, { cookie: admin })
     expect(after.data.progress).toMatchObject({ done: 0, volumeKg: 0 })
-    expect(after.data.progress.impact).toEqual({ sessions: 0, loggedSets: 0, checkins: 0 })
+    expect(after.data.progress.impact).toEqual({
+      sessions: 0,
+      loggedSets: 0,
+      checkins: 0,
+      likes: 0,
+      comments: 0,
+    })
     expect(after.data.progress.plan.enrollment.startDate).toBe('2026-11-16')
     expect((await call(`/sessions/${s.data.session.id}`, { cookie: member })).status).toBe(404)
   })

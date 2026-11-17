@@ -22,6 +22,10 @@ const rusks = {
   brands: 'Ouma, Pioneer Foods',
   serving_quantity: '42',
   nutriments: {
+    fiber_100g: 3.1,
+    sugars_100g: 18.5,
+    // Only salt: sodium is worked out from it (salt / 2.5).
+    salt_100g: 0.9,
     'energy-kcal_100g': 420,
     proteins_100g: '8.2',
     carbohydrates_100g: 66.4,
@@ -48,7 +52,15 @@ describe('barcode providers', () => {
       barcode: CODE,
       name: 'Buttermilk Rusks',
       brand: 'Ouma',
-      per100g: { kcal: 420, proteinG: 8.2, carbsG: 66.4, fatG: 13.1 },
+      per100g: {
+        kcal: 420,
+        proteinG: 8.2,
+        carbsG: 66.4,
+        fatG: 13.1,
+        fibreG: 3.1,
+        sugarG: 18.5,
+        sodiumMg: 360,
+      },
       servingG: 42,
       source: {
         provider: 'openfoodfacts',

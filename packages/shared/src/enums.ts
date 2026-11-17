@@ -1,19 +1,30 @@
 // Fixed value lists shared by the database, the API and the app.
 
-/** owner = sees every client and coach; admin = a coach who sees only their own clients; member = a client. */
-export const ROLES = ['owner', 'admin', 'member'] as const
+/**
+ * owner = sees every client and coach; admin = a coach who sees only their own clients;
+ * member = a client; platform = the developer who runs the platform (Claude, costs, email). A
+ * platform admin is not staff: they never see the gym's people or their data, only the
+ * Platform page. Made only with `bun run admin:create`, never from the dashboard.
+ */
+export const ROLES = ['owner', 'admin', 'member', 'platform'] as const
 export type Role = (typeof ROLES)[number]
 
-/** Owners and coaches: can use the admin. */
+/** Owners and coaches: the gym's own people who manage clients. Never the platform admin. */
 export const isStaff = (role: Role | string | undefined): boolean =>
   role === 'owner' || role === 'admin'
 export const isOwner = (role: Role | string | undefined): boolean => role === 'owner'
 /** A client (role `member`): sees only themselves and their own program. */
 export const isClient = (role: Role | string | undefined): boolean => role === 'member'
+/** The developer: only the Platform page in the admin, never the phone app. */
+export const isPlatform = (role: Role | string | undefined): boolean => role === 'platform'
+/** Who may sign in to the admin dashboard: staff and the platform admin. */
+export const canUseAdmin = (role: Role | string | undefined): boolean =>
+  isStaff(role) || isPlatform(role)
 export const ROLE_LABELS: Record<Role, string> = {
   owner: 'Owner',
   admin: 'Coach',
   member: 'Client',
+  platform: 'Platform admin',
 }
 
 /** How a group of exercises in a workout is done. */
@@ -190,4 +201,17 @@ export const HR_ZONES: Record<1 | 2 | 3 | 4 | 5, { name: string; percent: string
 
 export function hrZone(zone: number | null | undefined) {
   return zone && zone >= 1 && zone <= 5 ? HR_ZONES[zone as 1 | 2 | 3 | 4 | 5] : null
+}
+
+/**
+ * How active someone is in everyday life, NOT counting workouts: those are added to each day's
+ * calories from what they log (the MyFitnessPal way), so they're never counted twice.
+ */
+export const ACTIVITY_LEVELS = ['sedentary', 'light', 'active', 'very_active'] as const
+export type ActivityLevel = (typeof ACTIVITY_LEVELS)[number]
+export const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
+  sedentary: 'Mostly sitting (desk job)',
+  light: 'On their feet some of the day',
+  active: 'On their feet most of the day',
+  very_active: 'Physical job (builder, farm)',
 }

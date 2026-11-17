@@ -1,6 +1,8 @@
 // Programs one after another: a coach queues the next program, and on its start date it takes
 // over from the current one. Everything logged on the old one stays in their history.
+import { z } from 'zod'
 import { addDays } from './dates'
+import { isoDate } from './validators'
 
 interface Dated {
   startDate: string
@@ -73,4 +75,44 @@ export function dueToStart(
   }
   if (!active && queue[0]) return { activate: queue[0].id, finish: [] }
   return { activate: null, finish: [] }
+}
+
+/**
+ * Restarting a past program (admin, Past programs):
+ * - continue: pick up at the week they stopped; everything logged stays and keeps its ticks.
+ * - again: week 1 starts on the new date; old workouts stay in history and totals, but no longer
+ *   tick off the new calendar.
+ * - fresh: everything logged on it is deleted and week 1 starts on the new date.
+ */
+export const RESTART_MODES = ['continue', 'again', 'fresh'] as const
+export type RestartMode = (typeof RESTART_MODES)[number]
+
+export const restartProgramInput = z.object({
+  startDate: isoDate,
+  mode: z.enum(RESTART_MODES),
+})
+export type RestartProgramInput = z.infer<typeof restartProgramInput>
+
+interface GridDay {
+  id: number
+  weekNumber: number
+  workoutId: number | null
+}
+
+/**
+ * The week a program picks up at: the week of the first workout day not done yet.
+ * Null when every workout day is done (nothing to pick up; start it again instead).
+ */
+export function resumeWeek(days: GridDay[], doneDayIds: ReadonlySet<number>): number | null {
+  let week: number | null = null
+  for (const d of days) {
+    if (d.workoutId === null || doneDayIds.has(d.id)) continue
+    if (week === null || d.weekNumber < week) week = d.weekNumber
+  }
+  return week
+}
+
+/** The start date that puts week `week` on `day` (week 1 → the same day). */
+export function startDateForWeek(day: string, week: number): string {
+  return addDays(day, -(Math.max(week, 1) - 1) * 7)
 }

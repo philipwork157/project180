@@ -32,9 +32,14 @@ const NUTRIENTS = {
   proteinG: [1003, '203'],
   carbsG: [1005, '205'],
   fatG: [1004, '204'],
+  fibreG: [1079, '291'],
+  sugarG: [2000, '269'],
+  sodiumMg: [1093, '307'],
 } as const
 
 const sameCode = (a: string, b: string) => a.replace(/^0+/, '') === b.replace(/^0+/, '')
+
+const maybe = (v: number | null, round: (n: number) => number) => (v === null ? null : round(v))
 
 /** A food's values per 100 g (FoodData Central gives every nutrient per 100 g), or null. */
 function readFood(food: UsdaFood): ProviderProduct | null {
@@ -54,6 +59,9 @@ function readFood(food: UsdaFood): ProviderProduct | null {
       proteinG: roundGrams(protein ?? 0),
       carbsG: roundGrams(value(NUTRIENTS.carbsG) ?? 0),
       fatG: roundGrams(value(NUTRIENTS.fatG) ?? 0),
+      fibreG: maybe(value(NUTRIENTS.fibreG), roundGrams),
+      sugarG: maybe(value(NUTRIENTS.sugarG), roundGrams),
+      sodiumMg: maybe(value(NUTRIENTS.sodiumMg), Math.round),
     },
     servingG: serving && serving > 0 ? roundGrams(serving) : null,
   }

@@ -1,5 +1,5 @@
 import { sessions, users } from '@project180/db'
-import type { Me, Role } from '@project180/shared'
+import { type Me, ROLES, type Role } from '@project180/shared'
 import { sql } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import type { Auth } from './auth'
@@ -12,6 +12,9 @@ interface SessionLikeUser {
   timezone?: unknown
   weightUnit?: unknown
   mustChangePassword?: unknown
+  businessId?: unknown
+  coachId?: unknown
+  needsOnboarding?: unknown
 }
 
 /**
@@ -28,10 +31,14 @@ export function toMe(u: SessionLikeUser): Me {
     id: Number(u.id),
     name: u.name,
     email: u.email,
-    role: u.role === 'owner' || u.role === 'admin' ? u.role : 'member',
+    role: ROLES.includes(u.role as Role) ? (u.role as Role) : 'member',
     timezone: typeof u.timezone === 'string' ? u.timezone : 'Africa/Johannesburg',
     weightUnit: u.weightUnit === 'lb' ? 'lb' : 'kg',
     mustChangePassword: u.mustChangePassword === true || u.mustChangePassword === 1,
+    businessId:
+      typeof u.businessId === 'number' && Number.isInteger(u.businessId) ? u.businessId : null,
+    coachId: typeof u.coachId === 'number' && Number.isInteger(u.coachId) ? u.coachId : null,
+    needsOnboarding: u.needsOnboarding === true || u.needsOnboarding === 1,
   }
 }
 
@@ -41,7 +48,17 @@ export function toMe(u: SessionLikeUser): Me {
  */
 export async function createUserWithPassword(
   auth: Auth,
-  input: { name: string; email: string; password: string; role: Role; coachId?: number | null },
+  input: {
+    name: string
+    email: string
+    password: string
+    role: Role
+    coachId?: number | null
+    /** The business they join: always the business of the staff member adding them. */
+    businessId: number | null
+    /** False for people who sign up themselves: they confirm their email first. */
+    emailVerified?: boolean
+  },
 ) {
   const ctx = await auth.$context
   const existing = await ctx.internalAdapter.findUserByEmail(input.email)
@@ -51,9 +68,10 @@ export async function createUserWithPassword(
     {
       name: input.name,
       email: input.email,
-      emailVerified: true,
+      emailVerified: input.emailVerified ?? true,
       role: input.role,
       coachId: input.coachId ?? null,
+      businessId: input.businessId,
     },
     { method: 'admin' },
   )

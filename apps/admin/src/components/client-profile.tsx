@@ -1,5 +1,8 @@
 import { ApiError, api, clientProfileQuery } from '@project180/client'
 import {
+  ACTIVITY_LABELS,
+  ACTIVITY_LEVELS,
+  type ActivityLevel,
   type ClientProfile,
   type ClientProfileInput,
   EXPERIENCE_LABELS,
@@ -14,10 +17,11 @@ import {
   type TrainingPlace,
 } from '@project180/shared'
 import {
-  BirthDateSelect,
   Button,
+  Card,
   Chip,
   ChoiceChips,
+  cn,
   DatePicker,
   Drawer,
   Field,
@@ -27,7 +31,7 @@ import {
   toast,
 } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, NotebookPen, Pencil, Ruler, Scale, Target } from 'lucide-react'
+import { CalendarClock, Mars, NotebookPen, Pencil, Ruler, Scale, Target, Venus } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 export interface ProfileDraft {
@@ -36,6 +40,7 @@ export interface ProfileDraft {
   sex: Sex | null
   heightCm: string
   goalWeightKg: string
+  activityLevel: ActivityLevel | null
   mainGoal: Goal | null
   focusAreas: Goal[]
   places: TrainingPlace[]
@@ -52,6 +57,7 @@ export const EMPTY_PROFILE: ProfileDraft = {
   sex: null,
   heightCm: '',
   goalWeightKg: '',
+  activityLevel: null,
   mainGoal: null,
   focusAreas: [],
   places: [],
@@ -74,6 +80,7 @@ export function profileToDraft(p: ClientProfile): ProfileDraft {
     sex: p.sex,
     heightCm: p.heightCm?.toString() ?? '',
     goalWeightKg: p.goalWeightKg?.toString() ?? '',
+    activityLevel: p.activityLevel,
     mainGoal: p.mainGoal,
     focusAreas: p.focusAreas,
     places: p.places,
@@ -92,6 +99,7 @@ export function draftToInput(d: ProfileDraft): ClientProfileInput {
     sex: d.sex,
     heightCm: num(d.heightCm),
     goalWeightKg: num(d.goalWeightKg),
+    activityLevel: d.activityLevel,
     mainGoal: d.mainGoal,
     focusAreas: d.focusAreas,
     places: d.places,
@@ -104,10 +112,38 @@ export function draftToInput(d: ProfileDraft): ClientProfileInput {
 }
 
 const goalOptions = GOALS.map((g) => ({ value: g, label: GOAL_LABELS[g] }))
-const SEX_OPTIONS = [
-  { value: 'female' as const, label: 'Female' },
-  { value: 'male' as const, label: 'Male' },
+export const SEX_OPTIONS = [
+  { value: 'female' as const, label: 'Female', icon: <Venus strokeWidth={2.5} /> },
+  { value: 'male' as const, label: 'Male', icon: <Mars strokeWidth={2.5} /> },
 ]
+
+export const ACTIVITY_OPTIONS = ACTIVITY_LEVELS.map((a) => ({
+  value: a,
+  label: ACTIVITY_LABELS[a],
+}))
+
+/** A titled block in a long form: small-caps heading, a line above, an optional one-line note. */
+function FormSection({
+  title,
+  note,
+  children,
+}: {
+  title: string
+  note?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="flex flex-col gap-5 border-border border-t pt-6 first:border-t-0 first:pt-0">
+      <header className="flex flex-col gap-1">
+        <h3 className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+          {title}
+        </h3>
+        {note && <p className="text-[13px] text-ink-muted">{note}</p>}
+      </header>
+      {children}
+    </section>
+  )
+}
 
 /** Body basics: birth date, sex, height, weight now and goal weight. */
 export function BodyFields({
@@ -126,14 +162,17 @@ export function BodyFields({
     <div className="flex flex-col gap-5">
       <Field label="Date of birth" hint="Optional">
         {(id) => (
-          <BirthDateSelect
+          <DatePicker
             id={id}
+            birth
+            placeholder="Pick their birthday"
             value={draft.birthDate}
             onChange={(birthDate) => onChange({ birthDate })}
+            onClear={() => onChange({ birthDate: null })}
           />
         )}
       </Field>
-      <Field label="Sex" hint="Optional. Used later for calorie and heart-rate estimates.">
+      <Field label="Sex" hint="Optional. Used to work out their daily calories.">
         {() => (
           <ChoiceChips
             label="Sex"
@@ -180,6 +219,19 @@ export function BodyFields({
           )}
         </Field>
       </div>
+      <Field
+        label="How active are they?"
+        hint="Everyday life, not counting workouts (those are added each day). Optional."
+      >
+        {() => (
+          <ChoiceChips
+            label="How active are they?"
+            options={ACTIVITY_OPTIONS}
+            value={draft.activityLevel}
+            onChange={(activityLevel: ActivityLevel | null) => onChange({ activityLevel })}
+          />
+        )}
+      </Field>
     </div>
   )
 }
@@ -392,6 +444,114 @@ export function ProfileSummary({ userId, name }: { userId: number; name: string 
   )
 }
 
+const birthLabel = (iso: string) =>
+  new Intl.DateTimeFormat('en-ZA', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${iso}T00:00:00Z`))
+
+/**
+ * Everything in their profile, every field showing (Not set where it's empty), with Edit. For
+ * the Profile & access tab, so nothing is only visible inside the drawer.
+ */
+export function ProfileDetails({ userId, name }: { userId: number; name: string }) {
+  const profile = useQuery(clientProfileQuery(userId))
+  const [editing, setEditing] = useState(false)
+  const p = profile.data
+  if (!p) return <div className="h-80 animate-pulse rounded-lg bg-surface" />
+  const age = ageFrom(p.birthDate)
+  const list = (items: string[]) => (items.length > 0 ? items.join(', ') : null)
+  const groups: Array<{ title: string; rows: Array<[string, string | null]> }> = [
+    {
+      title: 'Contact and body',
+      rows: [
+        ['Phone', p.phone],
+        ['Date of birth', p.birthDate && `${birthLabel(p.birthDate)} · ${age} yrs`],
+        ['Sex', SEX_OPTIONS.find((o) => o.value === p.sex)?.label ?? null],
+        ['Height', p.heightCm ? `${p.heightCm} cm` : null],
+        ['Weight now', p.latestWeightKg ? `${p.latestWeightKg} kg (latest weigh-in)` : null],
+        ['Goal weight', p.goalWeightKg ? `${p.goalWeightKg} kg` : null],
+        ['How active', p.activityLevel && ACTIVITY_LABELS[p.activityLevel]],
+      ],
+    },
+    {
+      title: 'Goals',
+      rows: [
+        ['Main goal', p.mainGoal && GOAL_LABELS[p.mainGoal]],
+        ['Also working on', list(p.focusAreas.map((g) => GOAL_LABELS[g]))],
+        ['Experience', p.experience && EXPERIENCE_LABELS[p.experience]],
+        ['Days a week', p.daysPerWeek ? `${p.daysPerWeek} days` : null],
+        ['Where they train', list(p.places.map((x) => TRAINING_PLACE_LABELS[x]))],
+        [
+          'Event',
+          p.targetEvent &&
+            [p.targetEvent, p.targetEventDate && birthLabel(p.targetEventDate)]
+              .filter(Boolean)
+              .join(' · '),
+        ],
+        ['Injuries or anything to know', p.notes],
+      ],
+    },
+  ]
+  return (
+    <Card className="flex min-w-0 flex-col gap-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 className="font-bold text-[17px]">Profile</h2>
+          <p className="text-[14px] text-ink-muted">
+            Body basics and goals. Used for their daily calories and shown to them in the app.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Pencil className="size-4" aria-hidden />}
+          onClick={() => setEditing(true)}
+        >
+          Edit
+        </Button>
+      </div>
+      {groups.map((g) => (
+        <section key={g.title} className="flex flex-col gap-4 border-border border-t pt-5">
+          <h3 className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+            {g.title}
+          </h3>
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {g.rows.map(([label, value]) => (
+              <div
+                key={label}
+                className={cn(
+                  'flex min-w-0 flex-col gap-1',
+                  label === 'Injuries or anything to know' && 'sm:col-span-2',
+                )}
+              >
+                <dt className="font-semibold text-[13px] text-ink-muted">{label}</dt>
+                <dd
+                  className={cn(
+                    'whitespace-pre-line break-words text-[15px]',
+                    value ? 'font-semibold' : 'text-ink-muted',
+                  )}
+                >
+                  {value || 'Not set'}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+      <ProfileDrawer
+        open={editing}
+        onClose={() => setEditing(false)}
+        userId={userId}
+        name={name}
+        profile={p}
+      />
+    </Card>
+  )
+}
+
 function ProfileDrawer({
   open,
   onClose,
@@ -439,19 +599,31 @@ function ProfileDrawer({
         </>
       }
     >
-      <div className="flex flex-col gap-8">
-        <Field label="Phone" hint="Optional, for WhatsApp" error={error}>
-          {(id) => (
-            <Input
-              id={id}
-              type="tel"
-              value={draft.phone}
-              onChange={(e) => update({ phone: e.target.value })}
-            />
-          )}
-        </Field>
-        <BodyFields draft={draft} onChange={update} />
-        <GoalFields draft={draft} onChange={update} />
+      <div className="flex flex-col gap-6">
+        <FormSection title="Contact">
+          <Field label="Phone" hint="Optional, for WhatsApp" error={error}>
+            {(id) => (
+              <Input
+                id={id}
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="082 123 4567"
+                value={draft.phone}
+                onChange={(e) => update({ phone: e.target.value })}
+              />
+            )}
+          </Field>
+        </FormSection>
+        <FormSection
+          title="Body"
+          note="Age, sex, height and activity work out their daily calories."
+        >
+          <BodyFields draft={draft} onChange={update} />
+        </FormSection>
+        <FormSection title="Goals">
+          <GoalFields draft={draft} onChange={update} />
+        </FormSection>
       </div>
     </Drawer>
   )

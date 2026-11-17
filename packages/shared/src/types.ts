@@ -1,4 +1,5 @@
 import type {
+  ActivityLevel,
   EnrollmentStatus,
   Equipment,
   ExerciseCategory,
@@ -26,6 +27,12 @@ export interface Me {
   weightUnit: WeightUnit
   /** Signed in with a temporary password from their coach: they must choose their own first. */
   mustChangePassword: boolean
+  /** The business they belong to; null for the platform admin (and anyone without one). */
+  businessId: number | null
+  /** Their coach; null for staff and for people using the app on their own. */
+  coachId: number | null
+  /** Signed up themselves and hasn't been through the welcome wizard yet (app only). */
+  needsOnboarding: boolean
 }
 
 export interface Exercise {
@@ -52,6 +59,10 @@ export interface ClientProfile {
   sex: Sex | null
   heightCm: number | null
   goalWeightKg: number | null
+  /** For the calorie calculator; set by their coach. */
+  activityLevel: ActivityLevel | null
+  /** The pace they aim for in kg a week (negative = lose); set with their daily targets. */
+  weeklyChangeKg: number | null
   mainGoal: Goal | null
   focusAreas: Goal[]
   places: TrainingPlace[]
@@ -299,7 +310,17 @@ export interface PersonProgress {
   lastWorkoutAt: string | null
   recent: SessionSummary[]
   /** What a reset wipes. */
-  impact: { sessions: number; loggedSets: number; checkins: number }
+  impact: EnrollmentImpact
+}
+
+/** What's logged on one program: what a reset, remove or delete wipes for good. */
+export interface EnrollmentImpact {
+  sessions: number
+  loggedSets: number
+  checkins: number
+  /** Your likes and comments on those workouts (they go with the workouts). */
+  likes: number
+  comments: number
 }
 
 /** A program someone used to be on: archived (or replaced), with its history kept. */
@@ -318,8 +339,10 @@ export interface PastProgram {
   lastWorkoutAt: string | null
   /** Their finished workouts on it, newest first (at most 100). */
   recent: SessionSummary[]
+  /** The week "pick up where they left off" resumes at; null when every workout is done. */
+  resumeWeek: number | null
   /** What deleting it wipes. */
-  impact: { sessions: number; loggedSets: number; checkins: number }
+  impact: EnrollmentImpact
 }
 
 /** A program queued to take over on its start date. */
@@ -442,6 +465,8 @@ export interface SessionSummary {
   /** Coaches' lists also show workouts stopped early or cancelled; clients see completed only. */
   status: SessionStatus
   workoutName: string | null
+  /** Built by the person themselves (Quick workout), not from their program. */
+  quick: boolean
   startedAt: string
   durationSeconds: number | null
   feeling: number | null
@@ -476,6 +501,27 @@ export interface SwapOptions {
   coach: Record<number, number[]>
   /** What this person swapped each exercise for before, most recent first. */
   mine: Record<number, number[]>
+}
+
+/** A workout someone can start a quick workout from: their own, with its exercises. */
+export interface QuickWorkoutSource {
+  id: number
+  name: string
+  exercises: WorkoutExerciseItem[]
+  groups: WorkoutGroup[]
+}
+
+/** What the quick-workout builder offers (exercises come from the swap options). */
+export interface QuickWorkoutOptions {
+  /** Staff always; clients when their coach turned it on. */
+  enabled: boolean
+  workouts: QuickWorkoutSource[]
+}
+
+/** A client's quick-workout switch, for their coach. Staff can always build their own. */
+export interface QuickWorkoutsAccess {
+  enabled: boolean
+  always: boolean
 }
 
 export interface FinishResult {

@@ -1,6 +1,13 @@
-// What each person eats and drinks: their food log, their coach's daily targets, water, and the
-// daily photo-estimate counter. Photos themselves are never stored.
-import { FOOD_SOURCES, type FoodSearchResult, MEALS } from '@project180/shared'
+// What each person eats and drinks (food log, daily targets, water, the photo counter) and the
+// exercise they log by hand to add to the day (activities, steps).
+// Photos themselves are never stored.
+import {
+  ACTIVITY_KINDS,
+  FOOD_SOURCES,
+  type FoodSearchResult,
+  MEALS,
+  type SavedMealItem,
+} from '@project180/shared'
 import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { users } from './auth'
 import { createdAt, id, timestamp, updatedAt } from './columns'
@@ -26,6 +33,10 @@ export const foodEntries = sqliteTable(
     proteinG: real('protein_g').notNull(),
     carbsG: real('carbs_g'),
     fatG: real('fat_g'),
+    // Optional extras (from barcodes, the food database or typed in).
+    fibreG: real('fibre_g'),
+    sugarG: real('sugar_g'),
+    sodiumMg: real('sodium_mg'),
     source: text('source', { enum: FOOD_SOURCES }).notNull().default('manual'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -44,6 +55,8 @@ export const nutritionTargets = sqliteTable(
     proteinG: integer('protein_g').notNull(),
     carbsG: integer('carbs_g'),
     fatG: integer('fat_g'),
+    // The weight the calculator used; the Food card suggests recalculating when they move 2 kg.
+    basisWeightKg: real('basis_weight_kg'),
     setBy: integer('set_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -103,6 +116,9 @@ export const foodProducts = sqliteTable(
     proteinG: real('protein_g'),
     carbsG: real('carbs_g'),
     fatG: real('fat_g'),
+    fibreG: real('fibre_g'),
+    sugarG: real('sugar_g'),
+    sodiumMg: real('sodium_mg'),
     servingG: real('serving_g'),
     fetchedAt: timestamp('fetched_at').notNull(),
   },
@@ -119,3 +135,52 @@ export const foodSearches = sqliteTable('food_searches', {
   results: text('results', { mode: 'json' }).notNull().$type<FoodSearchResult[]>(),
   fetchedAt: timestamp('fetched_at').notNull(),
 })
+
+/**
+ * Activity logged by hand on Fuel ("Add activity": a walk, padel...). kcal is the estimate
+ * saved when it was logged (from their weight that day), like a food's kcal.
+ */
+export const activityLogs = sqliteTable(
+  'activity_logs',
+  {
+    id: id(),
+    clientUuid: text('client_uuid').notNull().unique(),
+    userId: userId(),
+    // Their local day, as YYYY-MM-DD.
+    date: text('date').notNull(),
+    kind: text('kind', { enum: ACTIVITY_KINDS }).notNull(),
+    minutes: integer('minutes').notNull(),
+    kcal: integer('kcal').notNull(),
+    createdAt: createdAt(),
+  },
+  // A day and a range of days read one person's rows by date.
+  (t) => [index('activity_logs_user_date_idx').on(t.userId, t.date)],
+)
+
+/** Steps typed in for a day: one row per person per day. */
+export const stepLogs = sqliteTable(
+  'step_logs',
+  {
+    userId: userId(),
+    date: text('date').notNull(),
+    steps: integer('steps').notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('step_logs_user_date_uq').on(t.userId, t.date)],
+)
+
+/**
+ * A meal someone saved to log again in one tap ("My meals"). Its foods are read and written
+ * whole with it, so they live in one small JSON value.
+ */
+export const savedMeals = sqliteTable(
+  'saved_meals',
+  {
+    id: id(),
+    userId: userId(),
+    name: text('name').notNull(),
+    items: text('items', { mode: 'json' }).$type<SavedMealItem[]>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('saved_meals_user_idx').on(t.userId)],
+)

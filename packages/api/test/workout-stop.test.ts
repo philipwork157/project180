@@ -37,13 +37,14 @@ async function setup() {
     body: { userId: memberId, programId: p.data.program.id, startDate: '2026-11-09' },
   })
   const plan = await call<Json>('/me/plan', { cookie: member })
-  const workoutId = plan.data.plan.days[0].workoutId as number
+  const { workoutId, programDayId } = plan.data.plan.days[0]
+  // Started from the plan, as the app does: the session belongs to the program.
   const start = async () =>
     (
       await call<Json>('/sessions', {
         method: 'POST',
         cookie: member,
-        body: { clientUuid: crypto.randomUUID(), workoutId },
+        body: { clientUuid: crypto.randomUUID(), workoutId, programDayId },
       })
     ).data.session.id as number
   const logSet = (sessionId: number) =>

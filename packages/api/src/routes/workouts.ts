@@ -170,7 +170,7 @@ export async function assertExercisesUsable(
     throw new HTTPException(400, { message: 'Unknown exercise in workout' })
 }
 
-function exerciseRows(workoutId: number, input: { exercises?: WorkoutExerciseInput[] }) {
+export function exerciseRows(workoutId: number, input: { exercises?: WorkoutExerciseInput[] }) {
   return (input.exercises ?? []).map((e, position) => ({
     workoutId,
     exerciseId: e.exerciseId,
@@ -193,7 +193,7 @@ function exerciseRows(workoutId: number, input: { exercises?: WorkoutExerciseInp
 
 export type WorkoutInputParsed = ReturnType<typeof workoutInput.parse>
 
-function groupRows(workoutId: number, input: { groups: WorkoutInputParsed['groups'] }) {
+export function groupRows(workoutId: number, input: { groups: WorkoutInputParsed['groups'] }) {
   return input.groups.map((g) => ({
     workoutId,
     groupNumber: g.groupNumber,
@@ -288,7 +288,14 @@ export const workoutRoutes = new Hono<AppEnv>()
     const rows = await c.var.db
       .select()
       .from(workouts)
-      .where(and(visibleTo(workouts, c.var.user, archived), libraryOnly(workouts, clientId)))
+      .where(
+        and(
+          visibleTo(workouts, c.var.user, archived),
+          libraryOnly(workouts, clientId),
+          // Quick workouts a client built for themselves never show in a library or builder.
+          eq(workouts.quick, false),
+        ),
+      )
       .orderBy(asc(workouts.name))
     const items = await loadWorkoutExercises(
       c.var.db,

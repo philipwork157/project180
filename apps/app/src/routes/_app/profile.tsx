@@ -5,12 +5,16 @@ import {
   setThemePreference,
   type ThemePreference,
 } from '@project180/client'
+import { isClient } from '@project180/shared'
 import { Button, cn } from '@project180/ui'
 import { useQueryClient } from '@tanstack/react-query'
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
+import { DeleteAccount } from '../../components/delete-account'
+import { FoodReminderSetting } from '../../components/food-reminder-setting'
 import { ChangePassword, MyGoals } from '../../components/my-goals'
+import { MyPlanCard } from '../../components/my-targets'
 import { PushSettings } from '../../components/push-settings'
 import { ScreenHeader } from '../../components/screen-header'
 import { Sheet } from '../../components/sheet'
@@ -28,6 +32,7 @@ const themes: Array<{ value: ThemePreference; label: string; icon: typeof Sun }>
 
 function ProfilePage() {
   const { me } = Route.useRouteContext()
+  const onOwn = isClient(me.role) && me.coachId === null
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [theme, setTheme] = useState(getThemePreference)
@@ -61,9 +66,12 @@ function ProfilePage() {
         </div>
       </section>
 
-      <MyGoals />
+      <MyGoals onOwn={onOwn} />
+      {/* On your own you manage your body basics and calories; with a coach, they do. */}
+      {onOwn && <MyPlanCard timezone={me.timezone} />}
 
       <PushSettings />
+      <FoodReminderSetting />
 
       <section className="flex flex-col gap-3">
         <h2 className="font-bold text-[17px]">Appearance</h2>
@@ -104,12 +112,26 @@ function ProfilePage() {
         </Button>
       </section>
 
+      {isClient(me.role) && <DeleteAccount coached={me.coachId !== null} />}
+
+      <p className="text-center text-[13px] text-ink-muted">
+        <Link to="/terms" className="font-semibold hover:text-ink">
+          Terms
+        </Link>
+        {' · '}
+        <Link to="/privacy" className="font-semibold hover:text-ink">
+          Privacy
+        </Link>
+      </p>
+
       <Sheet
         open={confirmSignOut}
         onClose={() => !signingOut && setConfirmSignOut(false)}
         label="Sign out"
       >
-        <div className="mx-auto flex max-w-md flex-col items-center gap-2 pb-4 text-center">
+        {/* Full width like every sheet: phone stacks Sign out over Cancel; wider screens put
+            them side by side so neither button stretches across the whole screen alone. */}
+        <div className="flex w-full flex-col items-center gap-2 pb-4 text-center">
           <span className="grid size-14 place-items-center rounded-full bg-danger/10 text-danger">
             <LogOut className="size-6" aria-hidden />
           </span>
@@ -117,14 +139,22 @@ function ProfilePage() {
           <p className="text-[15px] text-ink-muted">
             You’ll need your email and password to sign back in.
           </p>
-          <div className="mt-4 flex w-full flex-col gap-2">
-            <Button variant="danger" size="lg" block loading={signingOut} onClick={signOut}>
+          <div className="mt-4 grid w-full grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+            <Button
+              variant="danger"
+              size="lg"
+              block
+              loading={signingOut}
+              onClick={signOut}
+              className="md:order-2"
+            >
               Sign out
             </Button>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="lg"
               block
+              className="md:order-1"
               disabled={signingOut}
               onClick={() => setConfirmSignOut(false)}
             >

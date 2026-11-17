@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  ACTIVITY_LEVELS,
   EQUIPMENT,
   EXERCISE_CATEGORIES,
   EXPERIENCE_LEVELS,
@@ -7,7 +8,6 @@ import {
   GOALS,
   GROUP_KINDS,
   MUSCLE_GROUPS,
-  ROLES,
   SEXES,
   TRACKING_TYPES,
   TRAINING_PLACES,
@@ -47,6 +47,8 @@ export const clientProfileInput = z.object({
   sex: z.enum(SEXES).nullish(),
   heightCm: z.number().min(80).max(250).nullish(),
   goalWeightKg: z.number().min(25).max(400).nullish(),
+  /** Left out = unchanged (the phone app never sends it; only their coach sets it). */
+  activityLevel: z.enum(ACTIVITY_LEVELS).nullish(),
   mainGoal: z.enum(GOALS).nullish(),
   focusAreas: z.array(z.enum(GOALS)).max(GOALS.length).default([]),
   places: z.array(z.enum(TRAINING_PLACES)).max(TRAINING_PLACES.length).default([]),
@@ -63,7 +65,8 @@ export const createUserInput = z.object({
   name,
   email,
   password,
-  role: z.enum(ROLES).default('member'),
+  // Never 'platform': the platform admin is only ever made with `bun run admin:create`.
+  role: z.enum(['owner', 'admin', 'member']).default('member'),
   /** Owners can pick the coach; a coach's new clients are always their own. */
   coachId: z.number().int().positive().nullish(),
   profile: clientProfileInput.optional(),
@@ -183,6 +186,25 @@ export const workoutGroupInput = z.object({
 })
 export type WorkoutGroupInput = z.input<typeof workoutGroupInput>
 
+/** Keep only groups that exercises actually use, once each. */
+function keepUsedGroups<
+  W extends {
+    exercises: Array<{ supersetGroup?: number | null }>
+    groups: Array<{ groupNumber: number }>
+  },
+>(w: W): W {
+  const used = new Set(
+    w.exercises.map((e) => e.supersetGroup).filter((g): g is number => g != null),
+  )
+  const seen = new Set<number>()
+  return {
+    ...w,
+    groups: w.groups.filter(
+      (g) => used.has(g.groupNumber) && !seen.has(g.groupNumber) && seen.add(g.groupNumber),
+    ),
+  }
+}
+
 /** Create or replace a workout. The exercises array order is the workout order. */
 export const workoutInput = z
   .object({
@@ -192,20 +214,26 @@ export const workoutInput = z
     exercises: z.array(workoutExerciseInput).max(40).default([]),
     groups: z.array(workoutGroupInput).max(20).default([]),
   })
-  // Keep only groups that exercises actually use, once each.
-  .transform((w) => {
-    const used = new Set(
-      w.exercises.map((e) => e.supersetGroup).filter((g): g is number => g != null),
-    )
-    const seen = new Set<number>()
-    return {
-      ...w,
-      groups: w.groups.filter(
-        (g) => used.has(g.groupNumber) && !seen.has(g.groupNumber) && seen.add(g.groupNumber),
-      ),
-    }
-  })
+  .transform(keepUsedGroups)
 export type WorkoutInput = z.input<typeof workoutInput>
+
+/**
+ * Quick workout: someone builds their own and starts it at once. The clientUuid is the new
+ * session's, so a retried start returns the same workout. sourceWorkoutId = built from one.
+ */
+export const quickWorkoutInput = z
+  .object({
+    clientUuid: z.uuid(),
+    name,
+    sourceWorkoutId: id.nullish(),
+    exercises: z.array(workoutExerciseInput).min(1, 'Add at least one exercise').max(40),
+    groups: z.array(workoutGroupInput).max(20).default([]),
+  })
+  .transform(keepUsedGroups)
+export type QuickWorkoutInput = z.input<typeof quickWorkoutInput>
+
+/** A coach lets a client build their own quick workouts (or stops them). */
+export const quickWorkoutsAccessInput = z.object({ enabled: z.boolean() })
 
 export const programDayInput = z.object({
   weekNumber: z.number().int().min(1).max(52),

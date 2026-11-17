@@ -36,12 +36,15 @@ export function Bars({
   label,
   first,
   last,
+  ticks,
 }: {
   data: BarDatum[]
   barClass: string
   label: string
   first: string
   last: string
+  /** A short label under every bar ("3 Nov"); without them, just the first and last. */
+  ticks?: string[]
 }) {
   const [active, setActive] = useState<number | null>(null)
   const most = Math.max(1, ...data.map((d) => d.value))
@@ -85,10 +88,29 @@ export function Bars({
           ))}
         </ol>
       </div>
-      <div className="flex justify-between gap-2 font-semibold text-[12px] text-ink-muted">
-        <span>{first}</span>
-        <span>{last}</span>
-      </div>
+      {ticks ? (
+        <ol aria-hidden className="flex gap-[2px]">
+          {ticks.map((t, i) => (
+            <li
+              // biome-ignore lint/suspicious/noArrayIndexKey: one label per bar, in order
+              key={i}
+              className={cn(
+                'min-w-0 flex-1 truncate text-center font-semibold text-[11px]',
+                i === ticks.length - 1 ? 'text-ink' : 'text-ink-muted',
+                // Busy ranges: every other label, so they never run into each other.
+                ticks.length > 14 && i % 2 === 1 && 'invisible',
+              )}
+            >
+              {t}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="flex justify-between gap-2 font-semibold text-[12px] text-ink-muted">
+          <span>{first}</span>
+          <span>{last}</span>
+        </div>
+      )}
     </div>
   )
 }

@@ -54,3 +54,31 @@ export async function clearFailures(db: Db, k: SignInKeys) {
       .delete(signInAttempts)
       .where(eq(signInAttempts.key, `email:${k.email.trim().toLowerCase()}`))
 }
+
+/**
+ * Counts one try at something that sends email or makes an account (sign-up, "forgot
+ * password", resend) and answers false once `limit` tries within `windowMs` are used up for
+ * this key. Shares the sign-in table: keys are prefixed, so they never mix.
+ */
+export async function takeAttempt(
+  db: Db,
+  key: string,
+  limit: number,
+  windowMs: number,
+  now = Date.now(),
+): Promise<boolean> {
+  const [row] = await db.select().from(signInAttempts).where(eq(signInAttempts.key, key))
+  const fresh = !row || now - row.firstAt.getTime() > windowMs
+  const tries = fresh ? 1 : row.failures + 1
+  if (!fresh && row.failures >= limit) return false
+  const values = {
+    failures: tries,
+    firstAt: fresh ? new Date(now) : row.firstAt,
+    lockedUntil: null,
+  }
+  await db
+    .insert(signInAttempts)
+    .values({ key, ...values })
+    .onConflictDoUpdate({ target: signInAttempts.key, set: values })
+  return true
+}

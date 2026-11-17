@@ -1,9 +1,9 @@
 import { env } from 'cloudflare:test'
 import { createDb } from '@project180/db'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { workoutBuilderSettings } from '../src/settings'
+import { builderSettings } from '../src/settings'
 import { buildWorkout, libraryFor, toWorkoutInput } from '../src/workout-builder'
-import { ADMIN, call, createAdmin, setupHousehold, signIn } from './helpers'
+import { ADMIN, call, createAdmin, setupHousehold, signIn, signInPlatform } from './helpers'
 
 type Json = Record<string, any>
 
@@ -161,7 +161,15 @@ describe('Build with Claude', () => {
 
     const spy = claudeAnswers(reply(ids))
     const me = (await call<Json>('/me', { cookie: owner })).data.user
-    const result = await buildWorkout(createDb(env.DB), keyed, me, 'Upper body, dumbbells, 40 min')
+    const result = await buildWorkout(
+      createDb(env.DB),
+      keyed,
+      me,
+      'Upper body, dumbbells, 40 min',
+      {
+        model: 'claude-sonnet-5-5',
+      },
+    )
 
     expect(result.workout.name).toBe('Upper Body Dumbbells A')
     expect(result.workout.exercises).toHaveLength(4)
@@ -192,7 +200,9 @@ describe('Build with Claude', () => {
     const ids = await library(owner)
     claudeAnswers(reply(ids, { exercises: [reply(ids).exercises[4]] }))
     const me = (await call<Json>('/me', { cookie: owner })).data.user
-    await expect(buildWorkout(createDb(env.DB), keyed, me, 'Something odd')).rejects.toMatchObject({
+    await expect(
+      buildWorkout(createDb(env.DB), keyed, me, 'Something odd', { model: 'claude-sonnet-5-5' }),
+    ).rejects.toMatchObject({
       status: 422,
     })
     const count = await env.DB.prepare('SELECT count(*) AS n FROM workouts').first<Json>()
@@ -225,21 +235,28 @@ describe('Build with Claude', () => {
     ).toBe(503)
 
     const db = createDb(env.DB)
-    expect((await workoutBuilderSettings(db, keyed)).enabled).toBe(true)
-    await call('/admin/settings/workout-builder', {
+    expect((await builderSettings(db, keyed)).enabled).toBe(true)
+    // Only the platform admin switches it; owners and clients get 404 there.
+    const platform = await signInPlatform()
+    for (const cookie of [admin, member]) {
+      const tries = await call('/platform/claude', {
+        method: 'PUT',
+        cookie,
+        body: { feature: 'workout_builder', enabled: false },
+      })
+      expect(tries.status).toBe(404)
+    }
+    await call('/platform/claude', {
       method: 'PUT',
-      cookie: admin,
-      body: { enabled: false },
+      cookie: platform,
+      asAdminApp: true,
+      body: { feature: 'workout_builder', enabled: false },
     })
-    expect(await workoutBuilderSettings(db, keyed)).toMatchObject({
+    expect(await builderSettings(db, keyed)).toMatchObject({
       enabled: false,
       configured: true,
     })
-    const memberTries = await call('/admin/settings/workout-builder', {
-      method: 'PUT',
-      cookie: member,
-      body: { enabled: true },
-    })
-    expect(memberTries.status).toBe(403)
+    // Programs have their own switch, still on.
+    expect((await builderSettings(db, keyed, 'program_builder')).enabled).toBe(true)
   })
 })

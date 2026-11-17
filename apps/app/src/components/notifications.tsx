@@ -1,9 +1,17 @@
-import { meQuery, myChatUnreadQuery, myFeedbackQuery, planQuery } from '@project180/client'
+import {
+  foodDayQuery,
+  foodRemindersQuery,
+  meQuery,
+  myChatUnreadQuery,
+  myFeedbackQuery,
+  planQuery,
+} from '@project180/client'
 import {
   type AppNotification,
   appNotifications,
   chatNotification,
   feedbackNotifications,
+  foodReminderNotification,
   isClient,
 } from '@project180/shared'
 import { IconButton } from '@project180/ui'
@@ -44,9 +52,28 @@ export function useAppNotifications(): AppNotification[] {
   const me = useQuery(meQuery).data
   const chat = useQuery({ ...myChatUnreadQuery, enabled: !!me && isClient(me.role) }).data
   const { status, today } = useWeighInStatus()
+  const reminders = useQuery(foodRemindersQuery).data ?? false
+  const food = useQuery({ ...foodDayQuery(today ?? ''), enabled: reminders && !!today }).data
   // Unread messages first, then your coach's new likes and comments.
   const message = chatNotification(chat)
   const fromCoach = [...(message ? [message] : []), ...feedbackNotifications(feedback ?? [])]
+  // The evening food reminder (also pushed): from 19:00 with fewer than two meals logged.
+  const reminder =
+    today && food
+      ? foodReminderNotification({
+          on: reminders,
+          today,
+          hour: Number(
+            new Intl.DateTimeFormat('en-ZA', {
+              hour: 'numeric',
+              hourCycle: 'h23',
+              timeZone: me?.timezone ?? 'Africa/Johannesburg',
+            }).format(new Date()),
+          ),
+          mealsToday: new Set(food.entries.map((e) => e.meal)).size,
+        })
+      : null
+  if (reminder) fromCoach.push(reminder)
   if (!plan?.plan || !today) return fromCoach
   const day = plan.plan.days.find((d) => d.isToday) ?? null
   const planned = appNotifications({

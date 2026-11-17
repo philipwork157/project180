@@ -3,16 +3,14 @@ import {
   bodyCheckins,
   clientProfiles,
   enrollments,
-  exerciseAlternatives,
-  exercises,
+  programDays,
   programs,
   pushSubscriptions,
+  sessionFeedback,
   sessions,
   setLogs,
-  signInAttempts,
   users,
   workoutSessions,
-  workouts,
 } from '@project180/db'
 import {
   addDays,
@@ -24,19 +22,26 @@ import {
   type DeletePersonResult,
   type DirectoryPerson,
   deviceLabel,
+  type EnrollmentImpact,
   feedbackInput,
   isActiveNow,
   isClient,
   isOwner,
   isoDate,
   isStaff,
+  type Me,
   type PastProgram,
   type PeoplePage,
   type PersonActivity,
   type PersonProgress,
   peopleQueryInput,
+  type QuickWorkoutsAccess,
+  quickWorkoutsAccessInput,
   resetPasswordInput,
+  restartProgramInput,
+  resumeWeek,
   type SessionSummary,
+  startDateForWeek,
   todayIn,
   type UpcomingProgram,
   type UserSummary,
@@ -50,7 +55,7 @@ import {
   gt,
   gte,
   inArray,
-  isNull,
+  isNotNull,
   like,
   max,
   ne,
@@ -62,12 +67,14 @@ import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { coachedPerson, managedPerson, managedUsers } from '../access'
+import { deletePersonForGood } from '../delete-person'
 import { newPasswordEmail, sendEmail, welcomeEmail } from '../email'
 import type { AppEnv } from '../env'
 import { forbidden, notFound, parseBody, parseId } from '../errors'
 import { addFeedback, loadFeedback, removeFeedback } from '../feedback'
 import { requireAdmin, requireUser } from '../middleware'
 import { loadProfile, logWeight, saveProfile } from '../profiles'
+import { quickWorkoutsAccess } from '../quick'
 import { startDuePrograms } from '../schedule'
 import { cancelWorkout, sessionSummaries } from '../sessions'
 import { buildPersonStats } from '../stats'
@@ -126,18 +133,24 @@ function wipeEnrollment(db: Db, enrollmentId: number) {
 type Db = AppEnv['Variables']['db']
 
 /** Counts of what's logged on one enrollment: what a reset, remove or delete wipes. */
-async function enrollmentImpact(db: Db, enrollmentId: number) {
+async function enrollmentImpact(db: Db, enrollmentId: number): Promise<EnrollmentImpact> {
   return (await enrollmentImpacts(db, [enrollmentId])).get(enrollmentId) ?? noImpact
 }
 
-const noImpact = { sessions: 0, loggedSets: 0, checkins: 0 }
+const noImpact: EnrollmentImpact = {
+  sessions: 0,
+  loggedSets: 0,
+  checkins: 0,
+  likes: 0,
+  comments: 0,
+}
 
-/** The same counts for several enrollments in three grouped queries. */
+/** The same counts for several enrollments in four grouped queries. */
 async function enrollmentImpacts(db: Db, enrollmentIds: number[]) {
-  const out = new Map(enrollmentIds.map((id) => [id, { ...noImpact }]))
+  const out = new Map<number, EnrollmentImpact>(enrollmentIds.map((id) => [id, { ...noImpact }]))
   if (enrollmentIds.length === 0) return out
   const inEnrollments = inArray(workoutSessions.enrollmentId, enrollmentIds)
-  const [sessionCounts, setCounts, checkinCounts] = await Promise.all([
+  const [sessionCounts, setCounts, checkinCounts, feedbackCounts] = await Promise.all([
     db
       .select({ id: workoutSessions.enrollmentId, n: count() })
       .from(workoutSessions)
@@ -154,6 +167,13 @@ async function enrollmentImpacts(db: Db, enrollmentIds: number[]) {
       .from(bodyCheckins)
       .where(inArray(bodyCheckins.enrollmentId, enrollmentIds))
       .groupBy(bodyCheckins.enrollmentId),
+    // Likes and comments are deleted with their workout (cascade), so they're counted here too.
+    db
+      .select({ id: workoutSessions.enrollmentId, kind: sessionFeedback.kind, n: count() })
+      .from(sessionFeedback)
+      .innerJoin(workoutSessions, eq(workoutSessions.id, sessionFeedback.sessionId))
+      .where(inEnrollments)
+      .groupBy(workoutSessions.enrollmentId, sessionFeedback.kind),
   ])
   const at = (id: number | null) => (id === null ? undefined : out.get(id))
   for (const r of sessionCounts) {
@@ -167,6 +187,10 @@ async function enrollmentImpacts(db: Db, enrollmentIds: number[]) {
   for (const r of checkinCounts) {
     const row = at(r.id)
     if (row) row.checkins = r.n
+  }
+  for (const r of feedbackCounts) {
+    const row = at(r.id)
+    if (row) row[r.kind === 'like' ? 'likes' : 'comments'] = r.n
   }
   return out
 }
@@ -217,14 +241,37 @@ async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
     inArray(workoutSessions.enrollmentId, enrollmentIds),
     eq(workoutSessions.status, 'completed'),
   )
-  const [summaries, owners, impacts] = await Promise.all([
+  const [summaries, owners, impacts, grid] = await Promise.all([
     sessionSummaries(db, finishedIn, 10_000),
     db
-      .select({ id: workoutSessions.id, enrollmentId: workoutSessions.enrollmentId })
+      .select({
+        id: workoutSessions.id,
+        enrollmentId: workoutSessions.enrollmentId,
+        programDayId: workoutSessions.programDayId,
+      })
       .from(workoutSessions)
       .where(finishedIn),
     enrollmentImpacts(db, enrollmentIds),
+    // Their workout days, to work out where "pick up where they left off" resumes.
+    db
+      .select({
+        id: programDays.id,
+        programId: programDays.programId,
+        weekNumber: programDays.weekNumber,
+        workoutId: programDays.workoutId,
+      })
+      .from(programDays)
+      .where(
+        and(
+          inArray(
+            programDays.programId,
+            rows.map((r) => r.programId),
+          ),
+          isNotNull(programDays.workoutId),
+        ),
+      ),
   ])
+  const doneDays = new Set(owners.flatMap((o) => (o.programDayId == null ? [] : [o.programDayId])))
   const enrollmentOf = new Map(owners.map((o) => [o.id, o.enrollmentId]))
   const finishedBy = new Map<number, SessionSummary[]>()
   for (const s of summaries) {
@@ -248,6 +295,10 @@ async function pastPrograms(db: Db, userId: number): Promise<PastProgram[]> {
       volumeKg: Math.round(finished.reduce((a, x) => a + x.volumeKg, 0)),
       lastWorkoutAt: finished[0]?.startedAt ?? null,
       recent: finished.slice(0, PAST_WORKOUTS),
+      resumeWeek: resumeWeek(
+        grid.filter((d) => d.programId === r.programId),
+        doneDays,
+      ),
       impact: impacts.get(r.enrollmentId) ?? noImpact,
     }
   })
@@ -265,9 +316,14 @@ async function ownEnrollment(db: Db, userId: number, enrollmentId: number) {
 /** People per page on the People list. */
 const PEOPLE_PAGE = 25
 
-async function assertCoach(db: Db, coachId: number) {
-  const [coach] = await db.select({ role: users.role }).from(users).where(eq(users.id, coachId))
-  if (!coach || !isStaff(coach.role)) notFound('Coach not found')
+/** The coach must be staff in the same business as whoever picks them. */
+async function assertCoach(db: Db, me: Me, coachId: number) {
+  const [coach] = await db
+    .select({ role: users.role, businessId: users.businessId })
+    .from(users)
+    .where(eq(users.id, coachId))
+  if (!coach || !isStaff(coach.role) || coach.businessId !== me.businessId)
+    notFound('Coach not found')
 }
 
 export const adminUserRoutes = new Hono<AppEnv>()
@@ -423,13 +479,14 @@ export const adminUserRoutes = new Hono<AppEnv>()
     }
     return c.json(page)
   })
-  /** Staff who can coach (owners only): for picking or changing someone's coach. */
+  /** Staff in their business who can coach (owners only): for picking someone's coach. */
   .get('/coaches', async (c) => {
-    if (!isOwner(c.var.user.role)) forbidden('Only an owner can see every coach')
+    const me = c.var.user
+    if (!isOwner(me.role)) forbidden('Only an owner can see every coach')
     const rows = await c.var.db
       .select({ id: users.id, name: users.name, role: users.role })
       .from(users)
-      .where(inArray(users.role, ['owner', 'admin']))
+      .where(and(inArray(users.role, ['owner', 'admin']), managedUsers(me)))
       .orderBy(asc(users.name))
     return c.json({ coaches: rows })
   })
@@ -452,7 +509,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
     // Check everything that can be refused before creating anything, so a mistake (a program
     // this coach can't use, an unknown coach, an email in use) never leaves a half-made account.
     await Promise.all([
-      pickedCoach ? assertCoach(db, pickedCoach) : null,
+      pickedCoach ? assertCoach(db, me, pickedCoach) : null,
       input.program ? findVisibleProgram(db, me, input.program.programId, false) : null,
       db
         .select({ id: users.id })
@@ -462,7 +519,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
           if (taken) throw new HTTPException(409, { message: 'That email already has an account' })
         }),
     ])
-    const created = await createUserWithPassword(c.var.auth, { ...input, coachId })
+    // Everyone they add joins their own business.
+    const created = await createUserWithPassword(c.var.auth, {
+      ...input,
+      coachId,
+      businessId: me.businessId,
+    })
     // The password we set is temporary: they choose their own on first sign-in.
     await db.update(users).set({ mustChangePassword: true }).where(eq(users.id, created.id))
     const user = { ...created, mustChangePassword: true }
@@ -508,57 +570,21 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const person = await managedPerson(db, me, parseId(c.req.param('id')))
     if (person.id === me.id) forbidden('You can’t delete yourself')
     if (person.role === 'owner') forbidden('Owners can’t be deleted')
-    const id = person.id
-    const n = (rows: { n: number }[]) => rows[0]?.n ?? 0
-    const [[row], sessionRows, checkinRows, clientRows, exerciseRows, workoutRows, programRows] =
-      await Promise.all([
-        db.select({ email: users.email }).from(users).where(eq(users.id, id)),
-        db.select({ n: count() }).from(workoutSessions).where(eq(workoutSessions.userId, id)),
-        db.select({ n: count() }).from(bodyCheckins).where(eq(bodyCheckins.userId, id)),
-        db.select({ n: count() }).from(users).where(eq(users.coachId, id)),
-        db.select({ n: count() }).from(exercises).where(eq(exercises.createdBy, id)),
-        db
-          .select({ n: count() })
-          .from(workouts)
-          .where(and(eq(workouts.createdBy, id), isNull(workouts.clientId))),
-        db
-          .select({ n: count() })
-          .from(programs)
-          .where(and(eq(programs.createdBy, id), isNull(programs.clientId))),
-      ])
-    await db.batch([
-      // Hand over what other people still use.
-      db.update(users).set({ coachId: me.id }).where(eq(users.coachId, id)),
-      db.update(exercises).set({ createdBy: me.id }).where(eq(exercises.createdBy, id)),
-      db.update(workouts).set({ createdBy: me.id }).where(eq(workouts.createdBy, id)),
-      db.update(programs).set({ createdBy: me.id }).where(eq(programs.createdBy, id)),
-      db
-        .update(exerciseAlternatives)
-        .set({ createdBy: me.id })
-        .where(eq(exerciseAlternatives.createdBy, id)),
-      db.update(enrollments).set({ assignedBy: null }).where(eq(enrollments.assignedBy, id)),
-      // Everything they logged (sets and session snapshots go with their sessions).
-      db.delete(workoutSessions).where(eq(workoutSessions.userId, id)),
-      db.delete(bodyCheckins).where(eq(bodyCheckins.userId, id)),
-      db.delete(appActivity).where(eq(appActivity.userId, id)),
-      db.delete(enrollments).where(eq(enrollments.userId, id)),
-      // Their own copies of programs and workouts (days, rows and groups go with them).
-      db.delete(programs).where(eq(programs.clientId, id)),
-      db.delete(workouts).where(eq(workouts.clientId, id)),
-      db.delete(signInAttempts).where(eq(signInAttempts.key, `email:${row?.email ?? ''}`)),
-      // Last: the person (sign-ins, devices and profile go with them).
-      db.delete(users).where(eq(users.id, id)),
-    ])
-    const result: DeletePersonResult = {
-      removed: { workouts: n(sessionRows), checkins: n(checkinRows) },
-      handedOver: {
-        clients: n(clientRows),
-        exercises: n(exerciseRows),
-        workouts: n(workoutRows),
-        programs: n(programRows),
-      },
-    }
+    const result: DeletePersonResult = await deletePersonForGood(db, person.id, me.id)
     return c.json(result)
+  })
+  /** Whether this client may build their own quick workouts in the app (staff always can). */
+  .get('/:id/quick-workouts', async (c) => {
+    const person = await coachedPerson(c.var.db, c.var.user, parseId(c.req.param('id')))
+    return c.json({ quickWorkouts: await quickWorkoutsAccess(c.var.db, person) })
+  })
+  .put('/:id/quick-workouts', async (c) => {
+    const { db } = c.var
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
+    if (!isClient(person.role)) forbidden('Coaches and owners can always build their own')
+    const { enabled } = await parseBody(c.req.raw, quickWorkoutsAccessInput)
+    await db.update(users).set({ quickWorkouts: enabled }).where(eq(users.id, person.id))
+    return c.json({ quickWorkouts: { enabled, always: false } satisfies QuickWorkoutsAccess })
   })
   /** Hand a client to another coach (owners only). */
   .patch('/:id/coach', async (c) => {
@@ -567,7 +593,7 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const person = await managedPerson(db, me, parseId(c.req.param('id')))
     if (!isClient(person.role)) forbidden('Only clients have a coach')
     const { coachId } = await parseBody(c.req.raw, assignCoachInput)
-    await assertCoach(db, coachId)
+    await assertCoach(db, me, coachId)
     await db.update(users).set({ coachId }).where(eq(users.id, person.id))
     return c.body(null, 204)
   })
@@ -845,6 +871,66 @@ export const adminUserRoutes = new Hono<AppEnv>()
       })
     await db.update(enrollments).set({ status: 'active' }).where(eq(enrollments.id, row.id))
     return c.body(null, 204)
+  })
+  /**
+   * Restart a past program from a date: pick up where they left off (continue), start again
+   * keeping the old workouts in their history (again), or wipe them and start fresh (fresh).
+   */
+  .post('/:id/enrollments/:enrollmentId/restart', async (c) => {
+    const { db } = c.var
+    const person = await coachedPerson(db, c.var.user, parseId(c.req.param('id')))
+    const row = await ownEnrollment(db, person.id, parseId(c.req.param('enrollmentId')))
+    const { startDate, mode } = await parseBody(c.req.raw, restartProgramInput)
+    if (row.status !== 'completed' && row.status !== 'cancelled')
+      throw new HTTPException(409, { message: 'Only a past program can be restarted.' })
+    const [current] = await db
+      .select({ id: enrollments.id })
+      .from(enrollments)
+      .where(and(eq(enrollments.userId, person.id), eq(enrollments.status, 'active')))
+    if (current)
+      throw new HTTPException(409, {
+        message: 'They already have a current program. Archive it first.',
+      })
+    const sessionsOn = eq(workoutSessions.enrollmentId, row.id)
+    let start = startDate
+    if (mode === 'continue') {
+      const [days, done] = await Promise.all([
+        db
+          .select({
+            id: programDays.id,
+            weekNumber: programDays.weekNumber,
+            workoutId: programDays.workoutId,
+          })
+          .from(programDays)
+          .where(and(eq(programDays.programId, row.programId), isNotNull(programDays.workoutId))),
+        db
+          .select({ programDayId: workoutSessions.programDayId })
+          .from(workoutSessions)
+          .where(and(sessionsOn, eq(workoutSessions.status, 'completed'))),
+      ])
+      const week = resumeWeek(
+        days,
+        new Set(done.flatMap((d) => (d.programDayId == null ? [] : [d.programDayId]))),
+      )
+      if (week === null)
+        throw new HTTPException(409, {
+          message: 'Every workout on it is done. Start it again instead.',
+        })
+      start = startDateForWeek(startDate, week)
+    }
+    const reopen = db
+      .update(enrollments)
+      .set({ status: 'active', startDate: start, completedAt: null })
+      .where(eq(enrollments.id, row.id))
+    if (mode === 'fresh') await db.batch([...wipeEnrollment(db, row.id), reopen])
+    else if (mode === 'again')
+      // Old workouts stay in their history and totals but no longer tick off the new calendar.
+      await db.batch([
+        db.update(workoutSessions).set({ programDayId: null }).where(sessionsOn),
+        reopen,
+      ])
+    else await reopen
+    return c.json({ startDate: start })
   })
   /** Delete a past program and everything logged on it, or take a queued program off the list. */
   .delete('/:id/enrollments/:enrollmentId', async (c) => {

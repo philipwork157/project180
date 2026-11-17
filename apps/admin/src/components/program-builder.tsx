@@ -1,4 +1,4 @@
-import { ApiError, api, programQuery, workoutBuilderQuery } from '@project180/client'
+import { ApiError, api, programBuilderQuery, programQuery } from '@project180/client'
 import type { ProgramBuildResult } from '@project180/shared'
 import { Button, buttonClasses, Drawer, Field, Spinner, Textarea, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -13,12 +13,12 @@ const EXAMPLES = [
 ]
 
 /**
- * "Build with Claude" on the Programs page: shown when the owner has Build with Claude on and
- * the site has a Claude key. It only creates a new program (plus new workouts where the library
+ * "Build with Claude" on the Programs page: shown when building programs with Claude is on
+ * and the site has a Claude key. It only creates a new program (plus new workouts where the library
  * has nothing that fits); the coach then edits it in the normal program editor.
  */
 export function BuildProgramWithClaude() {
-  const available = useQuery(workoutBuilderQuery).data?.available ?? false
+  const available = useQuery(programBuilderQuery).data?.available ?? false
   const [open, setOpen] = useState(false)
   if (!available) return null
   return (

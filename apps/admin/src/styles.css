@@ -5,9 +5,14 @@
 @source "../../../packages/ui/src";
 
 @layer base {
+  /* No rubber-band bounce or pull-to-refresh on the page itself, in the browser or installed:
+     the root scroller takes its overscroll from html (Safari), the body covers the rest. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
   body {
     min-height: 100dvh;
-    overscroll-behavior-y: none;
   }
 }
 
@@ -19,10 +24,22 @@
   padding-top: max(env(safe-area-inset-top), 1rem);
 }
 
-/* Sideways-scrolling rows on phones (tabs, chips) without a visible scrollbar. */
+/* Sideways-scrolling rows on phones (tabs, chips) without a visible scrollbar. Some phones
+   (Android Chrome, iOS) still flash a scroll indicator along the bottom edge while you swipe, so
+   the row keeps 12px of room under the pills and cuts off the bottom 6px, where that indicator is
+   drawn: it can never sit on a pill. The negative margins give the room back, so the row sits
+   where it did. */
 @utility no-scrollbar {
   scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-top: 2px;
+  padding-bottom: 12px;
+  margin-top: -2px;
+  margin-bottom: -12px;
+  clip-path: inset(0 0 6px 0);
   &::-webkit-scrollbar {
     display: none;
+    width: 0;
+    height: 0;
   }
 }

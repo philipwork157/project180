@@ -1,5 +1,5 @@
 import { planQuery, statsQuery } from '@project180/client'
-import { formatNumber, type MyPlan, type PlanDay } from '@project180/shared'
+import { formatNumber, isClient, type MyPlan, type PlanDay } from '@project180/shared'
 import { Button, cn, StatCard, TurnArc } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -8,7 +8,9 @@ import { motion } from 'motion/react'
 import { useState } from 'react'
 import { Elapsed } from '../../components/elapsed'
 import { NotificationsButton } from '../../components/notifications'
+import { QuickWorkoutEntry } from '../../components/quick-workout'
 import { ScreenHeader } from '../../components/screen-header'
+import { StarterPrograms } from '../../components/starter-programs'
 import { WeekStrip } from '../../components/week-strip'
 import { useWeighInStatus, WeighInCard, WeighInSheet } from '../../components/weigh-in-card'
 import { useStartWorkout } from '../../lib/use-start-workout'
@@ -43,6 +45,10 @@ function TodayPage() {
     (d) => d.date > p.today && d.workoutId !== null && d.state === 'planned',
   )
   const thisWeek = stats.data?.weeks.at(-1)
+  // Quick workout (when allowed): a full card when there's nothing else to do today,
+  // a quieter row under today's workout otherwise, and hidden while one is in progress.
+  const planned = today?.workoutId != null && today.state !== 'done'
+  const showQuick = plan.data?.quickWorkouts === true && !activeSession
   const weighIn = useWeighInStatus()
   const [weighing, setWeighing] = useState(false)
 
@@ -134,8 +140,13 @@ function TodayPage() {
           </div>
         </>
       ) : (
-        <NoPlan />
+        <>
+          <NoPlan />
+          {isClient(me.role) && me.coachId === null && <StarterPrograms timezone={me.timezone} />}
+        </>
       )}
+
+      {showQuick && <QuickWorkoutEntry prominent={!planned} />}
 
       <section>
         <h2 className="mb-3 font-bold text-[17px]">This week</h2>
@@ -297,9 +308,13 @@ function shortDate(date: string) {
   }).format(new Date(`${date}T00:00:00Z`))
 }
 
-/** No program yet: their coach assigns one. Clients never pick from the library. */
+/**
+ * No program yet. With a coach: it's on its way. On your own: pick a ready-made program below,
+ * or build a quick workout.
+ */
 function NoPlan() {
   const { me } = Route.useRouteContext()
+  const onOwn = isClient(me.role) && me.coachId === null
   return (
     <section
       className={cn(
@@ -312,11 +327,12 @@ function NoPlan() {
         Your 180 starts here
       </p>
       <h2 className="relative mt-2 font-display font-extrabold text-[30px] leading-[34px] tracking-tight">
-        Your program is on its way
+        {onOwn ? 'Pick your first program' : 'Your program is on its way'}
       </h2>
       <p className="relative mt-2 max-w-[34ch] font-semibold text-[15px] text-[#f5f3ed]/75">
-        {me.name.split(' ')[0]}, your coach is putting it together. It shows up here and in your
-        calendar as soon as it’s ready.
+        {onOwn
+          ? `${me.name.split(' ')[0]}, choose a ready-made plan below, or build a quick workout and start now.`
+          : `${me.name.split(' ')[0]}, your coach is putting it together. It shows up here and in your calendar as soon as it’s ready.`}
       </p>
     </section>
   )

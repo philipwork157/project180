@@ -3,9 +3,19 @@ import { createDb } from '@project180/db'
 import { todayIn } from '@project180/shared'
 import { HTTPException } from 'hono/http-exception'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ClaudeMeter } from '../src/claude-calls'
 import { claimPhoto, estimateFoodPhoto, parseFoodPhotoReply, releasePhoto } from '../src/food-photo'
 import { foodPhotosAvailable, photoLimitFor } from '../src/settings'
-import { ADMIN, call, createAdmin, MEMBER, setupHousehold, signIn, signInAsIs } from './helpers'
+import {
+  ADMIN,
+  call,
+  createAdmin,
+  MEMBER,
+  setupHousehold,
+  signIn,
+  signInAsIs,
+  signInPlatform,
+} from './helpers'
 
 type Json = Record<string, any>
 
@@ -34,7 +44,10 @@ describe('food log', () => {
   it('logs foods, shows the day with totals, edits and deletes', async () => {
     const { member } = await setupHousehold()
     const added = await addFood(member, {
-      entries: [food(), food({ name: 'Rice', grams: 180, kcal: 234, proteinG: 4.3, carbsG: 51 })],
+      entries: [
+        food(),
+        food({ name: 'Rice', grams: 180, kcal: 234, proteinG: 4.3, carbsG: 51, fatG: 0 }),
+      ],
     })
     expect(added.status).toBe(201)
     expect(added.data.day.entries.map((e: Json) => e.name)).toEqual(['Chicken breast', 'Rice'])
@@ -100,7 +113,8 @@ describe('food log', () => {
       expect.objectContaining({ date: today, entries: 3, kcal: 698 }),
     ])
     const recent = await call<Json>('/me/food/recent', { cookie: member })
-    expect(recent.data.foods.map((f: Json) => f.name)).toEqual(['oats ', 'Chicken breast'])
+    // Names are saved trimmed, and "Oats" and "oats " count as one food.
+    expect(recent.data.foods.map((f: Json) => f.name)).toEqual(['oats', 'Chicken breast'])
   })
 })
 
@@ -346,10 +360,12 @@ describe('food photos', () => {
         content: [{ type: 'text', text: JSON.stringify(answer) }],
       })
     })
+    const meter: ClaudeMeter = { model: 'claude-sonnet-5-5' }
     const draft = await estimateFoodPhoto(
       { ...env, ANTHROPIC_API_KEY: 'test-key' },
       { bytes: new Uint8Array([255, 216, 255]), type: 'image/jpeg' },
       '50 g packet',
+      meter,
     )
     expect(draft.items).toEqual([
       {
@@ -374,6 +390,8 @@ describe('food photos', () => {
       source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/' },
     })
     expect(body.messages[0].content[1].text).toContain('50 g packet')
+    // What the scan is saved with: the outcome, what it found and that a note came (not the note).
+    expect(meter).toMatchObject({ outcome: 'ok', kind: 'meal', items: 1, hadNote: true })
   })
 
   it('answers a friendly error when Claude fails or replies in the wrong shape', async () => {
@@ -382,15 +400,21 @@ describe('food photos', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       Response.json({ error: { type: 'overloaded_error' } }, { status: 529 }),
     )
-    await expect(estimateFoodPhoto(keyed, photo, '')).rejects.toMatchObject({ status: 502 })
+    await expect(
+      estimateFoodPhoto(keyed, photo, '', { model: 'claude-sonnet-5-5' }),
+    ).rejects.toMatchObject({ status: 502 })
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       Response.json({
         stop_reason: 'end_turn',
         content: [{ type: 'text', text: 'A plate of food' }],
       }),
     )
-    await expect(estimateFoodPhoto(keyed, photo, '')).rejects.toBeInstanceOf(HTTPException)
-    await expect(estimateFoodPhoto(env, photo, '')).rejects.toMatchObject({ status: 503 })
+    await expect(
+      estimateFoodPhoto(keyed, photo, '', { model: 'claude-sonnet-5-5' }),
+    ).rejects.toBeInstanceOf(HTTPException)
+    await expect(
+      estimateFoodPhoto(env, photo, '', { model: 'claude-sonnet-5-5' }),
+    ).rejects.toMatchObject({ status: 503 })
   })
 
   it('caps photos per day, and gives one back when Claude could not read it', async () => {
@@ -409,11 +433,12 @@ describe('food photos', () => {
 })
 
 describe('food photo switch', () => {
-  it('is on by default; only an owner can turn it off, and then photos are unavailable', async () => {
+  it('is on by default; only the platform admin turns it off, and then photos are unavailable', async () => {
     await createAdmin()
     const owner = await signIn(ADMIN.email, ADMIN.password)
     await call('/admin/users', { method: 'POST', cookie: owner, body: { ...COACH, role: 'admin' } })
     const coach = await signIn(COACH.email, COACH.password)
+    const platform = await signInPlatform()
     const keyed = { ...env, ANTHROPIC_API_KEY: 'test-key' }
     const db = createDb(env.DB)
 
@@ -423,25 +448,39 @@ describe('food photo switch', () => {
     // Without a key there are no photos, whatever the switch says.
     expect(await foodPhotosAvailable(db, env)).toBe(false)
 
-    const byCoach = await call('/admin/settings/food-photos', {
-      method: 'PUT',
-      cookie: coach,
-      body: { enabled: false },
-    })
-    expect(byCoach.status).toBe(403)
-
-    const off = await call<Json>('/admin/settings/food-photos', {
+    // Owners and coaches can't switch it any more (owners only set the default limit).
+    const byOwner = await call('/admin/settings/food-photos', {
       method: 'PUT',
       cookie: owner,
       body: { enabled: false },
     })
-    expect(off.data.foodPhotos.enabled).toBe(false)
+    expect(byOwner.status).toBe(400)
+    for (const cookie of [owner, coach]) {
+      const tries = await call('/platform/claude', {
+        method: 'PUT',
+        cookie,
+        body: { feature: 'food_photo', enabled: false },
+      })
+      expect(tries.status).toBe(404)
+    }
+
+    const off = await call<Json>('/platform/claude', {
+      method: 'PUT',
+      cookie: platform,
+      asAdminApp: true,
+      body: { feature: 'food_photo', enabled: false },
+    })
+    expect(off.status).toBe(200)
     expect(await foodPhotosAvailable(db, keyed)).toBe(false)
+    expect(
+      (await call<Json>('/admin/settings/food-photos', { cookie: coach })).data.foodPhotos.enabled,
+    ).toBe(false)
 
-    await call('/admin/settings/food-photos', {
+    await call('/platform/claude', {
       method: 'PUT',
-      cookie: owner,
-      body: { enabled: true },
+      cookie: platform,
+      asAdminApp: true,
+      body: { feature: 'food_photo', enabled: true },
     })
     expect(await foodPhotosAvailable(db, keyed)).toBe(true)
   })
@@ -469,9 +508,9 @@ describe('food photo limits', () => {
     const perDayOf = async (cookie: string) =>
       (await call<Json>('/me/food/setup', { cookie })).data.photosPerDay
 
-    // The default is 10 for clients; owners have the safety-net number instead.
+    // The default is 10 for clients; owners have the platform's hard limit (50) instead.
     expect(await perDayOf(client)).toBe(10)
-    expect(await perDayOf(owner)).toBe(100)
+    expect(await perDayOf(owner)).toBe(50)
 
     // Only an owner changes the default, within 0 to 50.
     const put = (cookie: string, body: Json) =>
@@ -488,10 +527,16 @@ describe('food photo limits', () => {
     const set = (cookie: string, perDay: number | null) =>
       call<Json>(limitPath, { method: 'PUT', cookie, body: { perDay } })
     const two = await set(owner, 2)
-    expect(two.data.photoLimit).toEqual({ perDay: 2, defaultPerDay: 5, effective: 2, usedToday: 0 })
+    expect(two.data.photoLimit).toEqual({
+      perDay: 2,
+      defaultPerDay: 5,
+      effective: 2,
+      usedToday: 0,
+      owner: false,
+    })
     expect(await perDayOf(client)).toBe(2)
     await set(owner, 0)
-    expect(await photoLimitFor(db, env, { id: clientId, role: 'member' })).toBe(0)
+    expect(await photoLimitFor(db, env, { id: clientId, role: 'member', businessId: 1 })).toBe(0)
     expect((await call<Json>('/me/food/setup', { cookie: client })).data.photos).toBe(false)
     await set(owner, null)
     expect(await perDayOf(client)).toBe(5)

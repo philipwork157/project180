@@ -21,6 +21,11 @@ export interface Bindings {
   EMAIL_REDIRECT_TO?: string
   /** YouTube Data API v3 key, for "how to" video search inside the app. Optional. */
   YOUTUBE_API_KEY?: string
+  /**
+   * Cloudflare Turnstile's secret key: sign-up, "forgot password" and new links check it's a
+   * person. Unset (local, tests): not checked. The site key is VITE_TURNSTILE_SITE_KEY per app.
+   */
+  TURNSTILE_SECRET_KEY?: string
   /** Claude API key, for food photo estimates (phone app only). Without it the photo button hides. */
   ANTHROPIC_API_KEY?: string
   /** Which Claude model reads food photos (default in food-photo.ts). */

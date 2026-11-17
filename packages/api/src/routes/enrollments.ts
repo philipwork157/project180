@@ -60,8 +60,10 @@ export async function assignProgram(
   programId: number,
   startDate: string,
   mode: 'restart' | 'update' = 'restart',
+  /** A program already checked by the caller (a starter program someone picked themselves). */
+  found?: Awaited<ReturnType<typeof findVisibleProgram>>,
 ) {
-  const program = await findVisibleProgram(db, actor, programId, false)
+  const program = found ?? (await findVisibleProgram(db, actor, programId, false))
   if (mode === 'update') {
     const [current] = await activeFor(db, userId)
     if (!current || program.clientId !== null || current.sourceProgramId !== program.id)

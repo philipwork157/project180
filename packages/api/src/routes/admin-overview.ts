@@ -3,6 +3,8 @@ import {
   appActivity,
   enrollments,
   exercises,
+  invitations,
+  messages,
   programs,
   users,
   workoutSessions,
@@ -12,11 +14,12 @@ import {
   type AdminOverview,
   addDays,
   average,
+  type CoachFirstSteps,
   isActiveNow,
   tempPasswordExpired,
   todayIn,
 } from '@project180/shared'
-import { and, count, desc, eq, gte, inArray, sum } from 'drizzle-orm'
+import { and, count, desc, eq, gte, inArray, isNull, sum } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { myClients } from '../access'
 import { inChunks } from '../batch'
@@ -280,4 +283,35 @@ export const adminOverviewRoutes = new Hono<AppEnv>()
       },
     }
     return c.json({ overview })
+  })
+  /** A new coach's first steps, each ticked from what they've actually done. */
+  .get('/first-steps', async (c) => {
+    const { db, user: me } = c.var
+    const [[client], [invited], [program], [assigned], [message]] = await Promise.all([
+      db.select({ id: users.id }).from(users).where(myClients(me)).limit(1),
+      db
+        .select({ id: invitations.id })
+        .from(invitations)
+        .where(and(eq(invitations.coachId, me.id), eq(invitations.status, 'pending')))
+        .limit(1),
+      db
+        .select({ id: programs.id })
+        .from(programs)
+        .where(and(eq(programs.createdBy, me.id), isNull(programs.clientId)))
+        .limit(1),
+      db
+        .select({ id: enrollments.id })
+        .from(enrollments)
+        .innerJoin(users, eq(users.id, enrollments.userId))
+        .where(myClients(me))
+        .limit(1),
+      db.select({ id: messages.id }).from(messages).where(eq(messages.senderId, me.id)).limit(1),
+    ])
+    const steps: CoachFirstSteps = {
+      client: Boolean(client || invited),
+      program: Boolean(program),
+      assigned: Boolean(assigned),
+      message: Boolean(message),
+    }
+    return c.json({ steps })
   })

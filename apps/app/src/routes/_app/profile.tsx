@@ -13,6 +13,7 @@ import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { DeleteAccount } from '../../components/delete-account'
 import { FoodReminderSetting } from '../../components/food-reminder-setting'
+import { DownloadMyData } from '../../components/my-data'
 import { ChangePassword, MyGoals } from '../../components/my-goals'
 import { MyPlanCard } from '../../components/my-targets'
 import { PushSettings } from '../../components/push-settings'
@@ -63,6 +64,12 @@ function ProfilePage() {
         <div className="min-w-0">
           <p className="truncate font-bold text-[20px]">{me.name}</p>
           <p className="truncate font-semibold text-[13px] text-ink-muted">{me.email}</p>
+          {isClient(me.role) && me.coachName && (
+            <p className="mt-1 truncate text-[13px] text-ink-muted">
+              Coached by <b className="text-ink">{me.coachName}</b>
+              {me.businessName && me.businessName !== me.coachName && ` · ${me.businessName}`}
+            </p>
+          )}
         </div>
       </section>
 
@@ -112,6 +119,7 @@ function ProfilePage() {
         </Button>
       </section>
 
+      <DownloadMyData />
       {isClient(me.role) && <DeleteAccount coached={me.coachId !== null} />}
 
       <p className="text-center text-[13px] text-ink-muted">

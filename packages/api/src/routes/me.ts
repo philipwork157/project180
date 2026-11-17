@@ -1,6 +1,7 @@
 import {
   appActivity,
   bodyCheckins,
+  businesses,
   type Db,
   enrollments,
   programs,
@@ -38,11 +39,13 @@ import { alias } from 'drizzle-orm/sqlite-core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
+import { audit } from '../audit'
 import { inChunks } from '../batch'
 import { chatNewsForClient, loadThread, markRead, postMessage } from '../chat'
 import { deletePersonForGood } from '../delete-person'
 import type { AppEnv } from '../env'
 import { notFound, parseBody, parseId } from '../errors'
+import { exportMyData } from '../export'
 import { markFeedbackRead, unreadFeedback } from '../feedback'
 import { requireUser } from '../middleware'
 import { loadProfile, saveProfile } from '../profiles'
@@ -55,6 +58,7 @@ import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
 import { assignProgram, enrollmentQuery } from './enrollments'
 import { loadTargets, meFoodRoutes, saveTargets } from './food'
+import { meInvitationRoutes } from './invitations'
 import { loadProgramDays } from './programs'
 import { meWaterRoutes } from './water'
 
@@ -264,11 +268,34 @@ export const meRoutes = new Hono<AppEnv>()
   .get('/', async (c) => {
     const { db, user } = c.var
     // Read fresh (a cached sign-in can be a few minutes old): the wizard must end at once.
+    const coach = alias(users, 'coach')
     const [row] = await db
-      .select({ needsOnboarding: users.needsOnboarding })
+      .select({
+        needsOnboarding: users.needsOnboarding,
+        businessName: businesses.name,
+        coachName: coach.name,
+      })
       .from(users)
+      .leftJoin(businesses, eq(businesses.id, users.businessId))
+      .leftJoin(coach, eq(coach.id, users.coachId))
       .where(eq(users.id, user.id))
-    return c.json({ user: { ...user, needsOnboarding: row?.needsOnboarding ?? false } })
+    return c.json({
+      user: {
+        ...user,
+        needsOnboarding: row?.needsOnboarding ?? false,
+        businessName: row?.businessName ?? null,
+        coachName: row?.coachName ?? null,
+      },
+    })
+  })
+  /** Everything you logged, as one JSON file to keep (POPIA's right of access). */
+  .get('/export', async (c) => {
+    const { db, user } = c.var
+    const data = await exportMyData(db, user)
+    const date = new Date().toISOString().slice(0, 10)
+    c.header('content-disposition', `attachment; filename="project180-my-data-${date}.json"`)
+    c.header('cache-control', 'no-store')
+    return c.json(data)
   })
   /**
    * Delete your own account and everything you logged, for good (clients only; staff ask an
@@ -292,6 +319,11 @@ export const meRoutes = new Hono<AppEnv>()
     if (!ok) throw new HTTPException(400, { message: 'That isn’t your password.' })
     // Nothing of theirs is handed to anyone: clients have no library. Their own copies go too.
     await deletePersonForGood(db, user.id, user.coachId ?? user.id)
+    await audit(db, {
+      action: 'account.deleted',
+      actor: { id: 0, name: user.name },
+      businessId: user.businessId,
+    })
     return c.body(null, 204)
   })
   /** The welcome wizard is done (or skipped): it never shows again. */
@@ -533,3 +565,4 @@ export const meRoutes = new Hono<AppEnv>()
   .route('/food', meFoodRoutes)
   /** Your water: what you drank today and your daily goal (routes/water.ts). */
   .route('/water', meWaterRoutes)
+  .route('/invitations', meInvitationRoutes)

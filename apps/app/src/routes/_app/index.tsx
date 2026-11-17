@@ -1,5 +1,5 @@
 import { planQuery, statsQuery } from '@project180/client'
-import { formatNumber, isClient, type MyPlan, type PlanDay } from '@project180/shared'
+import { formatNumber, isClient, type Me, type MyPlan, type PlanDay } from '@project180/shared'
 import { Button, cn, StatCard, TurnArc } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -7,6 +7,7 @@ import { CalendarCheck, Check, Clock, Moon, Play, Timer } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
 import { Elapsed } from '../../components/elapsed'
+import { InvitationCards } from '../../components/invitation-card'
 import { NotificationsButton } from '../../components/notifications'
 import { QuickWorkoutEntry } from '../../components/quick-workout'
 import { ScreenHeader } from '../../components/screen-header'
@@ -57,8 +58,12 @@ function TodayPage() {
       <ScreenHeader
         overline={dateLabel}
         title={`${greeting(new Date().getHours())}, ${firstName}`}
+        subtitle={coachedBy(me)}
         action={<NotificationsButton />}
       />
+
+      {/* On their own: an invitation from a coach shows first, so it's never missed. */}
+      {isClient(me.role) && me.coachId === null && <InvitationCards />}
 
       {activeSession && (
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
@@ -336,4 +341,12 @@ function NoPlan() {
       </p>
     </section>
   )
+}
+
+/** "Coached by Cara · Cara Coaching" for clients; nothing for staff or people on their own. */
+function coachedBy(me: Me) {
+  if (!isClient(me.role) || !me.coachName) return undefined
+  return me.businessName && me.businessName !== me.coachName
+    ? `Coached by ${me.coachName} · ${me.businessName}`
+    : `Coached by ${me.coachName}`
 }

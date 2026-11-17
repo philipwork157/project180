@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
+import { FirstSteps } from '../../components/first-steps'
 import { PageHeader } from '../../components/page-header'
 import { SwapsLine } from '../../components/swaps-line'
 import { type OpenWorkout, WorkoutReviewDrawer } from '../../components/workout-review'
@@ -51,6 +52,7 @@ function Overview() {
           </Button>
         }
       />
+      <FirstSteps />
 
       {!o ? (
         <div className="grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">

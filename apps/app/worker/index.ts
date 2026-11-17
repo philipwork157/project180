@@ -1,4 +1,10 @@
-import { type Bindings, createApp, runDailyCleanup, runFoodReminders } from '@project180/api'
+import {
+  type Bindings,
+  createApp,
+  recordError,
+  runDailyCleanup,
+  runFoodReminders,
+} from '@project180/api'
 
 const app = createApp()
 
@@ -15,12 +21,16 @@ export default {
   async scheduled(controller, env, ctx) {
     if (controller.cron === FOOD_REMINDER_CRON) {
       ctx.waitUntil(
-        runFoodReminders(env).then((done) => console.log('[food-reminders]', JSON.stringify(done))),
+        runFoodReminders(env)
+          .then((done) => console.log('[food-reminders]', JSON.stringify(done)))
+          .catch((err) => recordError(env, 'cron', 'food reminders', String(err))),
       )
       return
     }
     ctx.waitUntil(
-      runDailyCleanup(env).then((done) => console.log('[cleanup]', JSON.stringify(done))),
+      runDailyCleanup(env)
+        .then((done) => console.log('[cleanup]', JSON.stringify(done)))
+        .catch((err) => recordError(env, 'cron', 'daily cleanup', String(err))),
     )
   },
 } satisfies ExportedHandler<Bindings>

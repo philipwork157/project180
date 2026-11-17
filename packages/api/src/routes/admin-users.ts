@@ -37,6 +37,7 @@ import {
   peopleQueryInput,
   type QuickWorkoutsAccess,
   quickWorkoutsAccessInput,
+  ROLE_LABELS,
   resetPasswordInput,
   restartProgramInput,
   resumeWeek,
@@ -67,6 +68,7 @@ import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { coachedPerson, managedPerson, managedUsers } from '../access'
+import { audit } from '../audit'
 import { deletePersonForGood } from '../delete-person'
 import { newPasswordEmail, sendEmail, welcomeEmail } from '../email'
 import type { AppEnv } from '../env'
@@ -546,6 +548,13 @@ export const adminUserRoutes = new Hono<AppEnv>()
           }),
         })
       : null
+    await audit(db, {
+      action: 'user.created',
+      actor: me,
+      target: user,
+      businessId: me.businessId,
+      detail: ROLE_LABELS[user.role],
+    })
     return c.json({ user, enrollment, email }, 201)
   })
   /** Contact, body basics and goals. */
@@ -571,6 +580,13 @@ export const adminUserRoutes = new Hono<AppEnv>()
     if (person.id === me.id) forbidden('You can’t delete yourself')
     if (person.role === 'owner') forbidden('Owners can’t be deleted')
     const result: DeletePersonResult = await deletePersonForGood(db, person.id, me.id)
+    await audit(db, {
+      action: 'user.deleted',
+      actor: me,
+      target: { id: 0, name: person.name },
+      businessId: me.businessId,
+      detail: ROLE_LABELS[person.role],
+    })
     return c.json(result)
   })
   /** Whether this client may build their own quick workouts in the app (staff always can). */
@@ -595,6 +611,14 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const { coachId } = await parseBody(c.req.raw, assignCoachInput)
     await assertCoach(db, me, coachId)
     await db.update(users).set({ coachId }).where(eq(users.id, person.id))
+    const [to] = await db.select({ name: users.name }).from(users).where(eq(users.id, coachId))
+    await audit(db, {
+      action: 'user.coach_changed',
+      actor: me,
+      target: person,
+      businessId: me.businessId,
+      detail: to ? `to ${to.name}` : null,
+    })
     return c.body(null, 204)
   })
   /**
@@ -616,6 +640,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
     if (isStaff(person.role) && !isOwner(me.role)) forbidden('Only an owner can block a coach')
     if (!blocked) {
       await db.update(users).set({ blockedAt: null }).where(eq(users.id, person.id))
+      await audit(db, {
+        action: 'user.unblocked',
+        actor: me,
+        target: person,
+        businessId: me.businessId,
+      })
       return c.json({ blocked: false })
     }
     await db.batch([
@@ -623,6 +653,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
       db.delete(sessions).where(eq(sessions.userId, person.id)),
       db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id)),
     ])
+    await audit(db, {
+      action: 'user.blocked',
+      actor: me,
+      target: person,
+      businessId: me.businessId,
+    })
     return c.json({ blocked: true })
   })
   .post('/:id/password', async (c) => {
@@ -639,6 +675,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
         // Signed out everywhere, so no phone keeps getting their notifications either.
         db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id)),
       ])
+      await audit(db, {
+        action: 'user.password_set',
+        actor: me,
+        target: person,
+        businessId: me.businessId,
+      })
     } else {
       // Your own: a new password signs you out on your other devices, as in Settings.
       await db

@@ -33,6 +33,9 @@ export interface Me {
   coachId: number | null
   /** Signed up themselves and hasn't been through the welcome wizard yet (app only). */
   needsOnboarding: boolean
+  /** GET /me only: their business's name and their coach's name (null without one). */
+  businessName?: string | null
+  coachName?: string | null
 }
 
 export interface Exercise {

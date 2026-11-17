@@ -1,5 +1,6 @@
 import type {
   AdminOverview,
+  AuditPage,
   ChatSummary,
   ChatThread,
   ChatUnread,
@@ -7,7 +8,9 @@ import type {
   ClaudeCosts,
   ClaudeFeatureSettings,
   ClientProfile,
+  CoachFirstSteps,
   EnrollmentSummary,
+  ErrorSummary,
   Exercise,
   FeedbackNews,
   FoodDay,
@@ -15,6 +18,8 @@ import type {
   FoodSearchResult,
   FoodSetup,
   FoodSummary,
+  Invitation,
+  InvitationForMe,
   Me,
   MyPlan,
   MyStats,
@@ -580,3 +585,37 @@ export function putRecipe(queryClient: QueryClient, recipe: Recipe) {
   )
   void queryClient.invalidateQueries({ queryKey: ['recipes', 'page'] })
 }
+
+/** Invitations waiting for the signed-in person (only when they train on their own). */
+export const myInvitationsQuery = queryOptions({
+  queryKey: ['me', 'invitations'],
+  queryFn: async () =>
+    (await api<{ invitations: InvitationForMe[] }>('/me/invitations')).invitations,
+})
+
+/** Staff: pending invitations (owners: the whole business; coaches: their own). */
+export const invitationsQuery = queryOptions({
+  queryKey: ['invitations'],
+  queryFn: async () => (await api<{ invitations: Invitation[] }>('/admin/invitations')).invitations,
+})
+
+/** Staff: a new coach's first steps on Today. */
+export const firstStepsQuery = queryOptions({
+  queryKey: ['overview', 'first-steps'],
+  queryFn: async () => (await api<{ steps: CoachFirstSteps }>('/admin/overview/first-steps')).steps,
+})
+
+/** Platform admin: who did what, newest first (pass the last page's nextBefore for more). */
+export const platformAuditQuery = (before: number | null = null) =>
+  queryOptions({
+    queryKey: ['platform', 'audit', before],
+    queryFn: async () =>
+      (await api<{ audit: AuditPage }>(`/platform/audit${before ? `?before=${before}` : ''}`))
+        .audit,
+  })
+
+/** Platform admin: errors in the last day and hour, and the latest ones. */
+export const platformErrorsQuery = queryOptions({
+  queryKey: ['platform', 'errors'],
+  queryFn: async () => (await api<{ errors: ErrorSummary }>('/platform/errors')).errors,
+})

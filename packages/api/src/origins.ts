@@ -24,3 +24,8 @@ export function requestOrigin(env: Bindings, origin: string | undefined, request
   if (origin && (allowedOrigins(env).has(origin) || sameOrigin(origin, requestUrl))) return origin
   return originOf(env.BETTER_AUTH_URL) ?? originOf(requestUrl) ?? ''
 }
+
+/** The phone app's address (links in invitations always open the app, even when sent from the admin). */
+export function appOrigin(env: Bindings) {
+  return originOf(env.APP_URL || env.BETTER_AUTH_URL || '') ?? ''
+}

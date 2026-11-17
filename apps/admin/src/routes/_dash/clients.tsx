@@ -3,9 +3,10 @@ import { type DirectoryPerson, isActiveNow, isOwner, isStaff, timeAgo } from '@p
 import { Button, Card, Chip, cn, EmptyState, Input, Select } from '@project180/ui'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link, redirect } from '@tanstack/react-router'
-import { ChevronRight, MessageCircle, Plus, Search, UsersRound } from 'lucide-react'
+import { ChevronRight, Mail, MessageCircle, Plus, Search, UsersRound } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import { Toolbar } from '../../components/controls'
+import { InviteDrawer, PendingInvitations } from '../../components/invitations'
 import { NewClientDrawer } from '../../components/new-client-wizard'
 import { PageHeader } from '../../components/page-header'
 import { ActiveDot } from '../../components/person-activity'
@@ -42,6 +43,7 @@ function ClientsPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [adding, setAdding] = useState(false)
+  const [inviting, setInviting] = useState(false)
   const sortId = useId()
   const searchId = useId()
   const q = useSettled(search.trim())
@@ -64,9 +66,21 @@ function ClientsPage() {
         title="Clients"
         subtitle="The people you coach. Open one to see their program, progress, food and chat."
         action={
-          <Button icon={<Plus className="size-5" aria-hidden />} onClick={() => setAdding(true)}>
-            {isOwner(me.role) ? 'Add person' : 'Add client'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              icon={<Mail className="size-5" aria-hidden />}
+              onClick={() => setInviting(true)}
+            >
+              Invite client
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Plus className="size-5" aria-hidden />}
+              onClick={() => setAdding(true)}
+            >
+              {isOwner(me.role) ? 'Add person' : 'Add with a password'}
+            </Button>
+          </div>
         }
       />
       <Toolbar>
@@ -107,6 +121,8 @@ function ClientsPage() {
         </label>
       </Toolbar>
 
+      <PendingInvitations />
+
       {people.isPending ? (
         <Card className="flex flex-col gap-3">
           {[0, 1, 2, 3, 4].map((i) => (
@@ -128,14 +144,15 @@ function ClientsPage() {
             title="No clients yet"
             action={
               <Button
-                icon={<Plus className="size-5" aria-hidden />}
-                onClick={() => setAdding(true)}
+                icon={<Mail className="size-5" aria-hidden />}
+                onClick={() => setInviting(true)}
               >
-                Add a client
+                Invite a client
               </Button>
             }
           >
-            Clients you add are yours: you build their programs and see how they’re going.
+            Invite someone by email: they choose their own password, and people already using the
+            app keep everything they’ve logged.
           </EmptyState>
         )
       ) : (
@@ -198,6 +215,7 @@ function ClientsPage() {
       )}
 
       <NewClientDrawer open={adding} onClose={() => setAdding(false)} me={me} />
+      <InviteDrawer open={inviting} onClose={() => setInviting(false)} me={me} />
     </>
   )
 }

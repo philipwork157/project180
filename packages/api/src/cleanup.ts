@@ -1,9 +1,12 @@
 // Daily housekeeping, run by the phone app Worker's cron trigger (wrangler.jsonc "triggers").
 import {
+  auditEvents,
   createDb,
   type Db,
   emailTokens,
+  errorEvents,
   foodPhotoUses,
+  invitations,
   pushSubscriptions,
   sessions,
   signInAttempts,
@@ -64,6 +67,10 @@ export async function dailyCleanup(db: Db, now = Date.now()) {
       .returning({ userId: foodPhotoUses.userId }),
     // Email links (confirm email, reset password) that have run out.
     db.delete(emailTokens).where(lt(emailTokens.expiresAt, at)),
+    // Errors after 30 days; answered or long-expired invitations after 90; the record after 2 years.
+    db.delete(errorEvents).where(lt(errorEvents.createdAt, new Date(now - 30 * DAY_MS))),
+    db.delete(invitations).where(lt(invitations.expiresAt, new Date(now - 90 * DAY_MS))),
+    db.delete(auditEvents).where(lt(auditEvents.createdAt, new Date(now - 730 * DAY_MS))),
   ])
   // Queued programs whose start date has come take over (the plan also does this when read).
   const programsStarted = await startDuePrograms(db, 'everyone', at)

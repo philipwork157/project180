@@ -1,13 +1,25 @@
 // The platform admin's page (the developer, role `platform`): which Claude features are on,
 // their models and hard daily limits, what Claude costs, every coach and owner, and site health.
 // Nothing here reads anyone's training, food or chats: only accounts, counts and spend.
-import { businesses, claudeCalls, exercises, programs, recipes, users } from '@project180/db'
 import {
+  auditEvents,
+  businesses,
+  claudeCalls,
+  errorEvents,
+  exercises,
+  programs,
+  recipes,
+  users,
+} from '@project180/db'
+import {
+  type AuditAction,
+  type AuditPage,
   addDays,
   type ClaudeCosts,
   type ClaudeFeature,
   type ClaudeSpendRow,
   claudeFeatureUpdate,
+  type ErrorSummary,
   type PlatformBusiness,
   type PlatformCoach,
   type PlatformHealth,
@@ -18,6 +30,8 @@ import {
 } from '@project180/shared'
 import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
+import { audit } from '../audit'
+import { emailMode } from '../email'
 import type { AppEnv } from '../env'
 import { notFound, parseBody } from '../errors'
 import { requirePlatform, requireUser } from '../middleware'
@@ -59,6 +73,8 @@ async function spendByFeature(db: AppEnv['Variables']['db'], from: Date, to?: Da
   )
 }
 
+const AUDIT_PAGE = 50
+
 export const platformRoutes = new Hono<AppEnv>()
   .use(requireUser, requirePlatform)
   /** Every Claude feature: switch, model and hard daily limit, and whether there's a key. */
@@ -67,7 +83,67 @@ export const platformRoutes = new Hono<AppEnv>()
     const { db, user } = c.var
     const input = await parseBody(c.req.raw, claudeFeatureUpdate)
     await setClaudeFeature(db, input, user.id)
+    await audit(db, {
+      action: 'platform.claude',
+      actor: user,
+      detail: Object.entries(input)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(', '),
+    })
     return c.json({ claude: await claudeConfig(db, c.env) })
+  })
+  /** The record of who did what, newest first, 50 at a time (?before= an id for older). */
+  .get('/audit', async (c) => {
+    const { db } = c.var
+    const before = Number(c.req.query('before'))
+    const rows = await db
+      .select({
+        id: auditEvents.id,
+        action: auditEvents.action,
+        actorName: auditEvents.actorName,
+        targetName: auditEvents.targetName,
+        businessName: businesses.name,
+        detail: auditEvents.detail,
+        createdAt: auditEvents.createdAt,
+      })
+      .from(auditEvents)
+      .leftJoin(businesses, eq(businesses.id, auditEvents.businessId))
+      .where(Number.isInteger(before) && before > 0 ? lt(auditEvents.id, before) : undefined)
+      .orderBy(desc(auditEvents.id))
+      .limit(AUDIT_PAGE + 1)
+    const page: AuditPage = {
+      events: rows.slice(0, AUDIT_PAGE).map((r) => ({
+        ...r,
+        action: r.action as AuditAction,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      nextBefore: rows.length > AUDIT_PAGE ? (rows[AUDIT_PAGE - 1]?.id ?? null) : null,
+    }
+    return c.json({ audit: page })
+  })
+  /** Errors in the last day and hour, the latest 50, and whether alert emails can go out. */
+  .get('/errors', async (c) => {
+    const { db } = c.var
+    const now = Date.now()
+    const [[day], [hour], recent, [admin]] = await Promise.all([
+      db
+        .select({ n: count() })
+        .from(errorEvents)
+        .where(gte(errorEvents.createdAt, new Date(now - 24 * 60 * 60 * 1000))),
+      db
+        .select({ n: count() })
+        .from(errorEvents)
+        .where(gte(errorEvents.createdAt, new Date(now - 60 * 60 * 1000))),
+      db.select().from(errorEvents).orderBy(desc(errorEvents.id)).limit(50),
+      db.select({ n: count() }).from(users).where(eq(users.role, 'platform')),
+    ])
+    const errors: ErrorSummary = {
+      last24h: day?.n ?? 0,
+      lastHour: hour?.n ?? 0,
+      recent: recent.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+      alertsOn: emailMode(c.env).mode !== 'off' && (admin?.n ?? 0) > 0,
+    }
+    return c.json({ errors })
   })
   /** What Claude costs: this month and last per feature, the last 30 days, top users, failures. */
   .get('/costs', async (c) => {
@@ -262,6 +338,12 @@ export const platformRoutes = new Hono<AppEnv>()
       if (!found) notFound('Business not found')
     }
     await setStarterBusiness(db, businessId, user.id)
+    await audit(db, {
+      action: 'platform.starter',
+      actor: user,
+      businessId,
+      detail: businessId === null ? 'none' : null,
+    })
     return c.json({ starter: await loadStarter(db) })
   })
   /**

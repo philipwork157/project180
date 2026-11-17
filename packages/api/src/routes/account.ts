@@ -14,34 +14,23 @@ import {
 import { and, eq, gt } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import { audit } from '../audit'
 import { isLocalSite, resetPasswordEmail, sendEmail, verifyEmailEmail } from '../email'
 import type { AppEnv, Bindings } from '../env'
 import { parseBody } from '../errors'
 import { requestOrigin } from '../origins'
 import { takeAttempt } from '../sign-in-limit'
 import { copyStarterLibrary } from '../starter'
+import { hashToken, newToken } from '../tokens'
 import { verifyTurnstile } from '../turnstile'
 import { createUserWithPassword, setPassword } from '../users'
+import { acceptInvitationRoutes } from './invitations'
 
 const HOUR = 60 * 60 * 1000
 /** Sign-ups per network address an hour; emails (resend, forgot) per address and per email. */
 const SIGNUPS_PER_IP = 5
 const EMAILS_PER_IP = 10
 const EMAILS_PER_EMAIL = 3
-
-/** 32 random bytes, URL-safe: what goes in the link. Only its hash is stored. */
-function newToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32))
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-}
-
-async function hashToken(token: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
-}
 
 /** A fresh link of this kind for this person (older ones of the same kind stop working). */
 async function issueToken(db: Db, userId: number, purpose: 'verify' | 'reset', ms: number) {
@@ -181,6 +170,12 @@ export const accountRoutes = new Hono<AppEnv>()
         .update(users)
         .set({ quickWorkouts: true, needsOnboarding: true })
         .where(eq(users.id, created.id))
+    await audit(db, {
+      action: coach ? 'account.signup_coach' : 'account.signup',
+      actor: created,
+      businessId,
+      detail: coach ? (input.businessName ?? null) : null,
+    })
     const base = requestOrigin(env, c.req.header('origin'), c.req.url)
     const link = await sendVerify(env, db, { ...created, coach }, base)
     return c.json({ email: created.email, ...devLink(env, link) }, 201)
@@ -198,7 +193,14 @@ export const accountRoutes = new Hono<AppEnv>()
       .update(users)
       .set({ emailVerified: true })
       .where(eq(users.id, found.userId))
-      .returning({ email: users.email })
+      .returning({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        businessId: users.businessId,
+      })
+    if (person)
+      await audit(db, { action: 'account.verified', actor: person, businessId: person.businessId })
     await db
       .delete(emailTokens)
       .where(and(eq(emailTokens.userId, found.userId), eq(emailTokens.purpose, 'verify')))
@@ -275,5 +277,17 @@ export const accountRoutes = new Hono<AppEnv>()
         .delete(emailTokens)
         .where(and(eq(emailTokens.userId, found.userId), eq(emailTokens.purpose, 'reset'))),
     ])
+    const [person] = await db
+      .select({ id: users.id, name: users.name, businessId: users.businessId })
+      .from(users)
+      .where(eq(users.id, found.userId))
+    if (person)
+      await audit(db, {
+        action: 'account.password_reset',
+        actor: person,
+        businessId: person.businessId,
+      })
     return c.json({ ok: true })
   })
+  /** Invitations from a coach: look one up by its link, or accept it as someone new. */
+  .route('/invite', acceptInvitationRoutes)

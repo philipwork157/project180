@@ -5,6 +5,7 @@
 //   instead, with the real recipient shown in the subject and a banner, so testing never emails clients.
 import { TEMP_PASSWORD_DAYS } from '@project180/shared'
 import type { Bindings } from './env'
+import { recordError } from './error-log'
 
 export interface EmailMessage {
   to: string
@@ -144,6 +145,12 @@ export async function sendEmail(env: Bindings, message: EmailMessage): Promise<E
     return { status: 'sent', to, messageId }
   } catch (err) {
     console.error('[email] SES send failed', err)
+    await recordError(
+      env,
+      'email',
+      `email: ${message.subject}`,
+      err instanceof Error ? err.message : String(err),
+    )
     return { status: 'failed', to, error: err instanceof Error ? err.message : String(err) }
   }
 }
@@ -297,4 +304,70 @@ export function newPasswordEmail(input: {
   )
   const text = `Hi ${first}, your coach has set a temporary password for you. It works for ${TEMP_PASSWORD_DAYS} days, and you'll choose your own when you sign in.\n\nEmail: ${input.email}\nTemporary password: ${input.password}\n\nSign in: ${login}`
   return { subject: 'Your temporary Project 180 password', html, text }
+}
+
+/** A coach invites someone: a new account from the link, or sign in and accept. */
+export function inviteEmail(input: {
+  name: string
+  coachName: string
+  businessName: string
+  link: string
+  days: number
+  existing: boolean
+}): Omit<EmailMessage, 'to'> {
+  const first = input.name.split(' ')[0] ?? input.name
+  const lead = `${input.coachName} (${input.businessName}) invited you to train with them on Project 180: your program, food, progress and a chat with your coach, all in one app.`
+  const how = input.existing
+    ? 'You already have an account: open the link, sign in and accept. Everything you’ve logged stays yours.'
+    : 'Open the link and choose a password to start.'
+  const privacy =
+    'To help your coach support you, Project 180 records when you use the app, roughly how long, and which devices you’re signed in on, alongside the workouts and check-ins you log. Only you, your coach and the Project 180 team can see it.'
+  const html = layout(
+    `You’re invited, ${escapeHtml(first)}`,
+    [
+      p(escapeHtml(lead)),
+      p(escapeHtml(how)),
+      button(input.link, input.existing ? 'Accept the invitation' : 'Create my account'),
+      small(
+        `The link works for ${input.days} days. If you don’t know ${escapeHtml(input.coachName)}, ignore this email.`,
+      ),
+      small(escapeHtml(privacy)),
+    ].join('\n'),
+  )
+  const text = `You’re invited, ${first}
+
+${lead}
+
+${how}
+
+${input.link}
+
+The link works for ${input.days} days. If you don’t know ${input.coachName}, ignore this email.
+
+${privacy}
+
+TRAIN. FUEL. FEEL. LIVE.`
+  return { subject: `${input.coachName} invited you to Project 180`, html, text }
+}
+
+/** To the platform admin: many errors in a short time. */
+export function errorAlertEmail(input: {
+  name: string
+  count: number
+  minutes: number
+  site: string
+  latest: string
+}): Omit<EmailMessage, 'to'> {
+  const first = input.name.split(' ')[0] ?? input.name
+  const lead = `${input.count} errors in the last ${input.minutes} minutes on ${input.site}.`
+  const html = layout(
+    `Something’s going wrong, ${escapeHtml(first)}`,
+    [
+      p(escapeHtml(lead)),
+      p(`Latest: <code>${escapeHtml(input.latest)}</code>`),
+      small('See the Errors list on the Platform page. You get this at most once an hour.'),
+    ].join('\n'),
+  )
+  const text = `${lead}\n\nLatest: ${input.latest}\n\nSee the Errors list on the Platform page. You get this at most once an hour.`
+  return { subject: `Project 180: ${input.count} errors in ${input.minutes} minutes`, html, text }
 }

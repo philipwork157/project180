@@ -1,5 +1,6 @@
 import { type Db, signInAttempts } from '@project180/db'
 import { eq, inArray } from 'drizzle-orm'
+import { audit } from './audit'
 
 /** Wrong passwords allowed per email, and per network address, before a pause. */
 export const EMAIL_LIMIT = 5
@@ -44,6 +45,12 @@ export async function recordFailure(db: Db, k: SignInKeys, now = Date.now()) {
       .insert(signInAttempts)
       .values({ key, ...values })
       .onConflictDoUpdate({ target: signInAttempts.key, set: values })
+    // Just locked: noted in the platform admin's record (which email or network, never a name).
+    if (failures === limit)
+      await audit(db, {
+        action: 'signin.locked',
+        detail: key.startsWith('email:') ? 'by email' : 'by network',
+      })
   }
 }
 

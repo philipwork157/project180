@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { secureHeaders } from 'hono/secure-headers'
 import { appKindOf, createAuth } from './auth'
 import type { AppEnv } from './env'
+import { recordError } from './error-log'
 import { mountMedia } from './media'
 import { allowedOrigins, sameOrigin } from './origins'
 import { accountRoutes, EMAIL_NOT_VERIFIED_MESSAGE, refuseUnverified } from './routes/account'
@@ -15,6 +16,7 @@ import { adminSettingsRoutes } from './routes/admin-settings'
 import { adminUserRoutes } from './routes/admin-users'
 import { enrollmentRoutes } from './routes/enrollments'
 import { exerciseRoutes } from './routes/exercises'
+import { adminInvitationRoutes } from './routes/invitations'
 import { meRoutes } from './routes/me'
 import { platformRoutes } from './routes/platform'
 import { programBuilderRoutes } from './routes/program-builder'
@@ -38,6 +40,7 @@ import {
 
 export { dailyCleanup, runDailyCleanup } from './cleanup'
 export type { Bindings } from './env'
+export { recordError } from './error-log'
 export { runFoodReminders, sendFoodReminders } from './food-reminders'
 
 /** The whole API, mounted at /api. The web app's Worker serves it. */
@@ -166,6 +169,7 @@ export function createApp() {
   app.route('/sessions', sessionRoutes)
   app.route('/recipes', recipeRoutes)
   app.route('/admin/users', adminUserRoutes)
+  app.route('/admin/invitations', adminInvitationRoutes)
   app.route('/admin/overview', adminOverviewRoutes)
   app.route('/admin/email', adminEmailRoutes)
   app.route('/admin/chat', adminChatRoutes)
@@ -181,6 +185,18 @@ export function createApp() {
     if (err instanceof HTTPException)
       return c.json({ error: err.message || 'This request isn’t allowed' }, err.status)
     console.error(err)
+    // Saved for the Platform page (and an alert email when there are many), after answering.
+    const saving = recordError(
+      c.env,
+      'api',
+      `${c.req.method} ${c.req.routePath || c.req.path}`,
+      err instanceof Error ? err.message : String(err),
+    )
+    try {
+      c.executionCtx.waitUntil(saving)
+    } catch {
+      // No execution context (tests): the promise still runs.
+    }
     return c.json({ error: 'Something went wrong' }, 500)
   })
 

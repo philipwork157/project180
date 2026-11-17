@@ -123,6 +123,7 @@
     <a href="#deploy">Deploying</a>
     <a href="#env">Environment and secrets</a>
     <a href="#jobs">Scheduled jobs</a>
+    <a href="#watching">Errors and records</a>
     <a href="#tests">Tests and checks</a>
     <a href="#changes">Latest changes</a>
   </nav>
@@ -183,10 +184,10 @@
       <div class="table-wrap"><table>
         <thead><tr><th>Who</th><th>Signs in to</th><th>Sees</th><th>How they get an account</th></tr></thead>
         <tbody>
-          <tr><td><b>Platform admin</b> (you)</td><td>Admin only</td><td>The Platform page: people, businesses, sign-ups, Claude costs and switches, starter library, site setup. Never anyone's training, food or chats.</td><td><code>bun run admin:create</code> → p (use a separate email, e.g. <code>name+platform@gmail.com</code>).</td></tr>
+          <tr><td><b>Platform admin</b> (you)</td><td>Admin only</td><td>The Platform page: people, businesses, sign-ups, errors, who did what, Claude costs and switches, starter library, site setup. Never anyone's training, food or chats.</td><td><code>bun run admin:create</code> → p (use a separate email, e.g. <code>name+platform@gmail.com</code>).</td></tr>
           <tr><td><b>Owner</b></td><td>Both</td><td>Everyone in their business; manages accounts. Not other coaches' programs.</td><td>Coach sign-up in the admin (makes a new business), or <code>admin:create</code>.</td></tr>
           <tr><td><b>Coach</b></td><td>Both</td><td>Their own clients and library.</td><td>Added by an owner, or <code>admin:create</code>.</td></tr>
-          <tr><td><b>Client</b></td><td>Phone app</td><td>Only themselves. Goal weight, activity and calories are their coach's (read-only).</td><td>Added by their coach.</td></tr>
+          <tr><td><b>Client</b></td><td>Phone app</td><td>Only themselves. Goal weight, activity and calories are their coach's (read-only).</td><td>Invited by their coach by email (or added with a temporary password).</td></tr>
           <tr><td><b>On their own</b></td><td>Phone app</td><td>Only themselves, plus the starter library. Edit their own goals, body and calories; pick starter programs; quick workouts.</td><td>"Create an account" in the app, then confirm their email and see the welcome wizard.</td></tr>
         </tbody>
       </table></div>
@@ -202,7 +203,9 @@
         <li><b>Forgot password</b>: a one-time link (60 minutes) in both apps; signs out everywhere.</li>
         <li><b>Welcome wizard</b> (<code>/welcome</code>): only for people who signed up themselves. Goal, about you, daily plan; skippable.</li>
         <li><b>Delete my account</b>: Profile in the app (clients), with their password. Owners delete people from the client page.</li>
-        <li><b>Temporary passwords</b>: staff-set passwords must be changed at first sign-in.</li>
+        <li><b>Invitations</b>: Clients → Invite client sends an email (link works 14 days). Someone new opens <code>/invite</code> in the app and chooses a password (signed in at once, no wizard). Someone already training on their own sees the invitation on Today; accepting moves them into the business with all their history. Pending invitations show on the Clients page with Resend and Cancel.</li>
+        <li><b>Temporary passwords</b>: still possible ("Add with a password"); staff-set passwords must be changed at first sign-in.</li>
+        <li><b>Download my data</b>: Profile in the app, one JSON file of everything they logged (<code>GET /me/export</code>).</li>
         <li><b>Limits</b>: 5 wrong passwords per email / 20 per network per 15 minutes; 5 sign-ups per network per hour; 3 emails per address and 10 per network per hour.</li>
         <li><b>Terms and privacy</b>: <code>/terms</code> and <code>/privacy</code> in both apps (draft text in <code>packages/ui/src/legal.tsx</code>; have it checked by a lawyer).</li>
       </ul>
@@ -276,7 +279,7 @@
         <li>Change <code>packages/db/src/schema</code>, then <code>bun run db:apply</code>. Never hand-edit a generated migration; one-off data moves are custom migrations (<code>drizzle-kit generate --custom</code>).</li>
         <li><b>Never rebuild a table on D1</b> (a <code>__new_</code> table in the SQL): it can cascade-delete child rows. Add nullable columns, new tables or indexes instead.</li>
         <li>D1 takes at most 100 values per statement: multi-row inserts use <code>insertMany</code> + <code>runAll</code>.</li>
-        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>.</li>
+        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors).</li>
       </ul>
     </section>
 
@@ -317,10 +320,19 @@ bun run deploy         # live, when dev looks right</code></pre>
       <div class="table-wrap"><table>
         <thead><tr><th>When (South African time)</th><th>What</th></tr></thead>
         <tbody>
-          <tr><td>04:00 daily (<code>0 2 * * *</code> UTC)</td><td>Daily cleanup: expired sign-ins, old sign-in counters, idle workouts closed, orphaned push subscriptions, old photo counters, expired email links; queued programs start.</td></tr>
+          <tr><td>04:00 daily (<code>0 2 * * *</code> UTC)</td><td>Daily cleanup: expired sign-ins, old sign-in counters, idle workouts closed, orphaned push subscriptions, old photo counters, expired email links; expired email links, errors after 30 days, old invitations after 90, the record after 2 years; queued programs start. A failed job is saved as an error.</td></tr>
           <tr><td>19:30 daily (<code>30 17 * * *</code> UTC)</td><td>Food reminders: a push to people who turned them on and logged little.</td></tr>
         </tbody>
       </table></div>
+    </section>
+
+    <section class="card" id="watching">
+      <h2>Keeping an eye on things</h2>
+      <ul>
+        <li><b>Errors</b> (Platform page): every crash in the API, every email that didn't send and every failed scheduled job is saved for 30 days. With 10 errors in 15 minutes, the platform admin gets an email (at most once an hour). Code: <code>packages/api/src/error-log.ts</code>.</li>
+        <li><b>Who did what</b> (Platform page): sign-ups, email confirmations, password resets, invitations, people added, deleted, blocked or moved to another coach, temporary passwords, sign-in lockouts and platform setting changes. Names only (no emails), never training, food or chats. Code: <code>packages/api/src/audit.ts</code>; labels in <code>AUDIT_ACTIONS</code> (shared).</li>
+        <li><b>First steps</b> (admin Today): a new coach's checklist (client, program, assign, message), ticked from what they've done, hideable.</li>
+      </ul>
     </section>
 
     <section class="card" id="tests">
@@ -336,6 +348,7 @@ bun run deploy         # live, when dev looks right</code></pre>
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">17 Nov</span> Invitations by email (new people and people on their own), the who-did-what record and the Errors card with alert emails on the Platform page, first steps for new coaches on Today, "Coached by" in the app, Download my data. Migration <code>0038_records</code>.</li>
         <li><span class="pill">17 Nov</span> Fuel: "See or remove" lists every drink of the day (remove any one, or clear the day: <code>DELETE /me/water?date=</code>); steps have a remove button on their row.</li>
         <li><span class="pill">17 Nov</span> Security pass: sign-up and reset links only come back in the API answer on localhost (never on the public dev site); a live deploy refuses without Turnstile. Removed the local free-exercise-db clone (clone it again only when picking new exercise photos).</li>
         <li><span class="pill">17 Nov</span> Terms and privacy pages and a required tick at sign-up; Delete my account in the app; seed scripts take <code>--business</code>; <code>admin:create</code> safety check; new coaches get the starter workouts; Platform page: people, sign-ups per week, businesses table; compact calories card on phones; this page.</li>

@@ -184,7 +184,7 @@
       <div class="table-wrap"><table>
         <thead><tr><th>Who</th><th>Signs in to</th><th>Sees</th><th>How they get an account</th></tr></thead>
         <tbody>
-          <tr><td><b>Platform admin</b> (you)</td><td>Admin only</td><td>The Platform page: people, businesses, sign-ups, errors, who did what, Claude costs and switches, starter library, site setup. Never anyone's training, food or chats.</td><td><code>bun run admin:create</code> → p (use a separate email, e.g. <code>name+platform@gmail.com</code>).</td></tr>
+          <tr><td><b>Platform admin</b> (you)</td><td>Admin only</td><td>The Platform pages (sidebar: Overview, Businesses, Sign-ins, Who did what, Claude, System): people, businesses, sign-ups, errors, sign-in tries, the record, Claude costs and switches, the starter library, the database and site setup. Never anyone's training, food or chats.</td><td><code>bun run admin:create</code> → p (use a separate email, e.g. <code>name+platform@gmail.com</code>).</td></tr>
           <tr><td><b>Owner</b></td><td>Both</td><td>Everyone in their business; manages accounts. Not other coaches' programs.</td><td>Coach sign-up in the admin (makes a new business), or <code>admin:create</code>.</td></tr>
           <tr><td><b>Coach</b></td><td>Both</td><td>Their own clients and library.</td><td>Added by an owner, or <code>admin:create</code>.</td></tr>
           <tr><td><b>Client</b></td><td>Phone app</td><td>Only themselves. Goal weight, activity and calories are their coach's (read-only).</td><td>Invited by their coach by email (or added with a temporary password).</td></tr>
@@ -350,6 +350,7 @@ bun run deploy         # live, when dev looks right</code></pre>
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">17 Nov</span> The Platform page is split into its own sidebar pages: Overview, Businesses, Sign-ins, Who did what, Claude and System. The Database card works again (counts run as one batch).</li>
         <li><span class="pill">17 Nov</span> Platform page: Sign-ins (every try to sign in to both apps) and Database (row counts and size). Recipe photos show in the phone app again (service worker allowed to fetch Unsplash). Migration <code>0039_sign_ins</code>.</li>
         <li><span class="pill">17 Nov</span> Invitations by email (new people and people on their own), the who-did-what record and the Errors card with alert emails on the Platform page, first steps for new coaches on Today, "Coached by" in the app, Download my data. Migration <code>0038_records</code>.</li>
         <li><span class="pill">17 Nov</span> Fuel: "See or remove" lists every drink of the day (remove any one, or clear the day: <code>DELETE /me/water?date=</code>); steps have a remove button on their row.</li>

@@ -11,13 +11,15 @@ import {
   type AuditEvent,
   ERROR_ALERT_COUNT,
   ERROR_ALERT_MINUTES,
+  type ErrorEvent,
   SIGN_IN_OUTCOME_LABELS,
   type SignInEvent,
   timeAgo,
 } from '@project180/shared'
 import { Button, Card, cn, Input } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 
 const at = new Intl.DateTimeFormat('en-ZA', {
@@ -28,8 +30,11 @@ const at = new Intl.DateTimeFormat('en-ZA', {
   timeZone: 'Africa/Johannesburg',
 })
 
-/** Errors in the last hour and day, and the latest ones. */
-export function ErrorsCard() {
+/**
+ * Errors in the last hour and day, and the latest ones. Compact (the Overview): the three
+ * newest and a link to System, where all of them are.
+ */
+export function ErrorsCard({ compact = false }: { compact?: boolean }) {
   const errors = useQuery({ ...platformErrorsQuery, refetchInterval: 60_000 }).data
   const bad = (errors?.lastHour ?? 0) > 0
   return (
@@ -76,29 +81,44 @@ export function ErrorsCard() {
               <span className="metric text-[28px]">{errors.last24h}</span>
             </div>
           </div>
-          {errors.recent.length === 0 ? (
+          {compact && errors.recent.length > 0 && <ErrorList errors={errors.recent.slice(0, 3)} />}
+          {compact ? (
+            <Link
+              to="/platform/system"
+              className="inline-flex min-h-11 items-center gap-1 self-start font-bold text-[14px] text-brand-text"
+            >
+              {errors.recent.length > 3 ? `See all ${errors.recent.length} errors` : 'Open System'}
+              <ChevronRight className="size-4" aria-hidden />
+            </Link>
+          ) : errors.recent.length === 0 ? (
             <p className="text-[14px] text-ink-muted">
               Nothing has gone wrong in the last 30 days.
             </p>
           ) : (
-            <ul className="flex max-h-96 w-full flex-col divide-y divide-border overflow-y-auto">
-              {errors.recent.map((e) => (
-                <li key={e.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-muted">
-                    <span className="rounded-sm bg-surface-raised px-1.5 font-bold text-ink uppercase">
-                      {e.source}
-                    </span>
-                    <span className="font-semibold text-ink">{e.where}</span>
-                    <span>{timeAgo(e.createdAt)}</span>
-                  </p>
-                  <p className="break-words font-mono text-[12px]">{e.message}</p>
-                </li>
-              ))}
-            </ul>
+            <ErrorList errors={errors.recent} />
           )}
         </>
       )}
     </Card>
+  )
+}
+
+function ErrorList({ errors }: { errors: ErrorEvent[] }) {
+  return (
+    <ul className="flex max-h-96 w-full flex-col divide-y divide-border overflow-y-auto">
+      {errors.map((e) => (
+        <li key={e.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-ink-muted">
+            <span className="rounded-sm bg-surface-raised px-1.5 font-bold text-ink uppercase">
+              {e.source}
+            </span>
+            <span className="font-semibold text-ink">{e.where}</span>
+            <span>{timeAgo(e.createdAt)}</span>
+          </p>
+          <p className="break-words font-mono text-[12px]">{e.message}</p>
+        </li>
+      ))}
+    </ul>
   )
 }
 

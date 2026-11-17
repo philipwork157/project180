@@ -219,16 +219,13 @@ export const platformRoutes = new Hono<AppEnv>()
       )
       .all<{ name: string }>()
     const names = tables.results.map((t) => t.name).filter((n) => /^[a-z0-9_]+$/.test(n))
-    // One statement for every count (a fixed number of queries however many tables there are).
-    const counts = names.length
-      ? await d1
-          .prepare(
-            names
-              .map((n) => `select '${n}' as name, count(*) as rows from "${n}"`)
-              .join(' union all '),
-          )
-          .all<{ name: string; rows: number }>()
-      : { results: [] as Array<{ name: string; rows: number }> }
+    // One round trip for every count (D1 refuses one big UNION: too many terms in a SELECT).
+    const batched = names.length
+      ? await d1.batch<{ name: string; rows: number }>(
+          names.map((n) => d1.prepare(`select '${n}' as name, count(*) as rows from "${n}"`)),
+        )
+      : []
+    const counts = { results: batched.flatMap((r) => r.results) }
     const probe = await d1.prepare('select 1').run()
     const size = (probe.meta as { size_after?: number }).size_after
     let migration: string | null = null

@@ -11,15 +11,20 @@ import {
   useNavigate,
 } from '@tanstack/react-router'
 import {
+  Building2,
   CalendarRange,
   ChefHat,
   Dumbbell,
   Gauge,
+  History,
   LayoutGrid,
   ListChecks,
+  LogIn,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  Server,
+  Sparkles,
   UsersRound,
   X,
 } from 'lucide-react'
@@ -36,9 +41,10 @@ export const Route = createFileRoute('/_dash')({
     if (me.mustChangePassword) throw redirect({ to: '/choose-password' })
     // The platform admin has only the Platform page and their own Settings; nobody else has Platform.
     const path = location.pathname
-    if (isPlatform(me.role) && path !== '/platform' && path !== '/settings')
+    const platformPage = path === '/platform' || path.startsWith('/platform/')
+    if (isPlatform(me.role) && !platformPage && path !== '/settings')
       throw redirect({ to: '/platform' })
-    if (!isPlatform(me.role) && path === '/platform') throw redirect({ to: '/' })
+    if (!isPlatform(me.role) && platformPage) throw redirect({ to: '/' })
     return { me }
   },
   component: AdminLayout,
@@ -74,9 +80,29 @@ const sections: Array<{ title?: string; items: NavItem[] }> = [
   },
 ]
 
-// The platform admin (the developer) sees only their own page.
+// The platform admin (the developer) sees only their own pages: the overview first, then who's
+// on the platform and what they do, then what it costs and how the site runs.
 const platformSections: Array<{ title?: string; items: NavItem[] }> = [
-  { items: [{ to: '/platform', label: 'Platform', icon: Gauge, exact: true }] },
+  {
+    items: [
+      { to: '/platform', label: 'Overview', icon: Gauge, exact: true },
+      { to: '/platform/businesses', label: 'Businesses', icon: Building2 },
+    ],
+  },
+  {
+    title: 'Watch',
+    items: [
+      { to: '/platform/sign-ins', label: 'Sign-ins', icon: LogIn },
+      { to: '/platform/activity', label: 'Who did what', icon: History },
+    ],
+  },
+  {
+    title: 'Run',
+    items: [
+      { to: '/platform/claude', label: 'Claude', icon: Sparkles },
+      { to: '/platform/system', label: 'System', icon: Server },
+    ],
+  },
 ]
 
 const COLLAPSED_KEY = 'project180-sidebar-collapsed'

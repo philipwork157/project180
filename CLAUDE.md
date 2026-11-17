@@ -11,7 +11,7 @@
 - API: every route touching personal data uses `requireUser` and filters by `c.var.user.id`. Add a privacy test in packages/api/test for each new resource.
 - Shared logic (dates, stats, validation, the workout board in `board.ts`) lives in packages/shared with unit tests.
 - Code style: Biome (single quotes, no semicolons, 2 spaces, 100 cols).
-- Both apps send a Content-Security-Policy (`apps/*/public/_headers`): no inline scripts, and any new outside host (images, frames, fonts, scripts) must be added there or the browser blocks it. The API refuses cross-site form posts (`csrf()` in packages/api/src/index.ts).
+- Both apps send a Content-Security-Policy (`apps/*/public/_headers`): no inline scripts, and any new outside host (images, frames, fonts, scripts) must be added there or the browser blocks it. An outside host the phone app's service worker caches (`runtimeCaching` in apps/app/vite.config.ts, e.g. images.unsplash.com) also goes in `connect-src`: the service worker fetches it, and a worker's fetch counts as a connection, not an image. The API refuses cross-site form posts (`csrf()` in packages/api/src/index.ts).
 - Forms: always use Field + Input/Select/Textarea from @project180/ui. Never a bare <select>: the Select component removes the browser arrow and draws a chevron 12px inside the right edge (pr-10). One deliberate exception: the big inline name field at the top of the workout and program editors.
 - Icon-only actions: always IconButton from @project180/ui (square, tooltip + aria-label built in). Never a padded Button with only an icon.
 - Admin add/edit/assign flows open a Drawer (side panel); assigning always uses AssignForm.

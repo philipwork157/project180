@@ -118,7 +118,15 @@ export const meWaterRoutes = new Hono<AppEnv>()
         .onConflictDoNothing({ target: waterLogs.clientUuid })
     return c.json({ water: await loadWaterDay(db, user.id, input.date) }, 201)
   })
-  /** Undo one log (the phone sends the last one). */
+  /** Clear a whole day's water (?date=, today when missing). Only ever your own rows. */
+  .delete('/', async (c) => {
+    const { db, user } = c.var
+    const { date } = parseQuery(dayQuery, { date: c.req.query('date') })
+    const day = date ?? todayIn(user.timezone)
+    await db.delete(waterLogs).where(and(eq(waterLogs.userId, user.id), eq(waterLogs.date, day)))
+    return c.json({ water: await loadWaterDay(db, user.id, day) })
+  })
+  /** Remove one drink (Undo sends the last one; the list can remove any). */
   .delete('/:id', async (c) => {
     const { db, user } = c.var
     const [row] = await db

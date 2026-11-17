@@ -31,6 +31,7 @@ export function ExerciseCard({
   const [adding, setAdding] = useState(false)
   const [stepping, setStepping] = useState(false)
   const remove = useDeleteActivity()
+  const clearSteps = useSetSteps()
   const empty =
     burned.workouts.length === 0 && burned.activities.length === 0 && burned.steps === null
 
@@ -100,6 +101,16 @@ export function ExerciseCard({
               }
               kcal={burned.stepsKcal}
               onClick={() => setStepping(true)}
+              action={
+                <IconButton
+                  label="Remove steps"
+                  icon={<Trash2 aria-hidden />}
+                  tone="danger"
+                  className="size-11"
+                  disabled={clearSteps.isPending}
+                  onClick={() => clearSteps.mutate({ date, steps: 0 })}
+                />
+              }
             />
           )}
         </ul>
@@ -121,6 +132,17 @@ export function ExerciseCard({
           {burned.steps === null ? 'Steps' : 'Edit steps'}
         </Button>
       </div>
+
+      {(remove.isError || clearSteps.isError) && (
+        <p role="alert" className="font-semibold text-[13px] text-danger">
+          Couldn’t remove that. Check your signal and try again.
+        </p>
+      )}
+      {!empty && (
+        <p className="text-[13px] text-ink-muted">
+          Tap steps to change them, or the bin to remove.
+        </p>
+      )}
 
       <ActivitySheet open={adding} date={date} onClose={() => setAdding(false)} />
       <StepsSheet

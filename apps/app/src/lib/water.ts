@@ -1,4 +1,5 @@
 // The phone's water log: a tap adds a glass at once (optimistic), Undo takes back the last one,
+// any drink can be removed from the list (or the whole day cleared),
 // and the daily goal can be changed here as well as by the coach.
 // Taps are sent one after another (one mutation scope), and only the last reply replaces the day,
 // so quick taps never flicker back while earlier ones are still on their way.
@@ -84,5 +85,23 @@ export function useWaterGoal(onSaved?: () => void) {
       void qc.invalidateQueries({ queryKey: ['water', 'summary'] })
       onSaved?.()
     },
+  })
+}
+
+/** Removes every drink on a day (the list's "Clear the day"), at once on screen. */
+export function useClearWater(onDone?: () => void) {
+  const qc = useQueryClient()
+  const reply = useReply()
+  return useMutation({
+    mutationKey: WATER_KEY,
+    scope: { id: 'water' },
+    mutationFn: (date: string) =>
+      api<{ water: WaterDay }>(`/me/water?date=${date}`, { method: 'DELETE' }),
+    onMutate: (date) => {
+      updateDay(qc, date, (day) => ({ ...day, ml: 0, logs: [] }))
+      onDone?.()
+    },
+    onSuccess: ({ water }) => reply(water),
+    onError: (_error, date) => void qc.invalidateQueries(waterDayQuery(date)),
   })
 }

@@ -8,19 +8,21 @@ import {
   type WaterDay,
   waterProgress,
 } from '@project180/shared'
-import { Button, ChoiceChips, cn, Field, IconButton, Input } from '@project180/ui'
-import { Check, Droplet, Pencil, Undo2 } from 'lucide-react'
+import { Button, ChoiceChips, ConfirmDialog, cn, Field, IconButton, Input } from '@project180/ui'
+import { Check, ChevronRight, Droplet, Pencil, Trash2, Undo2 } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
-import { useAddWater, useUndoWater, useWaterGoal } from '../lib/water'
+import { useAddWater, useClearWater, useUndoWater, useWaterGoal } from '../lib/water'
 import { Sheet } from './sheet'
 
 /**
- * Water for the day: how much against the goal, a glass or a bottle in one tap, and Undo.
+ * Water for the day: how much against the goal, a glass or a bottle in one tap, and Undo. Every
+ * drink is listed in a sheet ("3 drinks logged"), where any one can be removed or the day cleared.
  * Steel is the water colour; lime only when the goal is reached.
  */
 export function WaterCard({ water, isToday }: { water: WaterDay; isToday: boolean }) {
   const [editingGoal, setEditingGoal] = useState(false)
+  const [listing, setListing] = useState(false)
   const add = useAddWater()
   const undo = useUndoWater()
   const progress = waterProgress(water.ml, water.goalMl)
@@ -120,6 +122,21 @@ export function WaterCard({ water, isToday }: { water: WaterDay; isToday: boolea
           onClick={() => last && undo.mutate({ date: water.date, id: last.id, ml: last.ml })}
         />
       </div>
+      {water.logs.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setListing(true)}
+          className="-mx-2 -my-1 flex min-h-11 items-center gap-2 rounded-md px-2 text-left text-[14px] transition hover:bg-surface-raised active:scale-[0.99]"
+        >
+          <span className="min-w-0 flex-1 text-ink-muted">
+            {water.logs.length === 1 ? '1 drink logged' : `${water.logs.length} drinks logged`}
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1 font-bold text-brand-text">
+            See or remove
+            <ChevronRight className="size-4" aria-hidden />
+          </span>
+        </button>
+      )}
       {add.isError && (
         <p role="alert" className="font-semibold text-[13px] text-danger">
           Couldn’t save that. Check your signal and try again.
@@ -129,12 +146,120 @@ export function WaterCard({ water, isToday }: { water: WaterDay; isToday: boolea
         <p className="text-[13px] text-ink-muted">Forgot to log? Add it to this day here.</p>
       )}
 
+      <WaterLogSheet
+        open={listing}
+        water={water}
+        isToday={isToday}
+        onClose={() => setListing(false)}
+      />
       <WaterGoalSheet
         open={editingGoal}
         goalMl={water.goalMl}
         onClose={() => setEditingGoal(false)}
       />
     </section>
+  )
+}
+
+const timeLabel = new Intl.DateTimeFormat('en-ZA', {
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'Africa/Johannesburg',
+})
+
+/** Every drink on the day, newest first: remove any one, or clear the whole day. */
+function WaterLogSheet({
+  open,
+  water,
+  isToday,
+  onClose,
+}: {
+  open: boolean
+  water: WaterDay
+  isToday: boolean
+  onClose: () => void
+}) {
+  const [clearing, setClearing] = useState(false)
+  const remove = useUndoWater()
+  const clear = useClearWater(() => {
+    setClearing(false)
+    onClose()
+  })
+  const logs = [...water.logs].reverse()
+
+  return (
+    <Sheet open={open} onClose={onClose} label="Water logged">
+      <div className="flex flex-col gap-5 pb-6">
+        <div className="flex flex-col gap-1 pr-12">
+          <h2 className="font-display font-extrabold text-[24px] leading-7">
+            {isToday ? 'Water today' : 'Water this day'}
+          </h2>
+          <p className="text-[14px] text-ink-muted">
+            {formatWater(water.ml)} in total. Added too much? Remove that drink.
+          </p>
+        </div>
+        {logs.length === 0 ? (
+          <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
+            Nothing logged on this day.
+          </p>
+        ) : (
+          <ul className="flex w-full flex-col">
+            {logs.map((log) => (
+              <li
+                key={log.id}
+                className="flex min-h-14 items-center gap-3 border-border border-t py-1.5 first:border-t-0"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-steel/20 text-steel-text">
+                  <Droplet className="size-4" aria-hidden />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="tabular font-semibold text-[15px]">{formatWater(log.ml)}</span>
+                  <span className="tabular text-[13px] text-ink-muted">
+                    {timeLabel.format(new Date(log.createdAt))}
+                  </span>
+                </span>
+                <IconButton
+                  label={`Remove ${formatWater(log.ml)}`}
+                  icon={<Trash2 aria-hidden />}
+                  tone="danger"
+                  className="size-11 shrink-0"
+                  // A drink still on its way has a temporary (negative) id.
+                  disabled={log.id < 0}
+                  onClick={() => remove.mutate({ date: water.date, id: log.id, ml: log.ml })}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {remove.isError && (
+          <p role="alert" className="font-semibold text-[14px] text-danger">
+            Couldn’t remove that. Check your signal and try again.
+          </p>
+        )}
+        {logs.length > 1 && (
+          <Button
+            variant="ghost"
+            block
+            className="text-danger"
+            icon={<Trash2 className="size-4" aria-hidden />}
+            onClick={() => setClearing(true)}
+          >
+            Clear the day
+          </Button>
+        )}
+      </div>
+      <ConfirmDialog
+        open={clearing}
+        title="Clear all water for this day?"
+        confirmLabel="Clear the day"
+        loading={clear.isPending}
+        onConfirm={() => clear.mutate(water.date)}
+        onClose={() => setClearing(false)}
+      >
+        All {logs.length} drinks ({formatWater(water.ml)}) are removed. You can add them again
+        after.
+      </ConfirmDialog>
+    </Sheet>
   )
 }
 

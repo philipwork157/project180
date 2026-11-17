@@ -27,6 +27,21 @@ describe('water', () => {
     expect(summary.data.summary.days).toEqual([{ date: DAY, ml: 250 }])
   })
 
+  it('removes any drink, and clears a whole day of only your own water', async () => {
+    const { admin, member } = await setupHousehold()
+    const first = (await drink(member, 250)).data.water.logs[0].id
+    await drink(member, 500)
+    await drink(member, 750)
+    await drink(admin, 500)
+    const removed = await call<Json>(`/me/water/${first}`, { method: 'DELETE', cookie: member })
+    expect(removed.data.water.ml).toBe(1250)
+
+    const cleared = await call<Json>(`/me/water?date=${DAY}`, { method: 'DELETE', cookie: member })
+    expect(cleared.data.water).toMatchObject({ ml: 0, logs: [] })
+    // The coach's own water that day is untouched.
+    expect((await call<Json>(`/me/water?date=${DAY}`, { cookie: admin })).data.water.ml).toBe(500)
+  })
+
   it('the coach sets a goal, the client can change it, and either can clear it', async () => {
     const { admin, member } = await setupHousehold()
     const me = (await call<Json>('/me', { cookie: member })).data.user

@@ -9,6 +9,7 @@ import {
   exercises,
   programs,
   recipes,
+  signInEvents,
   users,
 } from '@project180/db'
 import {
@@ -19,16 +20,32 @@ import {
   type ClaudeFeature,
   type ClaudeSpendRow,
   claudeFeatureUpdate,
+  D1_LIMIT_BYTES,
+  type DatabaseSummary,
   type ErrorSummary,
   type PlatformBusiness,
   type PlatformCoach,
   type PlatformHealth,
   type PlatformPeople,
+  type SignInSummary,
   type StarterLibrary,
   starterLibraryInput,
   todayIn,
 } from '@project180/shared'
-import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  ne,
+  sql,
+} from 'drizzle-orm'
 import { Hono } from 'hono'
 import { audit } from '../audit'
 import { emailMode } from '../email'
@@ -74,6 +91,7 @@ async function spendByFeature(db: AppEnv['Variables']['db'], from: Date, to?: Da
 }
 
 const AUDIT_PAGE = 50
+const SIGN_IN_PAGE = 50
 
 export const platformRoutes = new Hono<AppEnv>()
   .use(requireUser, requirePlatform)
@@ -120,6 +138,117 @@ export const platformRoutes = new Hono<AppEnv>()
       nextBefore: rows.length > AUDIT_PAGE ? (rows[AUDIT_PAGE - 1]?.id ?? null) : null,
     }
     return c.json({ audit: page })
+  })
+  /**
+   * Every try to sign in to the app or the admin, newest first, 50 at a time: ?app=app|admin,
+   * ?failed=1 for only the ones that didn't get in, ?q= part of an email, ?before= an id.
+   */
+  .get('/sign-ins', async (c) => {
+    const { db } = c.var
+    const app = c.req.query('app')
+    const q = c.req.query('q')?.trim().toLowerCase().slice(0, 80)
+    const before = Number(c.req.query('before'))
+    const failed = ne(signInEvents.outcome, 'ok')
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const where = and(
+      app === 'app' || app === 'admin' ? eq(signInEvents.app, app) : undefined,
+      c.req.query('failed') === '1' ? failed : undefined,
+      q ? like(signInEvents.email, `%${q.replace(/[%_]/g, '')}%`) : undefined,
+      Number.isInteger(before) && before > 0 ? lt(signInEvents.id, before) : undefined,
+    )
+    const [rows, [day], topFailing] = await Promise.all([
+      db
+        .select({
+          id: signInEvents.id,
+          app: signInEvents.app,
+          email: signInEvents.email,
+          name: users.name,
+          outcome: signInEvents.outcome,
+          ip: signInEvents.ip,
+          country: signInEvents.country,
+          device: signInEvents.device,
+          createdAt: signInEvents.createdAt,
+        })
+        .from(signInEvents)
+        .leftJoin(users, eq(users.id, signInEvents.userId))
+        .where(where)
+        .orderBy(desc(signInEvents.id))
+        .limit(SIGN_IN_PAGE + 1),
+      db
+        .select({
+          ok: sql<number>`coalesce(sum(case when ${signInEvents.outcome} = 'ok' then 1 else 0 end), 0)`,
+          failed: sql<number>`coalesce(sum(case when ${signInEvents.outcome} != 'ok' then 1 else 0 end), 0)`,
+        })
+        .from(signInEvents)
+        .where(gte(signInEvents.createdAt, since)),
+      db
+        .select({
+          ip: signInEvents.ip,
+          country: sql<string | null>`max(${signInEvents.country})`,
+          failed: count(),
+          emails: sql<number>`count(distinct ${signInEvents.email})`,
+        })
+        .from(signInEvents)
+        .where(and(gte(signInEvents.createdAt, since), failed, isNotNull(signInEvents.ip)))
+        .groupBy(signInEvents.ip)
+        .orderBy(desc(count()))
+        .limit(5),
+    ])
+    const signIns: SignInSummary = {
+      last24h: { ok: Number(day?.ok ?? 0), failed: Number(day?.failed ?? 0) },
+      topFailing: topFailing.map((t) => ({
+        ip: t.ip ?? '',
+        country: t.country,
+        failed: t.failed,
+        emails: Number(t.emails),
+      })),
+      events: rows.slice(0, SIGN_IN_PAGE).map((r) => ({
+        ...r,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      nextBefore: rows.length > SIGN_IN_PAGE ? (rows[SIGN_IN_PAGE - 1]?.id ?? null) : null,
+    }
+    return c.json({ signIns })
+  })
+  /** Every table with its row count, the database size against D1's limit, the newest migration. */
+  .get('/database', async (c) => {
+    const d1 = c.env.DB
+    const tables = await d1
+      .prepare(
+        "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%' order by name",
+      )
+      .all<{ name: string }>()
+    const names = tables.results.map((t) => t.name).filter((n) => /^[a-z0-9_]+$/.test(n))
+    // One statement for every count (a fixed number of queries however many tables there are).
+    const counts = names.length
+      ? await d1
+          .prepare(
+            names
+              .map((n) => `select '${n}' as name, count(*) as rows from "${n}"`)
+              .join(' union all '),
+          )
+          .all<{ name: string; rows: number }>()
+      : { results: [] as Array<{ name: string; rows: number }> }
+    const probe = await d1.prepare('select 1').run()
+    const size = (probe.meta as { size_after?: number }).size_after
+    let migration: string | null = null
+    try {
+      const row = await d1
+        .prepare('select name from d1_migrations order by id desc limit 1')
+        .first<{ name: string }>()
+      migration = row?.name ?? null
+    } catch {
+      migration = null
+    }
+    const database: DatabaseSummary = {
+      sizeBytes: typeof size === 'number' && size > 0 ? size : null,
+      limitBytes: D1_LIMIT_BYTES,
+      tables: counts.results
+        .map((t) => ({ name: t.name, rows: Number(t.rows) }))
+        .sort((a, b) => b.rows - a.rows),
+      migration,
+    }
+    return c.json({ database })
   })
   /** Errors in the last day and hour, the latest 50, and whether alert emails can go out. */
   .get('/errors', async (c) => {

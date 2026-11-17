@@ -251,3 +251,46 @@ describe('first steps, business name and my data', () => {
     expect((await call('/me/export')).status).toBe(401)
   })
 })
+
+describe('sign-ins and the database (platform admin only)', () => {
+  it('notes every try to sign in, right or wrong, in either app', async () => {
+    await createAdmin()
+    await call('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: ADMIN.email, password: 'not-the-password' },
+    })
+    await call('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: 'nobody@example.com', password: 'guessing-1' },
+      asAdminApp: true,
+    })
+    const admin = await signIn(ADMIN.email, ADMIN.password)
+    const platform = await signInPlatform()
+    const res = await call<Json>('/platform/sign-ins', { cookie: platform, asAdminApp: true })
+    const outcomes = res.data.signIns.events.map((e: Json) => [e.app, e.email, e.outcome])
+    expect(outcomes).toEqual(
+      expect.arrayContaining([
+        ['app', ADMIN.email, 'wrong_password'],
+        ['admin', 'nobody@example.com', 'no_account'],
+        ['app', ADMIN.email, 'ok'],
+      ]),
+    )
+    expect(res.data.signIns.last24h.failed).toBeGreaterThanOrEqual(2)
+    const onlyFailed = await call<Json>('/platform/sign-ins?failed=1&app=admin', {
+      cookie: platform,
+      asAdminApp: true,
+    })
+    expect(onlyFailed.data.signIns.events.map((e: Json) => e.email)).toEqual(['nobody@example.com'])
+    expect((await call('/platform/sign-ins', { cookie: admin })).status).toBe(404)
+  })
+
+  it('lists every table with its rows, never the rows themselves', async () => {
+    const { admin } = await setupHousehold()
+    const platform = await signInPlatform()
+    const res = await call<Json>('/platform/database', { cookie: platform, asAdminApp: true })
+    const users = res.data.database.tables.find((t: Json) => t.name === 'users')
+    expect(users.rows).toBeGreaterThanOrEqual(3)
+    expect(JSON.stringify(res.data)).not.toContain(MEMBER.email)
+    expect((await call('/platform/database', { cookie: admin })).status).toBe(404)
+  })
+})

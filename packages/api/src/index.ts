@@ -27,6 +27,7 @@ import { videoRoutes } from './routes/videos'
 import { workoutBuilderRoutes } from './routes/workout-builder'
 import { workoutRoutes } from './routes/workouts'
 import { clearFailures, minutesLocked, recordFailure } from './sign-in-limit'
+import { recordSignIn, type SignInOutcome } from './sign-in-log'
 import {
   BLOCKED_MESSAGE,
   DASHBOARD_ONLY_MESSAGE,
@@ -86,17 +87,31 @@ export function createApp() {
       ip: c.req.header('cf-connecting-ip') ?? null,
     }
     const db = c.var.db
+    // Every try is noted for the platform admin's Sign-ins card, right or wrong.
+    const log = (outcome: SignInOutcome) =>
+      recordSignIn(db, {
+        app: c.var.appKind === 'admin' ? 'admin' : 'app',
+        email: keys.email,
+        outcome,
+        ip: keys.ip,
+        country: c.req.header('cf-ipcountry') ?? null,
+        userAgent: c.req.header('user-agent') ?? null,
+      })
     const wait = await minutesLocked(db, keys)
     if (wait > 0) {
+      await log('locked')
       const message = `Too many tries. Please wait ${wait} minute${wait === 1 ? '' : 's'} and try again.`
       return c.json({ code: 'TOO_MANY_ATTEMPTS', message, error: message }, 429)
     }
     const res = await c.var.auth.handler(c.req.raw)
-    if (res.status === 401) await recordFailure(db, keys)
-    else if (res.ok) {
+    if (res.status === 401) {
+      await recordFailure(db, keys)
+      await log('wrong_password')
+    } else if (res.ok) {
       await clearFailures(db, keys)
       // The right temporary password, but too old: no session (and no cookie) for it.
       if (keys.email && (await refuseExpiredTempPassword(db, keys.email))) {
+        await log('temp_expired')
         const message = TEMP_PASSWORD_EXPIRED_MESSAGE
         return c.json({ code: 'TEMP_PASSWORD_EXPIRED', message, error: message }, 403)
       }
@@ -107,17 +122,20 @@ export function createApp() {
       const token = typeof signedIn?.token === 'string' ? signedIn.token : null
       // Blocked by staff: the right password, but no session (in either app).
       if (keys.email && (await refuseBlocked(db, keys.email, token))) {
+        await log('blocked')
         const message = BLOCKED_MESSAGE
         return c.json({ code: 'BLOCKED', message, error: message }, 403)
       }
       // Signed up themselves but hasn't confirmed their email yet.
       if (keys.email && (await refuseUnverified(db, keys.email, token))) {
+        await log('unverified')
         const message = EMAIL_NOT_VERIFIED_MESSAGE
         return c.json({ code: 'EMAIL_NOT_VERIFIED', message, error: message }, 403)
       }
       // The admin lets only staff in: a client's right password gets no session there.
       if (c.var.appKind === 'admin' && keys.email) {
         if (await refuseNonStaff(db, keys.email, token)) {
+          await log('staff_only')
           const message = STAFF_ONLY_MESSAGE
           return c.json({ code: 'STAFF_ONLY', message, error: message }, 403)
         }
@@ -125,10 +143,12 @@ export function createApp() {
       // The platform admin signs in to the dashboard only.
       if (c.var.appKind === 'app' && keys.email) {
         if (await refusePlatformInApp(db, keys.email, token)) {
+          await log('dashboard_only')
           const message = DASHBOARD_ONLY_MESSAGE
           return c.json({ code: 'DASHBOARD_ONLY', message, error: message }, 403)
         }
       }
+      await log('ok')
     }
     return res
   })

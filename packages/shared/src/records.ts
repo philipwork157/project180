@@ -120,3 +120,50 @@ export interface CoachFirstSteps {
 
 /** Version of the "download my data" file, so its shape can change later. */
 export const EXPORT_VERSION = 1
+
+/** What happened when someone tried to sign in, in plain words for the Platform page. */
+export const SIGN_IN_OUTCOME_LABELS = {
+  ok: 'Signed in',
+  wrong_password: 'Wrong password',
+  no_account: 'No account with this email',
+  locked: 'Locked out (too many tries)',
+  blocked: 'Blocked by their coach',
+  unverified: 'Email not confirmed yet',
+  temp_expired: 'Temporary password expired',
+  staff_only: 'Client tried the admin',
+  dashboard_only: 'Platform admin tried the app',
+} as const
+export type SignInOutcomeKey = keyof typeof SIGN_IN_OUTCOME_LABELS
+
+export interface SignInEvent {
+  id: number
+  app: 'app' | 'admin'
+  email: string
+  /** Their name when the email has an account. */
+  name: string | null
+  outcome: SignInOutcomeKey
+  ip: string | null
+  country: string | null
+  device: string | null
+  createdAt: string
+}
+
+export interface SignInSummary {
+  last24h: { ok: number; failed: number }
+  /** Network addresses with the most failed tries in the last 24 hours. */
+  topFailing: Array<{ ip: string; country: string | null; failed: number; emails: number }>
+  events: SignInEvent[]
+  nextBefore: number | null
+}
+
+export interface DatabaseSummary {
+  /** Bytes, as D1 reports it; null when it can't tell. */
+  sizeBytes: number | null
+  /** D1's size limit per database. */
+  limitBytes: number
+  tables: Array<{ name: string; rows: number }>
+  migration: string | null
+}
+
+/** D1's limit per database on the paid plan (10 GB). */
+export const D1_LIMIT_BYTES = 10 * 1024 * 1024 * 1024

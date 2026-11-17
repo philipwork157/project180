@@ -10,6 +10,7 @@ import {
   pushSubscriptions,
   sessions,
   signInAttempts,
+  signInEvents,
   verifications,
 } from '@project180/db'
 import { and, eq, isNotNull, isNull, lt, notExists, or } from 'drizzle-orm'
@@ -71,6 +72,8 @@ export async function dailyCleanup(db: Db, now = Date.now()) {
     db.delete(errorEvents).where(lt(errorEvents.createdAt, new Date(now - 30 * DAY_MS))),
     db.delete(invitations).where(lt(invitations.expiresAt, new Date(now - 90 * DAY_MS))),
     db.delete(auditEvents).where(lt(auditEvents.createdAt, new Date(now - 730 * DAY_MS))),
+    // Sign-in tries after 90 days.
+    db.delete(signInEvents).where(lt(signInEvents.createdAt, new Date(now - 90 * DAY_MS))),
   ])
   // Queued programs whose start date has come take over (the plan also does this when read).
   const programsStarted = await startDuePrograms(db, 'everyone', at)

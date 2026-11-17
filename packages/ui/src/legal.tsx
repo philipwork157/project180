@@ -142,6 +142,10 @@ export const PRIVACY: Section[] = [
           How you use the app: when you were last active, roughly how long, and which devices you’re
           signed in on.
         </li>
+        <li className={li}>
+          Sign-in tries, right or wrong: the email typed, the network address, its country and the
+          kind of device. Kept 90 days, only to keep accounts safe from people trying to break in.
+        </li>
         <li className={li}>Messages between you and your coach.</li>
       </ul>
     ),

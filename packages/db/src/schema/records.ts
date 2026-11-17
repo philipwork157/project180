@@ -86,3 +86,42 @@ export const errorEvents = sqliteTable(
   },
   (t) => [index('error_events_created_idx').on(t.createdAt)],
 )
+
+export const SIGN_IN_OUTCOMES = [
+  'ok',
+  'wrong_password',
+  'no_account',
+  'locked',
+  'blocked',
+  'unverified',
+  'temp_expired',
+  'staff_only',
+  'dashboard_only',
+] as const
+
+/**
+ * Every try to sign in to the app or the admin, right or wrong, for the platform admin to spot
+ * attacks and people who can't get in. Kept 90 days. The email is as typed (lowercased), so
+ * tries at addresses with no account show too.
+ */
+export const signInEvents = sqliteTable(
+  'sign_in_events',
+  {
+    id: id(),
+    app: text('app', { enum: ['app', 'admin'] }).notNull(),
+    email: text('email').notNull(),
+    userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
+    outcome: text('outcome', { enum: SIGN_IN_OUTCOMES }).notNull(),
+    ip: text('ip'),
+    // Cloudflare's two-letter country for the address, e.g. ZA.
+    country: text('country'),
+    // "Chrome on iPhone": worked out from the browser, never the full string.
+    device: text('device'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('sign_in_events_created_idx').on(t.createdAt),
+    index('sign_in_events_user_idx').on(t.userId),
+    index('sign_in_events_ip_created_idx').on(t.ip, t.createdAt),
+  ],
+)

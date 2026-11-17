@@ -9,6 +9,7 @@ import type {
   ClaudeFeatureSettings,
   ClientProfile,
   CoachFirstSteps,
+  DatabaseSummary,
   EnrollmentSummary,
   ErrorSummary,
   Exercise,
@@ -43,6 +44,7 @@ import type {
   SavedMeal,
   SessionDetail,
   SessionFeedback,
+  SignInSummary,
   StarterLibrary,
   StarterProgram,
   SwapOptions,
@@ -618,4 +620,31 @@ export const platformAuditQuery = (before: number | null = null) =>
 export const platformErrorsQuery = queryOptions({
   queryKey: ['platform', 'errors'],
   queryFn: async () => (await api<{ errors: ErrorSummary }>('/platform/errors')).errors,
+})
+
+/** Platform admin: every try to sign in (app and admin), with filters and paging. */
+export const platformSignInsQuery = (filters: {
+  app: 'all' | 'app' | 'admin'
+  failed: boolean
+  q: string
+  before: number | null
+}) =>
+  queryOptions({
+    queryKey: ['platform', 'sign-ins', filters],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (filters.app !== 'all') params.set('app', filters.app)
+      if (filters.failed) params.set('failed', '1')
+      if (filters.q) params.set('q', filters.q)
+      if (filters.before) params.set('before', String(filters.before))
+      const qs = params.toString()
+      return (await api<{ signIns: SignInSummary }>(`/platform/sign-ins${qs ? `?${qs}` : ''}`))
+        .signIns
+    },
+  })
+
+/** Platform admin: every table's row count and the database size. */
+export const platformDatabaseQuery = queryOptions({
+  queryKey: ['platform', 'database'],
+  queryFn: async () => (await api<{ database: DatabaseSummary }>('/platform/database')).database,
 })

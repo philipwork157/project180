@@ -32,7 +32,12 @@ import { type ReactNode, useState } from 'react'
 import { Segmented } from '../../components/controls'
 import { EmailSettings } from '../../components/email-settings'
 import { PageHeader } from '../../components/page-header'
-import { ActivityRecord, ErrorsCard } from '../../components/platform-records'
+import {
+  ActivityRecord,
+  DatabaseCard,
+  ErrorsCard,
+  SignInsCard,
+} from '../../components/platform-records'
 
 /**
  * The platform admin's page (the developer): what Claude costs, each Claude feature's switch,
@@ -59,11 +64,12 @@ function PlatformPage() {
     <>
       <PageHeader
         title="Platform"
-        subtitle="Everyone on the platform, errors, who did what, Claude costs and switches, and how this site is set up."
+        subtitle="Everyone on the platform, errors, sign-ins, who did what, Claude costs and switches, and how this site is set up."
       />
       <div className="flex flex-col gap-5">
         <PeopleSummary />
         <ErrorsCard />
+        <SignInsCard />
         <Signups />
         <Businesses />
         <ActivityRecord />
@@ -75,6 +81,7 @@ function PlatformPage() {
           <TopUsers />
           <Failures />
         </div>
+        <DatabaseCard />
         <Health />
       </div>
     </>

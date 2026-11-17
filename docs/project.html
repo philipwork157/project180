@@ -279,7 +279,7 @@
         <li>Change <code>packages/db/src/schema</code>, then <code>bun run db:apply</code>. Never hand-edit a generated migration; one-off data moves are custom migrations (<code>drizzle-kit generate --custom</code>).</li>
         <li><b>Never rebuild a table on D1</b> (a <code>__new_</code> table in the SQL): it can cascade-delete child rows. Add nullable columns, new tables or indexes instead.</li>
         <li>D1 takes at most 100 values per statement: multi-row inserts use <code>insertMany</code> + <code>runAll</code>.</li>
-        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors).</li>
+        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>.</li>
       </ul>
     </section>
 
@@ -320,7 +320,7 @@ bun run deploy         # live, when dev looks right</code></pre>
       <div class="table-wrap"><table>
         <thead><tr><th>When (South African time)</th><th>What</th></tr></thead>
         <tbody>
-          <tr><td>04:00 daily (<code>0 2 * * *</code> UTC)</td><td>Daily cleanup: expired sign-ins, old sign-in counters, idle workouts closed, orphaned push subscriptions, old photo counters, expired email links; expired email links, errors after 30 days, old invitations after 90, the record after 2 years; queued programs start. A failed job is saved as an error.</td></tr>
+          <tr><td>04:00 daily (<code>0 2 * * *</code> UTC)</td><td>Daily cleanup: expired sign-ins, old sign-in counters, idle workouts closed, orphaned push subscriptions, old photo counters, expired email links; expired email links, errors after 30 days, old invitations and sign-in tries after 90, the record after 2 years; queued programs start. A failed job is saved as an error.</td></tr>
           <tr><td>19:30 daily (<code>30 17 * * *</code> UTC)</td><td>Food reminders: a push to people who turned them on and logged little.</td></tr>
         </tbody>
       </table></div>
@@ -331,6 +331,8 @@ bun run deploy         # live, when dev looks right</code></pre>
       <ul>
         <li><b>Errors</b> (Platform page): every crash in the API, every email that didn't send and every failed scheduled job is saved for 30 days. With 10 errors in 15 minutes, the platform admin gets an email (at most once an hour). Code: <code>packages/api/src/error-log.ts</code>.</li>
         <li><b>Who did what</b> (Platform page): sign-ups, email confirmations, password resets, invitations, people added, deleted, blocked or moved to another coach, temporary passwords, sign-in lockouts and platform setting changes. Names only (no emails), never training, food or chats. Code: <code>packages/api/src/audit.ts</code>; labels in <code>AUDIT_ACTIONS</code> (shared).</li>
+        <li><b>Sign-ins</b> (Platform page): every try to sign in to the phone app and the admin, right or wrong: email, name when there's an account, what happened (signed in, wrong password, no account, locked out, blocked, email not confirmed…), device, network address and country. Filters for app and "only failed", search by email, and the networks with the most failed tries in 24 hours. Kept 90 days. Code: <code>packages/api/src/sign-in-log.ts</code>.</li>
+        <li><b>Database</b> (Platform page): every table's row count and the size against D1's 10 GB, never the rows. To look at rows use the Cloudflare dashboard (D1 → project180-db) or <code>bunx wrangler d1 execute project180-db --remote --command "…"</code>.</li>
         <li><b>First steps</b> (admin Today): a new coach's checklist (client, program, assign, message), ticked from what they've done, hideable.</li>
       </ul>
     </section>
@@ -348,6 +350,7 @@ bun run deploy         # live, when dev looks right</code></pre>
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">17 Nov</span> Platform page: Sign-ins (every try to sign in to both apps) and Database (row counts and size). Recipe photos show in the phone app again (service worker allowed to fetch Unsplash). Migration <code>0039_sign_ins</code>.</li>
         <li><span class="pill">17 Nov</span> Invitations by email (new people and people on their own), the who-did-what record and the Errors card with alert emails on the Platform page, first steps for new coaches on Today, "Coached by" in the app, Download my data. Migration <code>0038_records</code>.</li>
         <li><span class="pill">17 Nov</span> Fuel: "See or remove" lists every drink of the day (remove any one, or clear the day: <code>DELETE /me/water?date=</code>); steps have a remove button on their row.</li>
         <li><span class="pill">17 Nov</span> Security pass: sign-up and reset links only come back in the API answer on localhost (never on the public dev site); a live deploy refuses without Turnstile. Removed the local free-exercise-db clone (clone it again only when picking new exercise photos).</li>

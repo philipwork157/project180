@@ -1,14 +1,21 @@
 // Platform page: the record of who did what (account changes, sign-ups, invitations, settings)
 // and the errors the site ran into, with alert emails when there are many.
-import { platformAuditQuery, platformErrorsQuery } from '@project180/client'
+import {
+  platformAuditQuery,
+  platformDatabaseQuery,
+  platformErrorsQuery,
+  platformSignInsQuery,
+} from '@project180/client'
 import {
   AUDIT_ACTIONS,
   type AuditEvent,
   ERROR_ALERT_COUNT,
   ERROR_ALERT_MINUTES,
+  SIGN_IN_OUTCOME_LABELS,
+  type SignInEvent,
   timeAgo,
 } from '@project180/shared'
-import { Button, Card, cn } from '@project180/ui'
+import { Button, Card, cn, Input } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useState } from 'react'
@@ -176,5 +183,305 @@ function AuditRow({ event: e }: { event: AuditEvent }) {
         )}
       </span>
     </li>
+  )
+}
+
+type AppFilter = 'all' | 'app' | 'admin'
+
+/** A filter you can switch on and off (lime when on). */
+function FilterChip({
+  active,
+  className,
+  onClick,
+  children,
+}: {
+  active: boolean
+  className?: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'h-11 rounded-pill px-4 font-bold text-[14px] transition active:scale-[0.97]',
+        active ? 'bg-brand text-on-brand' : 'bg-surface-raised text-ink hover:bg-border',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+const APP_LABELS: Record<'app' | 'admin', string> = { app: 'Phone app', admin: 'Admin' }
+
+/** Every try to sign in to the app or the admin: who, from where, and what happened. */
+export function SignInsCard() {
+  const [app, setApp] = useState<AppFilter>('all')
+  const [failed, setFailed] = useState(false)
+  const [search, setSearch] = useState('')
+  const [q, setQ] = useState('')
+  const [pages, setPages] = useState<Array<number | null>>([null])
+  const filters = { app, failed, q }
+  const first = useQuery(platformSignInsQuery({ ...filters, before: null })).data
+  const reset = () => setPages([null])
+
+  return (
+    <Card className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h2 className="font-bold text-[17px]">Sign-ins</h2>
+        <p className="text-[14px] text-ink-muted">
+          Every try to sign in to the phone app and the admin, right or wrong. Kept 90 days.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat label="Signed in, 24 h" value={first?.last24h.ok} />
+        <Stat
+          label="Failed, 24 h"
+          value={first?.last24h.failed}
+          warn={(first?.last24h.failed ?? 0) > 20}
+        />
+        <div className="col-span-2 flex flex-col gap-2 rounded-md bg-surface-raised p-4">
+          <span className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+            Most failed tries by network, 24 h
+          </span>
+          {!first ? (
+            <div className="h-10 animate-pulse rounded-sm bg-surface" />
+          ) : first.topFailing.length === 0 ? (
+            <span className="text-[14px] text-ink-muted">None</span>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {first.topFailing.map((t) => (
+                <li key={t.ip} className="flex items-center gap-2 text-[13px]">
+                  <span className="min-w-0 flex-1 truncate font-mono">
+                    {t.ip}
+                    {t.country && ` · ${t.country}`}
+                  </span>
+                  <span className="tabular shrink-0 text-ink-muted">
+                    {t.failed} tries · {t.emails} email{t.emails === 1 ? '' : 's'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="no-scrollbar flex gap-2 overflow-x-auto">
+          {(['all', 'app', 'admin'] as const).map((a) => (
+            <FilterChip
+              key={a}
+              active={app === a}
+              className="shrink-0 whitespace-nowrap"
+              onClick={() => {
+                setApp(a)
+                reset()
+              }}
+            >
+              {a === 'all' ? 'Both apps' : APP_LABELS[a]}
+            </FilterChip>
+          ))}
+          <FilterChip
+            active={failed}
+            className="shrink-0 whitespace-nowrap"
+            onClick={() => {
+              setFailed(!failed)
+              reset()
+            }}
+          >
+            Only failed
+          </FilterChip>
+        </div>
+        <form
+          className="md:ml-auto md:w-72"
+          onSubmit={(e) => {
+            e.preventDefault()
+            setQ(search.trim())
+            reset()
+          }}
+        >
+          <Input
+            type="search"
+            value={search}
+            placeholder="Search an email, press Enter"
+            aria-label="Search an email"
+            onChange={(e) => {
+              setSearch(e.target.value)
+              if (!e.target.value) {
+                setQ('')
+                reset()
+              }
+            }}
+          />
+        </form>
+      </div>
+
+      <ul className="flex w-full flex-col divide-y divide-border">
+        {pages.map((before, i) => (
+          <SignInPageRows
+            key={before ?? 'first'}
+            filters={{ ...filters, before }}
+            onMore={i === pages.length - 1 ? (next) => setPages([...pages, next]) : undefined}
+          />
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  warn,
+}: {
+  label: string
+  value: number | undefined
+  warn?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-md bg-surface-raised p-4">
+      <span className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+        {label}
+      </span>
+      {value === undefined ? (
+        <span className="h-8 w-12 animate-pulse rounded-sm bg-surface" />
+      ) : (
+        <span className={cn('metric text-[28px]', warn && 'text-danger')}>{value}</span>
+      )}
+    </div>
+  )
+}
+
+function SignInPageRows({
+  filters,
+  onMore,
+}: {
+  filters: { app: AppFilter; failed: boolean; q: string; before: number | null }
+  onMore?: (next: number) => void
+}) {
+  const page = useQuery(platformSignInsQuery(filters))
+  if (!page.data)
+    return (
+      <li className="py-3">
+        <div className="h-24 animate-pulse rounded-md bg-surface-raised" />
+      </li>
+    )
+  if (filters.before === null && page.data.events.length === 0)
+    return <li className="py-3 text-[14px] text-ink-muted">No sign-in tries match.</li>
+  return (
+    <>
+      {page.data.events.map((e) => (
+        <SignInRow key={e.id} event={e} />
+      ))}
+      {onMore && page.data.nextBefore !== null && (
+        <li className="pt-4">
+          <Button variant="secondary" block onClick={() => onMore(page.data.nextBefore as number)}>
+            Show older
+          </Button>
+        </li>
+      )}
+    </>
+  )
+}
+
+function SignInRow({ event: e }: { event: SignInEvent }) {
+  const ok = e.outcome === 'ok'
+  return (
+    <li className="flex flex-col gap-1 py-3 first:pt-0 md:flex-row md:items-center md:gap-4">
+      <span className="tabular w-32 shrink-0 text-[13px] text-ink-muted">
+        {at.format(new Date(e.createdAt))}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className={cn('size-2 shrink-0 rounded-full', ok ? 'bg-lime' : 'bg-danger')}
+          />
+          <span className="truncate font-semibold text-[14px]">
+            {e.name ? `${e.name} · ` : ''}
+            {e.email}
+          </span>
+        </span>
+        <span className="truncate text-[13px] text-ink-muted">
+          {[
+            SIGN_IN_OUTCOME_LABELS[e.outcome] ?? e.outcome,
+            APP_LABELS[e.app],
+            e.device,
+            e.ip && `${e.ip}${e.country ? ` (${e.country})` : ''}`,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>
+      </span>
+    </li>
+  )
+}
+
+const bytes = (n: number) =>
+  n >= 1024 ** 3
+    ? `${(n / 1024 ** 3).toFixed(2)} GB`
+    : n >= 1024 ** 2
+      ? `${(n / 1024 ** 2).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(n / 1024))} KB`
+
+/** Every table with its row count, and the size against D1's limit. Never the rows. */
+export function DatabaseCard() {
+  const db = useQuery(platformDatabaseQuery).data
+  const share = db?.sizeBytes ? db.sizeBytes / db.limitBytes : 0
+  return (
+    <Card className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h2 className="font-bold text-[17px]">Database</h2>
+        <p className="text-[14px] text-ink-muted">
+          How many rows each table has. To look at rows, use the Cloudflare dashboard (D1 →
+          project180-db), behind your Cloudflare sign-in.
+        </p>
+      </div>
+      {!db ? (
+        <div className="h-40 animate-pulse rounded-md bg-surface-raised" />
+      ) : (
+        <>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-3 text-[14px]">
+              <span>
+                <span className="metric text-[24px]">
+                  {db.sizeBytes === null ? 'Unknown' : bytes(db.sizeBytes)}
+                </span>{' '}
+                <span className="text-ink-muted">of {bytes(db.limitBytes)}</span>
+              </span>
+              {db.migration && (
+                <span className="truncate font-mono text-[12px] text-ink-muted">
+                  {db.migration}
+                </span>
+              )}
+            </div>
+            <div aria-hidden className="h-2 w-full overflow-hidden rounded-pill bg-surface-raised">
+              <div
+                className={cn('h-full rounded-pill', share > 0.8 ? 'bg-danger' : 'bg-steel')}
+                style={{ width: `${Math.max(share * 100, 1)}%` }}
+              />
+            </div>
+          </div>
+          <ul className="grid grid-cols-1 gap-x-8 sm:grid-cols-2 xl:grid-cols-4">
+            {db.tables.map((t) => (
+              <li
+                key={t.name}
+                className="flex items-center justify-between gap-3 border-border border-b py-2 text-[13px]"
+              >
+                <span className="truncate font-mono">{t.name}</span>
+                <span className="tabular shrink-0 font-semibold">
+                  {new Intl.NumberFormat('en-ZA').format(t.rows)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Card>
   )
 }

@@ -219,13 +219,14 @@ export const platformRoutes = new Hono<AppEnv>()
       )
       .all<{ name: string }>()
     const names = tables.results.map((t) => t.name).filter((n) => /^[a-z0-9_]+$/.test(n))
-    // One round trip for every count (D1 refuses one big UNION: too many terms in a SELECT).
-    const batched = names.length
-      ? await d1.batch<{ name: string; rows: number }>(
-          names.map((n) => d1.prepare(`select '${n}' as name, count(*) as rows from "${n}"`)),
-        )
-      : []
-    const counts = { results: batched.flatMap((r) => r.results) }
+    // Every count in ONE query (one column per table): the free plan allows 50 queries a request,
+    // and D1 refuses one big UNION (too many terms in a compound SELECT).
+    const row = names.length
+      ? await d1
+          .prepare(`select ${names.map((n) => `(select count(*) from "${n}") as "${n}"`).join(', ')}`)
+          .first<Record<string, number>>()
+      : null
+    const counts = { results: names.map((name) => ({ name, rows: Number(row?.[name] ?? 0) })) }
     const probe = await d1.prepare('select 1').run()
     const size = (probe.meta as { size_after?: number }).size_after
     let migration: string | null = null

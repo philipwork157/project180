@@ -107,7 +107,7 @@
 <header class="hero">
   <div class="kicker">Project 180 · TRAIN. FUEL. FEEL. LIVE.</div>
   <h1>How Project 180 works</h1>
-  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>17 November 2026</b>.</p>
+  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>19 November 2026</b>.</p>
 </header>
 
 <div class="layout">
@@ -122,6 +122,7 @@
     <a href="#database">Database and migrations</a>
     <a href="#deploy">Deploying</a>
     <a href="#env">Environment and secrets</a>
+    <a href="#golive">Going live checklist</a>
     <a href="#jobs">Scheduled jobs</a>
     <a href="#watching">Errors and records</a>
     <a href="#tests">Tests and checks</a>
@@ -315,6 +316,55 @@ bun run deploy         # live, when dev looks right</code></pre>
       </table></div>
     </section>
 
+    <section class="card" id="golive">
+      <h2>Going live checklist</h2>
+      <p class="lead">Everything the live site needs, once. Live keys are always new ones: never reuse a dev key on live. Secrets go on <b>both</b> Workers with the same value: run each command in <code>apps/app</code> and again in <code>apps/admin</code> (no <code>--env</code> means live).</p>
+      <h3>1. Cloudflare</h3>
+      <ul>
+        <li><b>Workers Paid plan</b> ($5 a month): more queries per request, 30 days of database restore points, 7 days of logs.</li>
+        <li><b>Live database:</b> <code>cd apps/app &amp;&amp; bunx wrangler d1 create project180-db</code>, then paste the printed id into <code>database_id</code> at the top of <b>both</b> <code>apps/app/wrangler.jsonc</code> and <code>apps/admin/wrangler.jsonc</code> (it's <code>00000000-…</code> now).</li>
+        <li><b>Photo storage:</b> <code>bunx wrangler r2 bucket create project180-media</code>.</li>
+        <li><b>Domains:</b> <code>project180.co.za</code> and <code>admin.project180.co.za</code> are created on the first deploy (the zone must be in this Cloudflare account).</li>
+        <li><b>Turnstile:</b> a "Project 180 live" widget for <code>project180.co.za</code> and <code>admin.project180.co.za</code>.</li>
+        <li><b>Web Analytics:</b> if it's switched on for the zone, Cloudflare adds a script the security settings block (a console error, nothing breaks). Turn off its automatic setup, or ask to allow it.</li>
+      </ul>
+      <h3>2. Amazon SES (email)</h3>
+      <ul>
+        <li>Production access in <b>af-south-1</b> (Cape Town): leaving the sandbox is per region, so check it's that one.</li>
+        <li><code>project180.co.za</code> verified as a domain in af-south-1, with its DKIM records in Cloudflare DNS (plus SPF and a DMARC record so mail lands in inboxes).</li>
+        <li>A new IAM user for live with only <code>ses:SendEmail</code>; its access key pair becomes the two AWS secrets below.</li>
+      </ul>
+      <h3>3. Secrets (on both Workers)</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Secret</th><th>Where it comes from</th><th>Needed?</th></tr></thead>
+        <tbody>
+          <tr><td><code>BETTER_AUTH_SECRET</code></td><td>A new random string: <code>openssl rand -base64 32</code>. Never change it later (it signs everyone out).</td><td>Yes</td></tr>
+          <tr><td><code>TURNSTILE_SECRET_KEY</code></td><td>The live Turnstile widget.</td><td>Yes (deploy refuses without it)</td></tr>
+          <tr><td><code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code></td><td>The live IAM user (SES).</td><td>Yes: without them nobody can confirm their email or reset a password</td></tr>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td>A new key at console.anthropic.com (its own workspace, with a monthly spend limit).</td><td>For food photos and Build with Claude</td></tr>
+          <tr><td><code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code></td><td>A new pair: <code>bunx web-push generate-vapid-keys</code>. Keep it for good.</td><td>For push notifications</td></tr>
+          <tr><td><code>YOUTUBE_API_KEY</code></td><td>Google Cloud, YouTube Data API v3, restricted to that API.</td><td>Optional (video search)</td></tr>
+          <tr><td><code>USDA_API_KEY</code></td><td>api.data.gov (and add <code>,usda</code> to <code>FOOD_BARCODE_PROVIDERS</code>).</td><td>Optional (barcode fallback)</td></tr>
+        </tbody>
+      </table></div>
+      <p>Everything else (addresses, AWS region, sender, models, sign-in length) is already set in <code>wrangler.jsonc</code>.</p>
+      <h3>4. Site keys in files</h3>
+      <ul>
+        <li><code>VITE_TURNSTILE_SITE_KEY=</code> the live widget's site key in <code>apps/app/.env.production</code> and <code>apps/admin/.env.production</code>.</li>
+      </ul>
+      <h3>5. Deploy and first run</h3>
+      <pre><code>bun run check
+bunx wrangler login        # once, for the safety check
+bun run deploy             # checks, applies every migration to the live database, deploys both apps
+bun run admin:create:live  # your platform admin (name+platform@…), then your owner account</code></pre>
+      <ul>
+        <li>Pick the starter library on Platform → Businesses, then fill it: <code>bun run db:seed:remote -- --business "Starter library"</code> and <code>bun run db:recipes:remote -- --business "Starter library"</code>.</li>
+        <li>Check: Platform → System shows every key as set up and sends a test email; sign up on the live app with a real inbox; open both sites with the browser console open and look for errors.</li>
+        <li>Point an uptime monitor at <code>https://project180.co.za/api/health</code> and <code>https://admin.project180.co.za/api/health</code>.</li>
+        <li>Practise one database restore on dev: <code>bunx wrangler d1 time-travel restore project180-db-dev --timestamp=…</code>.</li>
+      </ul>
+    </section>
+
     <section class="card" id="jobs">
       <h2>Scheduled jobs</h2>
       <div class="table-wrap"><table>
@@ -350,6 +400,7 @@ bun run deploy         # live, when dev looks right</code></pre>
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">19 Nov</span> Going live checklist added to this page.</li>
         <li><span class="pill">17 Nov</span> The Platform page is split into its own sidebar pages: Overview, Businesses, Sign-ins, Who did what, Claude and System. The Database card works again (counts run as one batch).</li>
         <li><span class="pill">17 Nov</span> Platform page: Sign-ins (every try to sign in to both apps) and Database (row counts and size). Recipe photos show in the phone app again (service worker allowed to fetch Unsplash). Migration <code>0039_sign_ins</code>.</li>
         <li><span class="pill">17 Nov</span> Invitations by email (new people and people on their own), the who-did-what record and the Errors card with alert emails on the Platform page, first steps for new coaches on Today, "Coached by" in the app, Download my data. Migration <code>0038_records</code>.</li>

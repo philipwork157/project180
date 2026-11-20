@@ -37,7 +37,8 @@ Decide what the photo shows:
 Rules:
 - If the person adds a note, trust it over what you see (for example the weight or how it was cooked).
 - Use realistic portions. When unsure, say so with confidence "low" rather than guessing wildly.
-- Numbers only, no ranges. Calories are kcal; protein, carbs and fat are grams.
+- Numbers only, no ranges. Calories are kcal; protein, carbs, fat, fibre and sugar are grams; sodium is milligrams.
+- Give fibre, sugar and sodium for each food too (typical values for that food and portion); null only when you truly can't tell. On a label, copy them when printed, otherwise null.
 - note: one short sentence when something matters (hidden oil, a portion that is hard to judge), otherwise null.`
 
 const nullableNumber = { type: ['number', 'null'] }
@@ -48,8 +49,11 @@ const macros = {
     protein_g: { type: 'number' },
     carbs_g: { type: 'number' },
     fat_g: { type: 'number' },
+    fibre_g: nullableNumber,
+    sugar_g: nullableNumber,
+    sodium_mg: nullableNumber,
   },
-  required: ['kcal', 'protein_g', 'carbs_g', 'fat_g'],
+  required: ['kcal', 'protein_g', 'carbs_g', 'fat_g', 'fibre_g', 'sugar_g', 'sodium_mg'],
   additionalProperties: false,
 }
 
@@ -69,9 +73,23 @@ const REPLY_SCHEMA = {
           protein_g: { type: 'number' },
           carbs_g: nullableNumber,
           fat_g: nullableNumber,
+          fibre_g: nullableNumber,
+          sugar_g: nullableNumber,
+          sodium_mg: nullableNumber,
           confidence: { type: 'string', enum: [...PHOTO_CONFIDENCE] },
         },
-        required: ['name', 'grams', 'kcal', 'protein_g', 'carbs_g', 'fat_g', 'confidence'],
+        required: [
+          'name',
+          'grams',
+          'kcal',
+          'protein_g',
+          'carbs_g',
+          'fat_g',
+          'fibre_g',
+          'sugar_g',
+          'sodium_mg',
+          'confidence',
+        ],
         additionalProperties: false,
       },
     },
@@ -109,6 +127,10 @@ const replySchema = z.object({
         protein_g: amount(500),
         carbs_g: amount(1000).nullable(),
         fat_g: amount(500).nullable(),
+        // Older answers (and models that skip them) have no extras: missing means unknown.
+        fibre_g: amount(200).nullable().catch(null),
+        sugar_g: amount(500).nullable().catch(null),
+        sodium_mg: amount(20000).nullable().catch(null),
         confidence: z.enum(PHOTO_CONFIDENCE).catch('low'),
       }),
     )
@@ -120,6 +142,9 @@ const replySchema = z.object({
         protein_g: amount(100),
         carbs_g: amount(100),
         fat_g: amount(100),
+        fibre_g: amount(100).nullable().catch(null),
+        sugar_g: amount(100).nullable().catch(null),
+        sodium_mg: amount(40000).nullable().catch(null),
       }),
       serving_g: amount(5000).nullable(),
     })
@@ -149,6 +174,9 @@ export function parseFoodPhotoReply(text: string): Omit<FoodPhotoDraft, 'photosL
           proteinG: roundGrams(i.protein_g),
           carbsG: i.carbs_g === null ? null : roundGrams(i.carbs_g),
           fatG: i.fat_g === null ? null : roundGrams(i.fat_g),
+          fibreG: i.fibre_g == null ? null : roundGrams(i.fibre_g),
+          sugarG: i.sugar_g == null ? null : roundGrams(i.sugar_g),
+          sodiumMg: i.sodium_mg == null ? null : Math.round(i.sodium_mg),
           confidence: i.confidence,
         }))
   const label =
@@ -159,6 +187,10 @@ export function parseFoodPhotoReply(text: string): Omit<FoodPhotoDraft, 'photosL
             proteinG: roundGrams(r.label.per_100g.protein_g),
             carbsG: roundGrams(r.label.per_100g.carbs_g),
             fatG: roundGrams(r.label.per_100g.fat_g),
+            fibreG: r.label.per_100g.fibre_g == null ? null : roundGrams(r.label.per_100g.fibre_g),
+            sugarG: r.label.per_100g.sugar_g == null ? null : roundGrams(r.label.per_100g.sugar_g),
+            sodiumMg:
+              r.label.per_100g.sodium_mg == null ? null : Math.round(r.label.per_100g.sodium_mg),
           },
           servingG: r.label.serving_g === null ? null : roundGrams(r.label.serving_g),
         }

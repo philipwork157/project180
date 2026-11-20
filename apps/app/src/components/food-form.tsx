@@ -1,8 +1,15 @@
-import { MEAL_LABELS, MEALS, type Meal } from '@project180/shared'
+import { MEAL_LABELS, MEALS, type Meal, type NutrientKey, perGram } from '@project180/shared'
 import { Button, ChoiceChips, Field, Input } from '@project180/ui'
 import { Plus } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
-import { amountText, type FoodDraftItem, parseAmount } from '../lib/food'
+import {
+  amountText,
+  type FoodDraftItem,
+  followGrams,
+  type NutrientText,
+  nutrientText,
+  parseAmount,
+} from '../lib/food'
 
 const MEAL_OPTIONS = MEALS.map((m) => ({ value: m, label: MEAL_LABELS[m] }))
 
@@ -27,6 +34,7 @@ export function AmountInput({
   placeholder,
   compact,
   label,
+  onBlur,
 }: {
   id?: string
   value: string
@@ -35,6 +43,7 @@ export function AmountInput({
   compact?: boolean
   /** For fields without a visible label (the photo review's small boxes). */
   label?: string
+  onBlur?: () => void
 }) {
   return (
     <Input
@@ -47,38 +56,16 @@ export function AmountInput({
       placeholder={placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value.replace(/[^\d.,]/g, ''))}
+      onBlur={onBlur}
       className="tabular"
     />
   )
 }
 
-interface FormValues {
-  name: string
-  grams: string
-  kcal: string
-  proteinG: string
-  carbsG: string
-  fatG: string
-  fibreG: string
-  sugarG: string
-  sodiumMg: string
-}
-
-const toValues = (food?: Partial<FoodDraftItem>): FormValues => ({
-  name: food?.name ?? '',
-  grams: amountText(food?.grams),
-  kcal: amountText(food?.kcal),
-  proteinG: amountText(food?.proteinG),
-  carbsG: amountText(food?.carbsG),
-  fatG: amountText(food?.fatG),
-  fibreG: amountText(food?.fibreG),
-  sugarG: amountText(food?.sugarG),
-  sodiumMg: amountText(food?.sodiumMg),
-})
-
 /**
  * Name, amount and the numbers for one food. Calories or protein is enough; carbs, fat and the
- * amount are optional. The id it saves with stays the same if Save is tapped again after a
+ * amount are optional. Once there's an amount and a number, changing the amount scales every
+ * number with it (a 100 g banana becomes 150 g with half as much again of everything). The id it saves with stays the same if Save is tapped again after a
  * dropped connection, so the food is never saved twice.
  */
 export function FoodForm({
@@ -97,15 +84,27 @@ export function FoodForm({
   /** Shown under the fields (the meal picker, a delete button). */
   extra?: ReactNode
 }) {
-  const [values, setValues] = useState(() => toValues(initial))
+  const [name, setName] = useState(initial?.name ?? '')
+  const [amounts, setAmounts] = useState(() => ({
+    grams: amountText(initial?.grams),
+    numbers: nutrientText(initial ?? {}),
+    basis: perGram(initial ?? {}, initial?.grams),
+  }))
+  const values: NutrientText & { name: string; grams: string } = {
+    ...amounts.numbers,
+    name,
+    grams: amounts.grams,
+  }
   const [clientUuid] = useState(() => initial?.clientUuid ?? crypto.randomUUID())
   const [tried, setTried] = useState(false)
   // Fibre, sugar and sodium tucked away unless the food already has some.
   const [more, setMore] = useState(
     () => initial?.fibreG != null || initial?.sugarG != null || initial?.sodiumMg != null,
   )
-  const set = (key: keyof FormValues) => (value: string) =>
-    setValues((v) => ({ ...v, [key]: value }))
+  // The amount: every number follows it. A number: kept as typed, and the amount follows it next.
+  const onGrams = (grams: string) => setAmounts((a) => followGrams(a, { grams }))
+  const set = (key: NutrientKey) => (value: string) =>
+    setAmounts((a) => followGrams(a, { key, value }))
   const kcal = parseAmount(values.kcal)
   const proteinG = parseAmount(values.proteinG)
   const nameError = values.name.trim() ? undefined : 'Give it a name'
@@ -144,12 +143,22 @@ export function FoodForm({
               maxLength={120}
               placeholder="e.g. Chicken wrap"
               value={values.name}
-              onChange={(e) => set('name')(e.target.value)}
+              onChange={(e) => setName(e.target.value)}
             />
           )}
         </Field>
-        <Field label="Amount (g)" hint="Optional">
-          {(id) => <AmountInput id={id} value={values.grams} onChange={set('grams')} />}
+        <Field
+          label="Amount (g)"
+          hint={amounts.basis ? 'The numbers follow the amount' : 'Optional'}
+        >
+          {(id) => (
+            <AmountInput
+              id={id}
+              value={values.grams}
+              onChange={onGrams}
+              onBlur={() => setAmounts((a) => followGrams(a, { settle: true }))}
+            />
+          )}
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

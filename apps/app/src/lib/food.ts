@@ -9,13 +9,18 @@ import {
   foodStreakQuery,
   savedMealsQuery,
 } from '@project180/client'
-import type {
-  BarcodeProduct,
-  FoodDay,
-  FoodPhotoDraft,
-  FoodSource,
-  Meal,
-  SavedMeal,
+import {
+  type BarcodeProduct,
+  type FoodDay,
+  type FoodPhotoDraft,
+  type FoodSource,
+  forGrams,
+  type Meal,
+  NUTRIENT_KEYS,
+  type NutrientKey,
+  type Nutrients,
+  perGram,
+  type SavedMeal,
 } from '@project180/shared'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
@@ -128,6 +133,51 @@ export function parseAmount(value: string): number | null {
 }
 
 export const amountText = (n: number | null | undefined) => (n == null ? '' : String(n))
+
+/** A food's numbers as typed in a form (empty = unknown). */
+export type NutrientText = Record<NutrientKey, string>
+
+export const nutrientText = (food: Partial<Nutrients>): NutrientText =>
+  Object.fromEntries(NUTRIENT_KEYS.map((k) => [k, amountText(food[k])])) as NutrientText
+
+export const parseNutrients = (text: NutrientText): Nutrients =>
+  Object.fromEntries(NUTRIENT_KEYS.map((k) => [k, parseAmount(text[k])])) as Nutrients
+
+/**
+ * The numbers follow the grams. Given the form's current numbers, its per-gram values (null
+ * until there's a weight) and what changed, returns the new numbers and per-gram values:
+ * - the amount changed: every number is worked out again from the per-gram values (with nothing
+ *   to work from yet it just sets the weight; leaving the field, `{ settle: true }`, then makes
+ *   it the weight the numbers are for, so typing "1", "15", "150" never scales by each digit);
+ * - one number changed: it's kept as typed and becomes part of the per-gram values, so later
+ *   amount changes keep the correction in proportion.
+ */
+export function followGrams(
+  state: { grams: string; numbers: NutrientText; basis: Nutrients | null },
+  change: { grams: string } | { key: NutrientKey; value: string } | { settle: true },
+): { grams: string; numbers: NutrientText; basis: Nutrients | null } {
+  if ('settle' in change) {
+    if (state.basis) return state
+    return { ...state, basis: perGram(parseNutrients(state.numbers), parseAmount(state.grams)) }
+  }
+  if ('grams' in change) {
+    const grams = parseAmount(change.grams)
+    if (grams === null) return { ...state, grams: change.grams }
+    if (state.basis && grams > 0)
+      return {
+        grams: change.grams,
+        numbers: nutrientText(forGrams(state.basis, grams)),
+        basis: state.basis,
+      }
+    return { ...state, grams: change.grams }
+  }
+  const numbers = { ...state.numbers, [change.key]: change.value }
+  return {
+    grams: state.grams,
+    numbers,
+    basis: perGram(parseNutrients(numbers), parseAmount(state.grams)) ?? state.basis,
+  }
+}
 
 /** Looks a barcode up (the server tries each provider and keeps a copy). 404 = nobody knows it. */
 export function useBarcodeLookup() {

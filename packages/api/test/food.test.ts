@@ -246,6 +246,9 @@ describe('food photos', () => {
             protein_g: 6.04,
             carbs_g: 63,
             fat_g: 1,
+            fibre_g: 2.04,
+            sugar_g: 0.5,
+            sodium_mg: 12.6,
             confidence: 'medium',
           },
           {
@@ -272,6 +275,9 @@ describe('food photos', () => {
           proteinG: 6,
           carbsG: 63,
           fatG: 1,
+          fibreG: 2,
+          sugarG: 0.5,
+          sodiumMg: 13,
           confidence: 'medium',
         },
         {
@@ -281,6 +287,10 @@ describe('food photos', () => {
           proteinG: 0,
           carbsG: null,
           fatG: 30,
+          // Missing extras mean unknown.
+          fibreG: null,
+          sugarG: null,
+          sodiumMg: null,
           confidence: 'low',
         },
       ],
@@ -309,7 +319,15 @@ describe('food photos', () => {
       }),
     )
     expect(label?.label).toEqual({
-      per100g: { kcal: 380, proteinG: 12.5, carbsG: 64, fatG: 7.2 },
+      per100g: {
+        kcal: 380,
+        proteinG: 12.5,
+        carbsG: 64,
+        fatG: 7.2,
+        fibreG: null,
+        sugarG: null,
+        sodiumMg: null,
+      },
       servingG: 45,
     })
     const shoe = parseFoodPhotoReply(
@@ -375,6 +393,9 @@ describe('food photos', () => {
         proteinG: 27,
         carbsG: 1,
         fatG: 3,
+        fibreG: null,
+        sugarG: null,
+        sodiumMg: null,
         confidence: 'high',
       },
     ])

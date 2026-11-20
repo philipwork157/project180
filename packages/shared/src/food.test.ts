@@ -5,9 +5,11 @@ import {
   foodReminderNotification,
   foodSearchInput,
   foodStreak,
+  forGrams,
   mealForHour,
   normalizeFoodQuery,
   nutritionTargetsInput,
+  perGram,
   rankFoodResults,
   scaleLabel,
   sumExtras,
@@ -186,5 +188,44 @@ describe('food reminder in the bell', () => {
     expect(foodReminderNotification({ ...base, hour: 18 })).toBeNull()
     expect(foodReminderNotification({ ...base, mealsToday: 2 })).toBeNull()
     expect(foodReminderNotification({ ...base, on: false })).toBeNull()
+  })
+})
+
+describe('numbers follow the grams', () => {
+  const banana = {
+    kcal: 18,
+    proteinG: 0.2,
+    carbsG: 4.6,
+    fatG: 0.1,
+    fibreG: 0.5,
+    sugarG: 2.4,
+    sodiumMg: 0,
+  }
+
+  it('scales every number from the weight it was estimated at', () => {
+    const basis = perGram(banana, 20)
+    expect(basis).not.toBeNull()
+    expect(forGrams(basis as NonNullable<typeof basis>, 80)).toEqual({
+      kcal: 72,
+      proteinG: 0.8,
+      carbsG: 18.4,
+      fatG: 0.4,
+      fibreG: 2,
+      sugarG: 9.6,
+      sodiumMg: 0,
+    })
+  })
+
+  it('adds no rounding errors while typing digit by digit', () => {
+    const basis = perGram({ kcal: 89, proteinG: 1.1, carbsG: null }, 100)
+    if (!basis) throw new Error('no basis')
+    for (const g of [1, 10, 100]) forGrams(basis, g)
+    expect(forGrams(basis, 100)).toMatchObject({ kcal: 89, proteinG: 1.1, carbsG: null })
+    expect(forGrams(basis, 0)).toMatchObject({ kcal: 0, proteinG: 0 })
+  })
+
+  it('has nothing to work from without a weight', () => {
+    expect(perGram(banana, null)).toBeNull()
+    expect(perGram(banana, 0)).toBeNull()
   })
 })

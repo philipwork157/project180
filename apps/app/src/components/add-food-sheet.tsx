@@ -7,7 +7,10 @@ import {
   kcalLabel,
   MEAL_LABELS,
   type Meal,
+  type NutrientKey,
+  type Nutrients,
   normalizeFoodQuery,
+  perGram,
   type RecentFood,
   type SavedMeal,
   scaleExtras,
@@ -33,7 +36,11 @@ import { useEffect, useId, useRef, useState } from 'react'
 import {
   amountText,
   type FoodDraftItem,
+  followGrams,
+  type NutrientText,
+  nutrientText,
   parseAmount,
+  parseNutrients,
   SEARCH_MIN_CHARS,
   useAddFood,
   useBarcodeLookup,
@@ -77,6 +84,7 @@ function productDraft(
         name: product.brand ? `${product.name} (${product.brand})` : product.name,
         grams,
         ...amount,
+        ...scaleExtras(product.per100g, grams),
         confidence: 'high',
       },
     ],
@@ -702,33 +710,39 @@ interface ReviewRow {
   clientUuid: string
   name: string
   grams: string
-  kcal: string
-  proteinG: string
-  carbsG: string
-  fatG: string
+  numbers: NutrientText
+  /** Per-gram values: change the grams and every number follows (null without a weight). */
+  basis: Nutrients | null
   low: boolean
+  /** Fibre, sugar and sodium shown. */
+  more: boolean
 }
 
 const rowOf = (i: FoodPhotoDraft['items'][number]): ReviewRow => ({
   clientUuid: crypto.randomUUID(),
   name: i.name,
   grams: amountText(i.grams),
-  kcal: amountText(i.kcal),
-  proteinG: amountText(i.proteinG),
-  carbsG: amountText(i.carbsG),
-  fatG: amountText(i.fatG),
+  numbers: nutrientText(i),
+  basis: perGram(i, i.grams),
   low: i.confidence === 'low',
+  more: false,
 })
 
-const itemOf = (r: ReviewRow): FoodDraftItem => ({
-  clientUuid: r.clientUuid,
-  name: r.name.trim(),
-  grams: parseAmount(r.grams),
-  kcal: parseAmount(r.kcal) ?? 0,
-  proteinG: parseAmount(r.proteinG) ?? 0,
-  carbsG: parseAmount(r.carbsG),
-  fatG: parseAmount(r.fatG),
-})
+const itemOf = (r: ReviewRow): FoodDraftItem => {
+  const n = parseNutrients(r.numbers)
+  return {
+    clientUuid: r.clientUuid,
+    name: r.name.trim(),
+    grams: parseAmount(r.grams),
+    kcal: n.kcal ?? 0,
+    proteinG: n.proteinG ?? 0,
+    carbsG: n.carbsG,
+    fatG: n.fatG,
+    fibreG: n.fibreG,
+    sugarG: n.sugarG,
+    sodiumMg: n.sodiumMg,
+  }
+}
 
 /** The editable draft from a photo. A nutrition label gets one "how much did you eat" box. */
 function PhotoReview({
@@ -768,24 +782,28 @@ function PhotoReview({
     )
   }
 
-  const update = (i: number, key: keyof ReviewRow) => (value: string) =>
-    setRows((list) => list.map((r, n) => (n === i ? { ...r, [key]: value } : r)))
-  // A label: the one food follows the amount eaten.
+  const setRow = (i: number, change: (r: ReviewRow) => ReviewRow) =>
+    setRows((list) => list.map((r, n) => (n === i ? change(r) : r)))
+  const rename = (i: number) => (name: string) => setRow(i, (r) => ({ ...r, name }))
+  // Change the grams and every number follows; change a number and it's kept as typed.
+  const onGrams = (i: number) => (grams: string) =>
+    setRow(i, (r) => ({ ...r, ...followGrams(r, { grams }) }))
+  const onNumber = (i: number, key: NutrientKey) => (value: string) =>
+    setRow(i, (r) => ({ ...r, ...followGrams(r, { key, value }) }))
+  // A label: the one food follows the amount eaten, from the label's own values per 100 g.
   const onEaten = (value: string) => {
     setEaten(value)
     const grams = parseAmount(value)
     if (!label || grams === null) return
-    const m = scaleLabel(label.per100g, grams)
+    const numbers = { ...scaleLabel(label.per100g, grams), ...scaleExtras(label.per100g, grams) }
     setRows((list) =>
       list.map((r, n) =>
         n === 0
           ? {
               ...r,
               grams: amountText(grams),
-              kcal: amountText(m.kcal),
-              proteinG: amountText(m.proteinG),
-              carbsG: amountText(m.carbsG),
-              fatG: amountText(m.fatG),
+              numbers: nutrientText(numbers),
+              basis: perGram(numbers, grams) ?? r.basis,
             }
           : r,
       ),
@@ -823,7 +841,7 @@ function PhotoReview({
                   aria-label="Food"
                   value={r.name}
                   maxLength={120}
-                  onChange={(e) => update(i, 'name')(e.target.value)}
+                  onChange={(e) => rename(i)(e.target.value)}
                   className="bg-surface font-semibold"
                 />
               </div>
@@ -841,12 +859,60 @@ function PhotoReview({
               </Chip>
             )}
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-              <SmallAmount label="Grams" value={r.grams} onChange={update(i, 'grams')} />
-              <SmallAmount label="kcal" value={r.kcal} onChange={update(i, 'kcal')} />
-              <SmallAmount label="Protein g" value={r.proteinG} onChange={update(i, 'proteinG')} />
-              <SmallAmount label="Carbs g" value={r.carbsG} onChange={update(i, 'carbsG')} />
-              <SmallAmount label="Fat g" value={r.fatG} onChange={update(i, 'fatG')} />
+              <SmallAmount
+                label="Grams"
+                value={r.grams}
+                onChange={onGrams(i)}
+                onBlur={() =>
+                  setRow(i, (row) => ({ ...row, ...followGrams(row, { settle: true }) }))
+                }
+              />
+              <SmallAmount label="kcal" value={r.numbers.kcal} onChange={onNumber(i, 'kcal')} />
+              <SmallAmount
+                label="Protein g"
+                value={r.numbers.proteinG}
+                onChange={onNumber(i, 'proteinG')}
+              />
+              <SmallAmount
+                label="Carbs g"
+                value={r.numbers.carbsG}
+                onChange={onNumber(i, 'carbsG')}
+              />
+              <SmallAmount label="Fat g" value={r.numbers.fatG} onChange={onNumber(i, 'fatG')} />
             </div>
+            {r.more ? (
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                <SmallAmount
+                  label="Fibre g"
+                  value={r.numbers.fibreG}
+                  onChange={onNumber(i, 'fibreG')}
+                />
+                <SmallAmount
+                  label="Sugar g"
+                  value={r.numbers.sugarG}
+                  onChange={onNumber(i, 'sugarG')}
+                />
+                <SmallAmount
+                  label="Sodium mg"
+                  value={r.numbers.sodiumMg}
+                  onChange={onNumber(i, 'sodiumMg')}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setRow(i, (row) => ({ ...row, more: true }))}
+                className="-my-1 flex min-h-11 items-center gap-1 self-start font-semibold text-[13px] text-brand-text"
+              >
+                <Plus className="size-4" aria-hidden />
+                Fibre, sugar and sodium
+              </button>
+            )}
+            <p className="text-[12px] text-ink-muted">
+              {r.basis
+                ? 'Change the grams and the numbers follow.'
+                : 'Add the grams to scale the numbers.'}
+            </p>
           </li>
         ))}
       </ul>
@@ -861,22 +927,7 @@ function PhotoReview({
           {error}
         </p>
       )}
-      <Button
-        size="lg"
-        block
-        loading={saving}
-        disabled={!named}
-        onClick={() =>
-          // A label also knows fibre, sugar and sodium: scaled to what was eaten.
-          onSave(
-            label
-              ? items.map((it, n) =>
-                  n === 0 ? { ...it, ...scaleExtras(label.per100g, it.grams ?? 100) } : it,
-                )
-              : items,
-          )
-        }
-      >
+      <Button size="lg" block loading={saving} disabled={!named} onClick={() => onSave(items)}>
         Save {items.length === 1 ? 'food' : `${items.length} foods`}
       </Button>
       {credit && (
@@ -911,10 +962,12 @@ function SmallAmount({
   label,
   value,
   onChange,
+  onBlur,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  onBlur?: () => void
 }) {
   const id = useId()
   return (
@@ -925,7 +978,7 @@ function SmallAmount({
       >
         {label}
       </label>
-      <AmountInput id={id} value={value} onChange={onChange} />
+      <AmountInput id={id} value={value} onChange={onChange} onBlur={onBlur} />
     </div>
   )
 }

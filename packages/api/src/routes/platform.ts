@@ -223,7 +223,9 @@ export const platformRoutes = new Hono<AppEnv>()
     // and D1 refuses one big UNION (too many terms in a compound SELECT).
     const row = names.length
       ? await d1
-          .prepare(`select ${names.map((n) => `(select count(*) from "${n}") as "${n}"`).join(', ')}`)
+          .prepare(
+            `select ${names.map((n) => `(select count(*) from "${n}") as "${n}"`).join(', ')}`,
+          )
           .first<Record<string, number>>()
       : null
     const counts = { results: names.map((name) => ({ name, rows: Number(row?.[name] ?? 0) })) }

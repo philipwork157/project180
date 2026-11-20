@@ -132,6 +132,10 @@ export interface FoodPhotoItem {
   proteinG: number
   carbsG: number | null
   fatG: number | null
+  /** Typical values for the food and portion; null when Claude couldn't tell. */
+  fibreG: number | null
+  sugarG: number | null
+  sodiumMg: number | null
   confidence: PhotoConfidence
 }
 
@@ -291,6 +295,52 @@ export function scaleExtras(per100g: Partial<NutrientExtras>, grams: number): Nu
     sugarG: at(per100g.sugarG, roundGrams),
     sodiumMg: at(per100g.sodiumMg, Math.round),
   }
+}
+
+/** Every number a food carries, in the order forms show them. */
+export const NUTRIENT_KEYS = [
+  'kcal',
+  'proteinG',
+  'carbsG',
+  'fatG',
+  'fibreG',
+  'sugarG',
+  'sodiumMg',
+] as const
+export type NutrientKey = (typeof NUTRIENT_KEYS)[number]
+export type Nutrients = Record<NutrientKey, number | null>
+
+/**
+ * How much of each nutrient is in one gram, from a food's numbers and its weight: what lets the
+ * numbers follow the grams. Null without a weight (nothing to work from). Kept unrounded, so
+ * typing 1, 10, 100 never adds up rounding errors.
+ */
+export function perGram(food: Partial<Nutrients>, grams: number | null | undefined) {
+  if (!grams || grams <= 0) return null
+  const basis = {} as Nutrients
+  for (const key of NUTRIENT_KEYS) {
+    const v = food[key]
+    basis[key] = v == null ? null : v / grams
+  }
+  return basis
+}
+
+/** A food's numbers for a weight, from its per-gram values (unknowns stay null). */
+export function forGrams(basis: Nutrients, grams: number): Nutrients {
+  const g = Math.max(0, grams)
+  const out = {} as Nutrients
+  for (const key of NUTRIENT_KEYS) {
+    const v = basis[key]
+    out[key] =
+      v == null
+        ? null
+        : key === 'kcal'
+          ? roundKcal(v * g)
+          : key === 'sodiumMg'
+            ? Math.round(v * g)
+            : roundGrams(v * g)
+  }
+  return out
 }
 
 /** The meal a new food most likely belongs to, from the local hour (0–23). */

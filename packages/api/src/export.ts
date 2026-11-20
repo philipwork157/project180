@@ -6,6 +6,7 @@ import {
   type Db,
   exercises,
   foodEntries,
+  foodFavourites,
   messages,
   nutritionTargets,
   savedMeals,
@@ -36,6 +37,7 @@ export async function exportMyData(db: Db, me: Me) {
     steps,
     meals,
     chat,
+    favourites,
   ] = await Promise.all([
     db
       .select({
@@ -153,6 +155,17 @@ export async function exportMyData(db: Db, me: Me) {
       .from(messages)
       .where(eq(messages.clientId, me.id))
       .orderBy(asc(messages.id)),
+    db
+      .select({
+        name: foodFavourites.name,
+        grams: foodFavourites.grams,
+        kcal: foodFavourites.kcal,
+        proteinG: foodFavourites.proteinG,
+        carbsG: foodFavourites.carbsG,
+        fatG: foodFavourites.fatG,
+      })
+      .from(foodFavourites)
+      .where(eq(foodFavourites.userId, me.id)),
   ])
 
   const setsBySession = new Map<number, Array<Omit<(typeof sets)[number], 'sessionId'>>>()
@@ -188,6 +201,7 @@ export async function exportMyData(db: Db, me: Me) {
     activities,
     steps,
     savedMeals: meals,
+    favouriteFoods: favourites,
     chat: chat.map((m) => ({
       from: m.senderId === me.id ? 'you' : 'coach',
       body: m.body,

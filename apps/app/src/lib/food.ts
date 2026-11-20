@@ -4,6 +4,7 @@ import {
   api,
   apiForm,
   foodDayQuery,
+  foodFavouritesQuery,
   foodRecentQuery,
   foodSearchQuery,
   foodStreakQuery,
@@ -11,8 +12,10 @@ import {
 } from '@project180/client'
 import {
   type BarcodeProduct,
+  type FavouriteFood,
   type FoodDay,
   type FoodPhotoDraft,
+  type FoodSearchResult,
   type FoodSource,
   forGrams,
   type Meal,
@@ -275,4 +278,75 @@ export function useDeleteSavedMeal() {
       ),
     onError: () => void queryClient.invalidateQueries({ queryKey: savedMealsQuery.queryKey }),
   })
+}
+
+/** "Type it in words": a description turned into foods to check (counts as a photo estimate). */
+export function useDescribeFood() {
+  return useMutation({
+    mutationFn: async (text: string) =>
+      (
+        await api<{ draft: FoodPhotoDraft }>('/me/food/describe', {
+          method: 'POST',
+          body: { text },
+        })
+      ).draft,
+  })
+}
+
+/** Star or unstar a food. The list updates from the server's reply. */
+export function useFavourite() {
+  const qc = useQueryClient()
+  const put = ({ favourites }: { favourites: FavouriteFood[] }) =>
+    qc.setQueryData(foodFavouritesQuery.queryKey, favourites)
+  const star = useMutation({
+    mutationFn: (food: Omit<FoodDraftItem, 'clientUuid'>) =>
+      api<{ favourites: FavouriteFood[] }>('/me/food/favourites', { method: 'POST', body: food }),
+    onSuccess: put,
+  })
+  const unstar = useMutation({
+    mutationFn: (id: number) =>
+      api<{ favourites: FavouriteFood[] }>(`/me/food/favourites/${id}`, { method: 'DELETE' }),
+    onSuccess: put,
+  })
+  return { star, unstar }
+}
+
+/**
+ * "Look it up": real numbers for a food's name at an amount. The food database first (free,
+ * real values per 100 g); only when it knows nothing, Claude from the name and amount (counts
+ * as a photo estimate). Answers the numbers for `grams` (or one portion), and where they came
+ * from.
+ */
+export async function lookUpFood(
+  name: string,
+  grams: number | null,
+): Promise<{ grams: number; numbers: Nutrients; from: string }> {
+  const q = name.trim().slice(0, 60)
+  const results = await api<{ results: FoodSearchResult[] }>(
+    `/me/food/search?q=${encodeURIComponent(q)}`,
+  )
+    .then((r) => r.results)
+    .catch(() => [] as FoodSearchResult[])
+  const hit = results[0]
+  if (hit) {
+    const g = grams ?? hit.servingG ?? 100
+    const per100 = { ...hit.per100g }
+    const basis = perGram(per100, 100)
+    if (basis) return { grams: g, numbers: forGrams(basis, g), from: hit.source.label }
+  }
+  const draft = (
+    await api<{ draft: FoodPhotoDraft }>('/me/food/describe', {
+      method: 'POST',
+      body: { text: grams ? `${grams} g ${q}` : q },
+    })
+  ).draft
+  const item = draft.items[0]
+  if (!item) throw new Error('Nothing found for that name.')
+  const g = grams ?? item.grams ?? 100
+  const basis = perGram(item, item.grams)
+  return {
+    grams: g,
+    numbers: basis ? forGrams(basis, g) : (item as unknown as Nutrients),
+    from: 'Claude’s estimate',
+  }
 }

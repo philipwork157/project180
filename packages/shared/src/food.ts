@@ -19,7 +19,7 @@ export const MEAL_LABELS: Record<Meal, string> = {
 }
 
 /** How a food was added. */
-export const FOOD_SOURCES = ['manual', 'photo', 'barcode', 'search', 'recipe'] as const
+export const FOOD_SOURCES = ['manual', 'photo', 'barcode', 'search', 'recipe', 'describe'] as const
 export type FoodSource = (typeof FOOD_SOURCES)[number]
 
 /**
@@ -436,6 +436,22 @@ export const nutritionTargetsInput = z.object({
 
 /** A hint typed with a photo, e.g. "200 g chicken, cooked in oil". */
 export const foodPhotoHint = z.string().trim().max(200)
+
+/** "Type it in words": what someone ate, in their own words ("2 eggs, toast with butter"). */
+export const foodDescribeInput = z.object({
+  text: z.string().trim().min(2, 'Say what you ate').max(500),
+})
+
+/** A food starred to log again in one tap. */
+export interface FavouriteFood extends RecentFood {
+  id: number
+}
+
+/** Starring a food: the same numbers a food is logged with. */
+export const favouriteInput = foodItemInput
+
+/** Favourites one person can keep. */
+export const MAX_FAVOURITES = 100
 
 /** Photo estimates as the owner sees them, and whether this site has a Claude key at all. */
 export interface FoodPhotoSettings {

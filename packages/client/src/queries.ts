@@ -13,6 +13,7 @@ import type {
   EnrollmentSummary,
   ErrorSummary,
   Exercise,
+  FavouriteFood,
   FeedbackNews,
   FoodDay,
   FoodPhotoSettings,
@@ -647,4 +648,11 @@ export const platformSignInsQuery = (filters: {
 export const platformDatabaseQuery = queryOptions({
   queryKey: ['platform', 'database'],
   queryFn: async () => (await api<{ database: DatabaseSummary }>('/platform/database')).database,
+})
+
+/** Foods the signed-in person starred to log again in one tap. */
+export const foodFavouritesQuery = queryOptions({
+  queryKey: ['food', 'favourites'],
+  queryFn: async () =>
+    (await api<{ favourites: FavouriteFood[] }>('/me/food/favourites')).favourites,
 })

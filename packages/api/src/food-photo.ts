@@ -234,6 +234,20 @@ function unreadable(
   })
 }
 
+/** How Claude reads a description in words ("2 eggs and toast") instead of a photo. */
+const TEXT_INSTRUCTIONS = `You estimate nutrition from what someone says they ate, for a fitness coaching app in South Africa.
+
+Read what the person wrote:
+- "meal": list each separate food or drink they mention, with a short everyday name a South African would use. Use the amounts they give (2 eggs, a cup, 150 g); otherwise assume one ordinary portion. Estimate the grams and the calories, protein, carbs and fat for that amount, and count oil, butter, milk or sugar they mention in the food it goes with.
+- "not_food": nothing in it is food or drink. Return no items.
+Always return label as null.
+
+Rules:
+- Numbers only, no ranges. Calories are kcal; protein, carbs, fat, fibre and sugar are grams; sodium is milligrams.
+- Give fibre, sugar and sodium for each food too (typical values); null only when you truly can't tell.
+- When an amount is a guess, use confidence "low".
+- note: one short sentence when something matters (a portion you had to guess), otherwise null.`
+
 /**
  * Asks Claude what's in the photo. Throws a friendly 502/503 when it can't answer. `meter` is
  * filled in as it goes (tokens, time, outcome) so the call can be saved either way.
@@ -244,10 +258,43 @@ export async function estimateFoodPhoto(
   hint: string,
   meter: ClaudeMeter,
 ): Promise<Omit<FoodPhotoDraft, 'photosLeft'>> {
-  const key = env.ANTHROPIC_API_KEY
-  if (!key) throw new HTTPException(503, { message: 'Photo estimates aren’t set up yet.' })
-  const { model } = meter
   meter.hadNote = Boolean(hint)
+  return askClaude(env, meter, INSTRUCTIONS, [
+    {
+      type: 'image',
+      source: { type: 'base64', media_type: photo.type, data: toBase64(photo.bytes) },
+    },
+    { type: 'text', text: hint ? `Note from the person: ${hint}` : 'No note from the person.' },
+  ])
+}
+
+/**
+ * "Type it in words": the same estimate from a description instead of a photo (cheaper: no
+ * image). Also how "Look it up" asks about one renamed food the database doesn't know.
+ */
+export async function estimateFoodText(
+  env: Bindings,
+  text: string,
+  meter: ClaudeMeter,
+): Promise<Omit<FoodPhotoDraft, 'photosLeft'>> {
+  meter.hadNote = true
+  const draft = await askClaude(env, meter, TEXT_INSTRUCTIONS, [
+    { type: 'text', text: `What the person ate: ${text}` },
+  ])
+  // Saved as "words" in the Claude costs, so photos and descriptions can be told apart.
+  meter.kind = 'words'
+  return { ...draft, label: null, kind: draft.kind === 'label' ? 'meal' : draft.kind }
+}
+
+async function askClaude(
+  env: Bindings,
+  meter: ClaudeMeter,
+  system: string,
+  content: unknown[],
+): Promise<Omit<FoodPhotoDraft, 'photosLeft'>> {
+  const key = env.ANTHROPIC_API_KEY
+  if (!key) throw new HTTPException(503, { message: 'Food estimates aren’t set up yet.' })
+  const { model } = meter
   const started = Date.now()
   const fail = (reason: string, detail?: unknown) => {
     meter.durationMs = Date.now() - started
@@ -266,22 +313,8 @@ export async function estimateFoodPhoto(
         model,
         // Room for the model's own thinking before the short JSON answer.
         max_tokens: 4000,
-        system: INSTRUCTIONS,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: { type: 'base64', media_type: photo.type, data: toBase64(photo.bytes) },
-              },
-              {
-                type: 'text',
-                text: hint ? `Note from the person: ${hint}` : 'No note from the person.',
-              },
-            ],
-          },
-        ],
+        system,
+        messages: [{ role: 'user', content }],
         output_config: { format: { type: 'json_schema', schema: REPLY_SCHEMA } },
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),

@@ -1,4 +1,10 @@
-import { ApiError, foodRecentQuery, foodSetupQuery, savedMealsQuery } from '@project180/client'
+import {
+  ApiError,
+  foodFavouritesQuery,
+  foodRecentQuery,
+  foodSetupQuery,
+  savedMealsQuery,
+} from '@project180/client'
 import {
   type BarcodeProduct,
   type FoodPhotoDraft,
@@ -17,17 +23,30 @@ import {
   scaleLabel,
   sumMacros,
 } from '@project180/shared'
-import { Button, Chip, ConfirmDialog, cn, Field, IconButton, Input, Spinner } from '@project180/ui'
+import {
+  Button,
+  Chip,
+  ConfirmDialog,
+  cn,
+  Field,
+  IconButton,
+  Input,
+  Spinner,
+  Textarea,
+} from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
   Bookmark,
   Camera,
   History,
+  MessageSquareText,
   PenLine,
   Plus,
   ScanBarcode,
   Search,
+  Sparkles,
+  Star,
   Trash2,
   X,
   Zap,
@@ -37,6 +56,7 @@ import {
   amountText,
   type FoodDraftItem,
   followGrams,
+  lookUpFood,
   type NutrientText,
   nutrientText,
   parseAmount,
@@ -45,6 +65,8 @@ import {
   useAddFood,
   useBarcodeLookup,
   useDeleteSavedMeal,
+  useDescribeFood,
+  useFavourite,
   useFoodSearch,
   useLogSavedMeal,
   usePhotoEstimate,
@@ -61,13 +83,15 @@ type Step =
   | { kind: 'form'; initial?: Partial<FoodDraftItem> }
   | { kind: 'quick' }
   | { kind: 'reading' }
+  | { kind: 'describe'; text: string }
+  | { kind: 'thinking'; text: string }
   | { kind: 'scan'; error?: string }
   | { kind: 'looking'; code: string }
   | { kind: 'missing'; code: string; message: string }
   | {
       kind: 'review'
       draft: ReviewDraft
-      source: 'photo' | 'barcode' | 'search'
+      source: 'photo' | 'barcode' | 'search' | 'describe'
       credit?: BarcodeProduct['source']
     }
 
@@ -131,6 +155,9 @@ function AddFood({
   const setup = useQuery(foodSetupQuery).data
   const recent = useQuery(foodRecentQuery).data ?? []
   const estimate = usePhotoEstimate()
+  const describe = useDescribeFood()
+  const favourites = useQuery(foodFavouritesQuery).data ?? []
+  const { star, unstar } = useFavourite()
   const lookup = useBarcodeLookup()
   const add = useAddFood(onDone)
   const meals = useQuery(savedMealsQuery).data ?? []
@@ -156,6 +183,14 @@ function AddFood({
         onError: () => setStep({ kind: 'menu' }),
       },
     )
+  }
+
+  const onDescribe = (text: string) => {
+    setStep({ kind: 'thinking', text })
+    describe.mutate(text, {
+      onSuccess: (draft) => setStep({ kind: 'review', draft, source: 'describe' }),
+      onError: () => setStep({ kind: 'describe', text }),
+    })
   }
 
   const onPickResult = (food: FoodSearchResult) =>
@@ -186,6 +221,7 @@ function AddFood({
 
   const back =
     step.kind === 'form' ||
+    step.kind === 'describe' ||
     step.kind === 'review' ||
     step.kind === 'scan' ||
     step.kind === 'missing' ? (
@@ -220,12 +256,14 @@ function AddFood({
       <div className="pr-12">
         <h2 className="font-display font-extrabold text-[24px] leading-7">
           {step.kind === 'review'
-            ? step.source !== 'photo'
-              ? 'Check the amount'
-              : 'Check the estimate'
-            : step.kind === 'scan' || step.kind === 'looking'
-              ? 'Scan a barcode'
-              : `Add to ${MEAL_LABELS[meal]}`}
+            ? step.source === 'photo' || step.source === 'describe'
+              ? 'Check the estimate'
+              : 'Check the amount'
+            : step.kind === 'describe' || step.kind === 'thinking'
+              ? 'Describe what you ate'
+              : step.kind === 'scan' || step.kind === 'looking'
+                ? 'Scan a barcode'
+                : `Add to ${MEAL_LABELS[meal]}`}
         </h2>
         {step.kind === 'review' && (
           <p className="mt-1 text-[14px] text-ink-muted">
@@ -233,13 +271,16 @@ function AddFood({
               ? 'From the food database. Set how much you ate, then save.'
               : step.source === 'barcode'
                 ? 'From the product’s label. Set how much you ate, then save.'
-                : 'These are estimates from your photo. Fix anything that looks off, then save.'}
+                : step.source === 'describe'
+                  ? 'Estimated from what you wrote. Fix anything that looks off, then save.'
+                  : 'These are estimates from your photo. Fix anything that looks off, then save.'}
           </p>
         )}
       </div>
-      {step.kind !== 'reading' && step.kind !== 'scan' && step.kind !== 'looking' && (
-        <MealPicker value={meal} onChange={setMeal} />
-      )}
+      {step.kind !== 'reading' &&
+        step.kind !== 'thinking' &&
+        step.kind !== 'scan' &&
+        step.kind !== 'looking' && <MealPicker value={meal} onChange={setMeal} />}
 
       {step.kind === 'menu' && (setup?.search || recent.length > 0) && (
         <SearchBox value={query} onChange={setQuery} canSearch={!!setup?.search} />
@@ -264,6 +305,7 @@ function AddFood({
             onPhoto={() => fileInput.current?.click()}
             onScan={() => setStep({ kind: 'scan' })}
             onType={() => setStep({ kind: 'form' })}
+            onDescribe={() => setStep({ kind: 'describe', text: '' })}
           />
           {estimate.isError && (
             <p
@@ -291,8 +333,37 @@ function AddFood({
               onPick={(m) => logMeal.mutate({ id: m.id, date, meal })}
             />
           )}
+          {favourites.length > 0 && (
+            <RecentList
+              title="Favourites"
+              icon={<Star className="size-3.5" aria-hidden />}
+              foods={favourites}
+              starred={() => true}
+              onStar={(f) => {
+                const fav = favourites.find((x) => x.name === f.name)
+                if (fav) unstar.mutate(fav.id)
+              }}
+              onPick={(f) => setStep({ kind: 'form', initial: f })}
+            />
+          )}
           {recent.length > 0 && (
-            <RecentList foods={recent} onPick={(f) => setStep({ kind: 'form', initial: f })} />
+            <RecentList
+              foods={recent}
+              starred={(f) => favourites.some((x) => x.name === f.name)}
+              onStar={(f) => {
+                const fav = favourites.find((x) => x.name === f.name)
+                if (fav) unstar.mutate(fav.id)
+                else star.mutate(f)
+              }}
+              onPick={(f) => setStep({ kind: 'form', initial: f })}
+            />
+          )}
+          {(star.isError || unstar.isError) && (
+            <p role="alert" className="font-semibold text-[13px] text-danger">
+              {star.error instanceof ApiError
+                ? star.error.message
+                : 'Couldn’t change your favourites. Try again.'}
+            </p>
           )}
         </>
       )}
@@ -313,6 +384,30 @@ function AddFood({
           error={add.isError ? 'Couldn’t save. Check your signal and try again.' : null}
           onSubmit={(food) => add.mutate({ date, meal, source: 'manual', entries: [food] })}
         />
+      )}
+
+      {step.kind === 'describe' && (
+        <DescribeForm
+          initial={step.text}
+          error={
+            describe.isError
+              ? describe.error instanceof ApiError
+                ? describe.error.message
+                : 'Couldn’t work it out. Check your signal and try again.'
+              : null
+          }
+          onSubmit={onDescribe}
+        />
+      )}
+
+      {step.kind === 'thinking' && (
+        <div className="flex flex-col items-center gap-3 py-10" aria-live="polite">
+          <p className="inline-flex items-center gap-3 font-bold text-[15px]">
+            <Spinner />
+            Working it out…
+          </p>
+          <p className="max-w-sm text-center text-[13px] text-ink-muted">“{step.text}”</p>
+        </div>
       )}
 
       {step.kind === 'reading' && (
@@ -407,13 +502,16 @@ function AddFood({
               ? 'Scan another'
               : step.source === 'search'
                 ? 'Search again'
-                : 'Take another photo'
+                : step.source === 'describe'
+                  ? 'Describe it again'
+                  : 'Take another photo'
           }
           saving={add.isPending}
           error={add.isError ? 'Couldn’t save. Check your signal and try again.' : null}
           onRetake={() => {
             if (step.source === 'barcode') return setStep({ kind: 'scan' })
             if (step.source === 'search') return setStep({ kind: 'menu' })
+            if (step.source === 'describe') return setStep({ kind: 'describe', text: '' })
             setStep({ kind: 'menu' })
             fileInput.current?.click()
           }}
@@ -567,7 +665,12 @@ function SearchResults({
   )
 }
 
-const WAY_COLUMNS = { 1: 'grid-cols-1', 2: 'grid-cols-2', 3: 'grid-cols-3' } as const
+const WAY_COLUMNS = {
+  1: 'grid-cols-1',
+  2: 'grid-cols-2',
+  3: 'grid-cols-3',
+  4: 'grid-cols-2 md:grid-cols-4',
+} as const
 
 /**
  * The ways to add food, side by side as equal tiles so the choice reads at a glance.
@@ -579,12 +682,14 @@ function AddWays({
   onPhoto,
   onScan,
   onType,
+  onDescribe,
 }: {
   photos: boolean
   barcode: boolean
   onPhoto: () => void
   onScan: () => void
   onType: () => void
+  onDescribe: () => void
 }) {
   const ways = [
     photos && {
@@ -601,6 +706,15 @@ function AddWays({
       label: 'Barcode',
       hint: 'Packaged food',
       onClick: onScan,
+      primary: false,
+    },
+    // Same Claude as photos (and the same daily limit): only where photos work.
+    photos && {
+      key: 'describe',
+      icon: MessageSquareText,
+      label: 'Describe',
+      hint: 'Say what you ate',
+      onClick: onDescribe,
       primary: false,
     },
     {
@@ -665,24 +779,31 @@ function RecentList({
   foods,
   onPick,
   title = 'Recent',
+  icon = <History className="size-3.5" aria-hidden />,
+  starred,
+  onStar,
 }: {
   foods: RecentFood[]
   onPick: (f: RecentFood) => void
   title?: string
+  icon?: React.ReactNode
+  /** Favourites: whether a food is starred, and starring or unstarring it. */
+  starred?: (f: RecentFood) => boolean
+  onStar?: (f: RecentFood) => void
 }) {
   return (
     <section className="flex flex-col gap-2">
       <h3 className="inline-flex items-center gap-2 font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
-        <History className="size-3.5" aria-hidden />
+        {icon}
         {title}
       </h3>
       <ul className="flex w-full flex-col">
         {foods.slice(0, 8).map((f) => (
-          <li key={f.name}>
+          <li key={f.name} className="flex items-center gap-1 border-border border-b">
             <button
               type="button"
               onClick={() => onPick(f)}
-              className="group flex min-h-14 w-full items-center gap-3 border-border border-b py-2.5 text-left transition active:scale-[0.99]"
+              className="group flex min-h-14 min-w-0 flex-1 items-center gap-3 py-2.5 text-left transition active:scale-[0.99]"
             >
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-4">
                 <span className="min-w-0 truncate font-semibold text-[15px] sm:flex-1">
@@ -699,10 +820,75 @@ function RecentList({
                 <Plus className="size-5" />
               </span>
             </button>
+            {onStar && (
+              <IconButton
+                label={starred?.(f) ? `Unstar ${f.name}` : `Star ${f.name}`}
+                icon={
+                  <Star aria-hidden className={cn(starred?.(f) && 'fill-current text-lime-text')} />
+                }
+                className="size-11 shrink-0"
+                onClick={() => onStar(f)}
+              />
+            )}
           </li>
         ))}
       </ul>
     </section>
+  )
+}
+
+/** "Describe": what you ate in your own words, worked out into foods to check. */
+function DescribeForm({
+  initial,
+  error,
+  onSubmit,
+}: {
+  initial: string
+  error: string | null
+  onSubmit: (text: string) => void
+}) {
+  const [text, setText] = useState(initial)
+  const ready = text.trim().length >= 2
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (ready) onSubmit(text.trim())
+      }}
+    >
+      <Field label="What did you eat?" hint="Amounts help: “2 eggs”, “a cup”, “150 g”.">
+        {(id) => (
+          <Textarea
+            id={id}
+            rows={3}
+            maxLength={500}
+            autoFocus
+            placeholder="2 scrambled eggs, a slice of toast with butter and a coffee with milk"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+        )}
+      </Field>
+      {error && (
+        <p
+          role="alert"
+          className="rounded-md bg-danger/10 p-3 font-semibold text-[14px] text-danger"
+        >
+          {error}
+        </p>
+      )}
+      <Button
+        type="submit"
+        size="lg"
+        block
+        disabled={!ready}
+        icon={<Sparkles className="size-5" aria-hidden />}
+      >
+        Work it out
+      </Button>
+      <p className="text-center text-[12px] text-ink-muted">Counts as one of today’s photos.</p>
+    </form>
   )
 }
 
@@ -716,6 +902,10 @@ interface ReviewRow {
   low: boolean
   /** Fibre, sugar and sodium shown. */
   more: boolean
+  /** The name it came with: renaming it offers "Look it up". */
+  original: string
+  /** Where "Look it up" found the numbers. */
+  found?: string
 }
 
 const rowOf = (i: FoodPhotoDraft['items'][number]): ReviewRow => ({
@@ -726,6 +916,7 @@ const rowOf = (i: FoodPhotoDraft['items'][number]): ReviewRow => ({
   basis: perGram(i, i.grams),
   low: i.confidence === 'low',
   more: false,
+  original: i.name,
 })
 
 const itemOf = (r: ReviewRow): FoodDraftItem => {
@@ -766,6 +957,8 @@ function PhotoReview({
   const [rows, setRows] = useState<ReviewRow[]>(() => draft.items.map(rowOf))
   const label = draft.kind === 'label' ? draft.label : null
   const [eaten, setEaten] = useState(() => amountText(label?.servingG ?? (label ? 100 : null)))
+  const [looking, setLooking] = useState<string | null>(null)
+  const [lookError, setLookError] = useState<string | null>(null)
 
   if (draft.kind === 'not_food' || rows.length === 0) {
     return (
@@ -782,6 +975,32 @@ function PhotoReview({
     )
   }
 
+  // "Look it up": real numbers for the (renamed) food at its amount: the food database first,
+  // Claude only when the database knows nothing.
+  const lookUp = async (i: number) => {
+    const r = rows[i]
+    if (!r?.name.trim()) return
+    setLooking(r.clientUuid)
+    setLookError(null)
+    try {
+      const res = await lookUpFood(r.name, parseAmount(r.grams))
+      setRow(i, (row) => ({
+        ...row,
+        grams: amountText(res.grams),
+        numbers: nutrientText(res.numbers),
+        basis: perGram(res.numbers, res.grams) ?? row.basis,
+        low: false,
+        original: row.name,
+        found: res.from,
+      }))
+    } catch (err) {
+      setLookError(
+        err instanceof ApiError ? err.message : `Couldn’t find “${r.name}”. Check the numbers.`,
+      )
+    } finally {
+      setLooking(null)
+    }
+  }
   const setRow = (i: number, change: (r: ReviewRow) => ReviewRow) =>
     setRows((list) => list.map((r, n) => (n === i ? change(r) : r)))
   const rename = (i: number) => (name: string) => setRow(i, (r) => ({ ...r, name }))
@@ -858,6 +1077,19 @@ function PhotoReview({
                 Not sure about this one: check it
               </Chip>
             )}
+            {(r.name.trim() !== r.original || r.low) && r.name.trim() && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-11 self-start"
+                loading={looking === r.clientUuid}
+                icon={<Search className="size-4" aria-hidden />}
+                onClick={() => void lookUp(i)}
+              >
+                Look up “{r.name.trim().slice(0, 30)}”
+              </Button>
+            )}
+            {r.found && <p className="text-[12px] text-ink-muted">Numbers from {r.found}.</p>}
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               <SmallAmount
                 label="Grams"
@@ -916,6 +1148,11 @@ function PhotoReview({
           </li>
         ))}
       </ul>
+      {lookError && (
+        <p role="alert" className="font-semibold text-[13px] text-danger">
+          {lookError}
+        </p>
+      )}
       <p className="tabular text-center font-semibold text-[14px] text-ink-muted">
         Adds {kcalLabel(totals.kcal)} kcal · {gramsLabel(totals.proteinG)} g protein
       </p>

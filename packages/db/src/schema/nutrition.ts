@@ -184,3 +184,26 @@ export const savedMeals = sqliteTable(
   },
   (t) => [index('saved_meals_user_idx').on(t.userId)],
 )
+
+/**
+ * A food someone starred to log again in one tap ("Favourites" in Add food). One per name per
+ * person: starring the same name again updates its numbers.
+ */
+export const foodFavourites = sqliteTable(
+  'food_favourites',
+  {
+    id: id(),
+    userId: userId(),
+    name: text('name').notNull(),
+    grams: real('grams'),
+    kcal: real('kcal').notNull(),
+    proteinG: real('protein_g').notNull(),
+    carbsG: real('carbs_g'),
+    fatG: real('fat_g'),
+    fibreG: real('fibre_g'),
+    sugarG: real('sugar_g'),
+    sodiumMg: real('sodium_mg'),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('food_favourites_user_name_uq').on(t.userId, t.name)],
+)

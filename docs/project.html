@@ -280,7 +280,7 @@
         <li>Change <code>packages/db/src/schema</code>, then <code>bun run db:apply</code>. Never hand-edit a generated migration; one-off data moves are custom migrations (<code>drizzle-kit generate --custom</code>).</li>
         <li><b>Never rebuild a table on D1</b> (a <code>__new_</code> table in the SQL): it can cascade-delete child rows. Add nullable columns, new tables or indexes instead.</li>
         <li>D1 takes at most 100 values per statement: multi-row inserts use <code>insertMany</code> + <code>runAll</code>.</li>
-        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>.</li>
+        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>, <code>0040_favourites</code>.</li>
       </ul>
     </section>
 
@@ -400,6 +400,7 @@ bun run admin:create:live  # your platform admin (name+platform@…), then your 
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">20 Nov</span> Faster food logging: <b>Describe</b> (say what you ate, Claude turns it into foods; counts as one of the day's photo estimates), <b>Look it up</b> on a renamed or uncertain food (the food database first, Claude only if it knows nothing), and <b>Favourites</b> (star a food to log it again in one tap). Migration <code>0040_favourites</code>.</li>
         <li><span class="pill">20 Nov</span> Food: the numbers follow the grams everywhere (photo review, typing a food, editing a logged one): change 20 g to 80 g and calories, protein, carbs, fat, fibre, sugar and sodium all scale. Meal photos now also estimate fibre, sugar and sodium.</li>
         <li><span class="pill">19 Nov</span> Going live checklist added to this page; starting on Cloudflare's free plan (limits listed there). The Database card counts every table in one query (the free plan allows 50 a request).</li>
         <li><span class="pill">17 Nov</span> The Platform page is split into its own sidebar pages: Overview, Businesses, Sign-ins, Who did what, Claude and System. The Database card works again (counts run as one batch).</li>

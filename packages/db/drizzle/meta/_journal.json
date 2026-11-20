@@ -281,6 +281,13 @@
       "when": 1794949564693,
       "tag": "0039_sign_ins",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1795160845436,
+      "tag": "0040_favourites",
+      "breakpoints": true
     }
   ]
 }

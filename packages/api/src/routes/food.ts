@@ -5,6 +5,7 @@ import {
   clientProfiles,
   type Db,
   foodEntries,
+  foodFavourites,
   foodPhotoUses,
   nutritionTargets,
   savedMeals,
@@ -19,19 +20,24 @@ import {
   type BarcodeProduct,
   barcodeInput,
   copyMealInput,
+  type FavouriteFood,
   type FoodDay,
   type FoodEntry,
   type FoodPhotoDraft,
   type FoodSearchResult,
   type FoodSetup,
   type FoodSummary,
+  favouriteInput,
+  foodDescribeInput,
   foodPhotoHint,
   foodSearchInput,
   foodStreak,
   isoDate,
   logSavedMealInput,
+  MAX_FAVOURITES,
   MAX_SAVED_MEAL_ITEMS,
   MAX_SAVED_MEALS,
+  type Me,
   type NutritionTargets,
   noBurn,
   nutritionTargetsInput,
@@ -65,6 +71,7 @@ import { conflict, notFound, parseBody, parseId, parseQuery } from '../errors'
 import {
   claimPhoto,
   estimateFoodPhoto,
+  estimateFoodText,
   foodPhotosConfigured,
   PHOTO_MAX_BYTES,
   PHOTO_TYPES,
@@ -595,15 +602,74 @@ export const meFoodRoutes = new Hono<AppEnv>()
    * A photo of a meal or a nutrition label becomes a draft to check. Nothing is saved, and the
    * photo itself goes to Claude and is then dropped (never stored or logged).
    */
+  /**
+   * "Type it in words": what someone ate, described, turned into foods to check. Counts as one
+   * of today's photo estimates (same daily limit, same switch) and is saved with its cost.
+   */
+  .post('/describe', async (c) => {
+    const { db, user } = c.var
+    const { text } = await parseBody(c.req.raw, foodDescribeInput)
+    const { feature, date, photosLeft } = await claimEstimate(db, c.env, user)
+    const meter: ClaudeMeter = { model: feature.model }
+    try {
+      const draft = await estimateFoodText(c.env, text, meter)
+      return c.json<{ draft: FoodPhotoDraft }>({ draft: { ...draft, photosLeft } })
+    } catch (err) {
+      await releasePhoto(db, user.id, date)
+      throw err
+    } finally {
+      await recordClaudeCall(db, user.id, 'food_photo', meter)
+    }
+  })
+  /** Favourites: foods starred to log again in one tap, newest first. */
+  .get('/favourites', async (c) => {
+    const { db, user } = c.var
+    return c.json<{ favourites: FavouriteFood[] }>({
+      favourites: await listFavourites(db, user.id),
+    })
+  })
+  /** Star a food. The same name again updates its numbers. */
+  .post('/favourites', async (c) => {
+    const { db, user } = c.var
+    const input = await parseBody(c.req.raw, favouriteInput)
+    const [mine] = await db
+      .select({ n: count() })
+      .from(foodFavourites)
+      .where(eq(foodFavourites.userId, user.id))
+    const values = {
+      grams: input.grams ?? null,
+      kcal: input.kcal,
+      proteinG: input.proteinG,
+      carbsG: input.carbsG ?? null,
+      fatG: input.fatG ?? null,
+      fibreG: input.fibreG ?? null,
+      sugarG: input.sugarG ?? null,
+      sodiumMg: input.sodiumMg ?? null,
+    }
+    const [existing] = await db
+      .select({ id: foodFavourites.id })
+      .from(foodFavourites)
+      .where(and(eq(foodFavourites.userId, user.id), eq(foodFavourites.name, input.name)))
+    if (!existing && (mine?.n ?? 0) >= MAX_FAVOURITES)
+      conflict(`You can keep ${MAX_FAVOURITES} favourites. Unstar one first.`)
+    if (existing)
+      await db.update(foodFavourites).set(values).where(eq(foodFavourites.id, existing.id))
+    else await db.insert(foodFavourites).values({ userId: user.id, name: input.name, ...values })
+    return c.json({ favourites: await listFavourites(db, user.id) }, existing ? 200 : 201)
+  })
+  .delete('/favourites/:id', async (c) => {
+    const { db, user } = c.var
+    const [row] = await db
+      .delete(foodFavourites)
+      .where(
+        and(eq(foodFavourites.id, parseId(c.req.param('id'))), eq(foodFavourites.userId, user.id)),
+      )
+      .returning({ id: foodFavourites.id })
+    if (!row) notFound('Favourite not found')
+    return c.json({ favourites: await listFavourites(db, user.id) })
+  })
   .post('/photo', async (c) => {
     const { db, user } = c.var
-    if (!foodPhotosConfigured(c.env))
-      throw new HTTPException(503, { message: 'Photo estimates aren’t set up yet.' })
-    const feature = await claudeFeature(db, c.env, 'food_photo')
-    if (!feature.enabled)
-      throw new HTTPException(403, {
-        message: 'Photo estimates are turned off at the moment. Type it in instead.',
-      })
     const body = await c.req.parseBody().catch(() => null)
     const photo = body?.photo
     if (!(photo instanceof File) || photo.size === 0)
@@ -613,13 +679,7 @@ export const meFoodRoutes = new Hono<AppEnv>()
     if (photo.size > PHOTO_MAX_BYTES)
       throw new HTTPException(400, { message: 'That photo is too big. Try again.' })
     const hint = parseQuery(foodPhotoHint, typeof body?.hint === 'string' ? body.hint : '')
-    const perDay = await photoLimitFor(db, c.env, user)
-    if (perDay === 0)
-      throw new HTTPException(403, {
-        message: 'Photo estimates are switched off for you. Type it in instead.',
-      })
-    const date = todayIn(user.timezone)
-    const photosLeft = await claimPhoto(db, user.id, date, perDay)
+    const { feature, date, photosLeft } = await claimEstimate(db, c.env, user)
     // Every scan is saved with its tokens and cost for the platform admin (never the photo).
     const meter: ClaudeMeter = { model: feature.model }
     try {
@@ -637,6 +697,48 @@ export const meFoodRoutes = new Hono<AppEnv>()
       await recordClaudeCall(db, user.id, 'food_photo', meter)
     }
   })
+
+/**
+ * Before any Claude food estimate (photo or words): set up, switched on, within the person's
+ * daily limit. Counts one now (released again if Claude fails).
+ */
+async function claimEstimate(db: Db, env: Bindings, user: Me) {
+  if (!foodPhotosConfigured(env))
+    throw new HTTPException(503, { message: 'Food estimates aren’t set up yet.' })
+  const feature = await claudeFeature(db, env, 'food_photo')
+  if (!feature.enabled)
+    throw new HTTPException(403, {
+      message: 'Food estimates are turned off at the moment. Type it in instead.',
+    })
+  const perDay = await photoLimitFor(db, env, user)
+  if (perDay === 0)
+    throw new HTTPException(403, {
+      message: 'Food estimates are switched off for you. Type it in instead.',
+    })
+  const date = todayIn(user.timezone)
+  const photosLeft = await claimPhoto(db, user.id, date, perDay)
+  return { feature, date, photosLeft }
+}
+
+async function listFavourites(db: Db, userId: number): Promise<FavouriteFood[]> {
+  return db
+    .select({
+      id: foodFavourites.id,
+      name: foodFavourites.name,
+      grams: foodFavourites.grams,
+      kcal: foodFavourites.kcal,
+      proteinG: foodFavourites.proteinG,
+      carbsG: foodFavourites.carbsG,
+      fatG: foodFavourites.fatG,
+      fibreG: foodFavourites.fibreG,
+      sugarG: foodFavourites.sugarG,
+      sodiumMg: foodFavourites.sodiumMg,
+    })
+    .from(foodFavourites)
+    .where(eq(foodFavourites.userId, userId))
+    .orderBy(desc(foodFavourites.id))
+    .limit(MAX_FAVOURITES)
+}
 
 /** One person's photo limit and today's use, for their coach. */
 async function loadPhotoLimit(

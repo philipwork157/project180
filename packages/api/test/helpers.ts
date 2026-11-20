@@ -88,18 +88,26 @@ export async function setupHousehold(): Promise<{ admin: string; member: string 
   return { admin, member }
 }
 
-/** The platform admin (the developer), signed in to the dashboard, as `admin:create` makes them. */
-export async function signInPlatform(): Promise<string> {
-  await createAdmin(PLATFORM, 'platform')
+/**
+ * Signs in to the dashboard (the admin app's own cookie) and returns that cookie. `signIn` gives
+ * the phone app's cookie, which the admin Worker doesn't accept.
+ */
+export async function signInAdminApp(email: string, password: string): Promise<string> {
   const res = await call('/auth/sign-in/email', {
     method: 'POST',
-    body: { email: PLATFORM.email, password: PLATFORM.password },
+    body: { email, password },
     asAdminApp: true,
   })
   if (res.status !== 200)
-    throw new Error(`Platform sign-in failed (${res.status}): ${JSON.stringify(res.data)}`)
+    throw new Error(`Dashboard sign-in failed (${res.status}): ${JSON.stringify(res.data)}`)
   return (res.headers as unknown as { getSetCookie(): string[] })
     .getSetCookie()
     .map((c) => c.split(';')[0])
     .join('; ')
+}
+
+/** The platform admin (the developer), signed in to the dashboard, as `admin:create` makes them. */
+export async function signInPlatform(): Promise<string> {
+  await createAdmin(PLATFORM, 'platform')
+  return signInAdminApp(PLATFORM.email, PLATFORM.password)
 }

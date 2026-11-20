@@ -259,7 +259,9 @@ export async function estimateFoodPhoto(
   meter: ClaudeMeter,
 ): Promise<Omit<FoodPhotoDraft, 'photosLeft'>> {
   meter.hadNote = Boolean(hint)
-  return askClaude(env, meter, INSTRUCTIONS, [
+  // `return await`, not `return`: without a key askClaude fails at once, and a bare return would
+  // leave that rejection without a handler for a moment (reported as unhandled).
+  return await askClaude(env, meter, INSTRUCTIONS, [
     {
       type: 'image',
       source: { type: 'base64', media_type: photo.type, data: toBase64(photo.bytes) },

@@ -2,7 +2,18 @@
 // gym's data), coaches and owners never see platform pages, clients never get into the admin,
 // and one client never reaches another client's data. If any of these fail, something leaks.
 import { describe, expect, it } from 'vitest'
-import { call, MEMBER, setupHousehold, signIn, signInPlatform } from './helpers'
+import {
+  ADMIN,
+  call,
+  createAdmin,
+  MEMBER,
+  setupHousehold,
+  signIn,
+  signInAdminApp,
+  signInPlatform,
+} from './helpers'
+
+const COACH = { name: 'Coach', email: 'coach@example.com', password: 'coach-password-1' }
 
 type Json = Record<string, any>
 
@@ -24,10 +35,16 @@ const PLATFORM_ROUTES = [
 
 describe('who can see what', () => {
   it('coaches and owners never reach a platform page', async () => {
-    const { admin } = await setupHousehold()
-    for (const path of PLATFORM_ROUTES) {
-      const res = await call(path, { cookie: admin, asAdminApp: true })
-      expect([403, 404], path).toContain(res.status)
+    await setupHousehold()
+    // Signed in to the dashboard itself: the phone app's cookie would only ever get a 401 there.
+    const owner = await signInAdminApp(ADMIN.email, ADMIN.password)
+    await createAdmin(COACH, 'admin')
+    const coach = await signInAdminApp(COACH.email, COACH.password)
+    for (const cookie of [owner, coach]) {
+      for (const path of PLATFORM_ROUTES) {
+        const res = await call(path, { cookie, asAdminApp: true })
+        expect([403, 404], path).toContain(res.status)
+      }
     }
   })
 

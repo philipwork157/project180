@@ -24,6 +24,10 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ['./test/apply-migrations.ts'],
+    // Real requests against a real D1 in workerd, and some tests set up many people (each
+    // password is hashed on purpose slowly). 5s is too tight when every file runs at once.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     // Better Auth answers a wrong password or a sign-up attempt with the right 401/400, but in
     // workerd its internal APIError also shows up as an "unhandled rejection". The tests check
     // those responses, so ignore exactly these expected errors and still fail on anything else.

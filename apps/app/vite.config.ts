@@ -84,16 +84,10 @@ export default defineConfig(({ mode }) => {
               handler: 'CacheFirst',
               options: { cacheName: 'recipe-images', expiration: { maxEntries: 200 } },
             },
-            {
-              // Unsplash recipe photos: kept once seen (opaque cross-origin answers count too).
-              urlPattern: ({ url }) => url.origin === 'https://images.unsplash.com',
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'unsplash-images',
-                expiration: { maxEntries: 200 },
-                cacheableResponse: { statuses: [0, 200] },
-              },
-            },
+            // Unsplash recipe photos are left to the browser on purpose: a service worker would
+            // fetch them under the CSP it was installed with (a header change never reaches an
+            // installed worker), and opaque cross-origin copies count as ~7 MB each in Chrome's
+            // storage quota. Unsplash's own long cache headers keep them on the phone.
           ],
         },
       }),

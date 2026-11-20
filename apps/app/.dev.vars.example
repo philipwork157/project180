@@ -26,3 +26,6 @@ EMAIL_REDIRECT_TO=philipwork157@gmail.com
 # VAPID_PUBLIC_KEY=
 # VAPID_PRIVATE_KEY=
 # VAPID_SUBJECT=mailto:hello@project180.co.za
+# Cloudflare Turnstile locally: the test secret (always passes). Pair it with the test site key in
+# apps/app/.env.development and apps/admin/.env.development; never use it on dev or live.
+# TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

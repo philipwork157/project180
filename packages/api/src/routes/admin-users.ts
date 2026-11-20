@@ -1,6 +1,7 @@
 import {
   appActivity,
   bodyCheckins,
+  checkIns,
   clientProfiles,
   enrollments,
   programDays,
@@ -81,6 +82,7 @@ import { startDuePrograms } from '../schedule'
 import { cancelWorkout, sessionSummaries } from '../sessions'
 import { buildPersonStats } from '../stats'
 import { createUserWithPassword, setPassword, signedInSql } from '../users'
+import { adminCheckInRoutes } from './check-ins'
 import { assignProgram } from './enrollments'
 import { adminFoodRoutes } from './food'
 import { buildPlan } from './me'
@@ -536,6 +538,14 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const enrollment = input.program
       ? await assignProgram(db, me, user.id, input.program.programId, input.program.startDate)
       : null
+    // Their first check-in: only with their own coach (check-ins are coaching).
+    if (input.checkIn && isClient(user.role) && coachId === me.id)
+      await db.insert(checkIns).values({
+        clientId: user.id,
+        coachId: me.id,
+        dueDate: input.checkIn.dueDate,
+        repeatWeeks: input.checkIn.repeatWeeks,
+      })
     const email = input.sendWelcome
       ? await sendEmail(env, {
           to: user.email,
@@ -990,3 +1000,4 @@ export const adminUserRoutes = new Hono<AppEnv>()
   .route('/', adminFoodRoutes)
   /** Their water and daily water goal (routes/water.ts). */
   .route('/', adminWaterRoutes)
+  .route('/', adminCheckInRoutes)

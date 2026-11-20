@@ -91,6 +91,8 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
   const [weightNow, setWeightNow] = useState('')
   const [programId, setProgramId] = useState<number | null>(null)
   const [startDate, setStartDate] = useState(() => nextMonday(me.timezone))
+  const [checkInDate, setCheckInDate] = useState<string | null>(null)
+  const [checkInRepeat, setCheckInRepeat] = useState<'1' | '2' | '4' | 'once'>('2')
   const [sendWelcome, setSendWelcome] = useState(true)
 
   const updateProfile = (patch: Partial<ProfileDraft>) => setProfile((p) => ({ ...p, ...patch }))
@@ -139,6 +141,13 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
         profile: draftToInput(profile),
         currentWeightKg: Number.isFinite(weight) ? weight : null,
         program: programId && !otherCoach ? { programId, startDate } : null,
+        checkIn:
+          isClient && !otherCoach && checkInDate
+            ? {
+                dueDate: checkInDate,
+                repeatWeeks: checkInRepeat === 'once' ? null : (Number(checkInRepeat) as 1 | 2 | 4),
+              }
+            : null,
         sendWelcome,
       })
       void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
@@ -380,6 +389,41 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                     <Field label="Start date">
                       {(id) => <DatePicker id={id} value={startDate} onChange={setStartDate} />}
                     </Field>
+                  )}
+                  {isClient && !otherCoach && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Field
+                        label="First check-in"
+                        hint={`Optional. ${first} is reminded the evening before and on the day.`}
+                      >
+                        {(id) => (
+                          <DatePicker
+                            id={id}
+                            value={checkInDate}
+                            onChange={setCheckInDate}
+                            onClear={() => setCheckInDate(null)}
+                            placeholder="No check-in yet"
+                          />
+                        )}
+                      </Field>
+                      <Field label="Then">
+                        {(id) => (
+                          <Select
+                            id={id}
+                            value={checkInRepeat}
+                            disabled={!checkInDate}
+                            onChange={(e) =>
+                              setCheckInRepeat(e.target.value as '1' | '2' | '4' | 'once')
+                            }
+                          >
+                            <option value="1">Every week</option>
+                            <option value="2">Every 2 weeks</option>
+                            <option value="4">Every 4 weeks</option>
+                            <option value="once">Just this once</option>
+                          </Select>
+                        )}
+                      </Field>
+                    </div>
                   )}
                   <label className="flex cursor-pointer items-start gap-3 rounded-md bg-surface-raised p-4">
                     <input

@@ -22,6 +22,7 @@ export async function loadProfile(db: Db, userId: number): Promise<ClientProfile
     activityLevel: row?.activityLevel ?? null,
     weeklyChangeKg: row?.weeklyChangeKg ?? null,
     mainGoal: row?.mainGoal ?? null,
+    bodyGoal: row?.bodyGoal ?? null,
     focusAreas: (row?.focusAreas ?? []) as ClientProfile['focusAreas'],
     places: (row?.places ?? []) as ClientProfile['places'],
     experience: row?.experience ?? null,
@@ -46,6 +47,7 @@ export async function saveProfile(db: Db, userId: number, input: ProfileInput) {
     ...(input.goalWeightKg === undefined ? {} : { goalWeightKg: input.goalWeightKg }),
     ...(input.activityLevel === undefined ? {} : { activityLevel: input.activityLevel }),
     mainGoal: input.mainGoal ?? null,
+    ...(input.bodyGoal === undefined ? {} : { bodyGoal: input.bodyGoal }),
     // The main goal isn't repeated in the extra focus areas.
     focusAreas: input.focusAreas.filter((g) => g !== input.mainGoal),
     places: input.places,

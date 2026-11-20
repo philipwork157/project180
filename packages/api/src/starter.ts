@@ -4,6 +4,7 @@
 import { appSettings, type Db, programDays, programs, users } from '@project180/db'
 import type { StarterProgram } from '@project180/shared'
 import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { runSqlBatch } from './batch'
 
 export const STARTER_KEY = 'starter_business_id'
 
@@ -42,30 +43,30 @@ export async function copyStarterLibrary(db: Db, businessId: number, ownerId: nu
   const starter = await starterBusinessId(db)
   if (starter === null || starter === businessId) return
   const now = Date.now()
-  await db.batch([
-    db.run(sql`insert into exercises (name, muscle_group, category, equipment, tracking_type, instructions, keywords, video_url, image_key, created_by, business_id, created_at, updated_at)
+  await runSqlBatch(db, [
+    sql`insert into exercises (name, muscle_group, category, equipment, tracking_type, instructions, keywords, video_url, image_key, created_by, business_id, created_at, updated_at)
       select name, muscle_group, category, equipment, tracking_type, instructions, keywords, video_url,
         case when image_key like 'uploads/%' then null else image_key end,
         ${ownerId}, ${businessId}, ${now}, ${now}
-      from exercises where business_id = ${starter} and archived_at is null`),
-    db.run(sql`insert into recipes (title, summary, meal, category, servings, prep_minutes, cook_minutes, kcal, protein_g, carbs_g, fat_g, ingredients, steps, tips, source_name, source_url, image_key, created_by, business_id, created_at, updated_at)
+      from exercises where business_id = ${starter} and archived_at is null`,
+    sql`insert into recipes (title, summary, meal, category, servings, prep_minutes, cook_minutes, kcal, protein_g, carbs_g, fat_g, ingredients, steps, tips, source_name, source_url, image_key, created_by, business_id, created_at, updated_at)
       select title, summary, meal, category, servings, prep_minutes, cook_minutes, kcal, protein_g, carbs_g, fat_g, ingredients, steps, tips, source_name, source_url,
         case when image_key like 'uploads/%' then null else image_key end,
         ${ownerId}, ${businessId}, ${now}, ${now}
-      from recipes where business_id = ${starter} and archived_at is null`),
+      from recipes where business_id = ${starter} and archived_at is null`,
     // Workouts: source_workout_id holds the starter workout's id just long enough to copy its
     // rows and groups, then it's cleared (it's only meant for clients' copies).
-    db.run(sql`insert into workouts (name, description, estimated_minutes, created_by, source_workout_id, created_at, updated_at)
+    sql`insert into workouts (name, description, estimated_minutes, created_by, source_workout_id, created_at, updated_at)
       select name, description, estimated_minutes, ${ownerId}, id, ${now}, ${now}
       from workouts
       where client_id is null and archived_at is null and quick = 0
-        and created_by in (select id from users where business_id = ${starter} and role in ('owner', 'admin'))`),
-    db.run(sql`insert into workout_groups (workout_id, group_number, kind, rounds, work_seconds, rest_seconds)
+        and created_by in (select id from users where business_id = ${starter} and role in ('owner', 'admin'))`,
+    sql`insert into workout_groups (workout_id, group_number, kind, rounds, work_seconds, rest_seconds)
       select nw.id, g.group_number, g.kind, g.rounds, g.work_seconds, g.rest_seconds
       from workout_groups g
       join workouts nw on nw.source_workout_id = g.workout_id
-        and nw.created_by = ${ownerId} and nw.created_at = ${now} and nw.client_id is null`),
-    db.run(sql`insert into workout_exercises (workout_id, exercise_id, position, target_sets, target_reps_min, target_reps_max, target_reps_per_set, bodyweight, target_seconds, rest_seconds, section, target_distance_m, target_pace_seconds, target_hr_zone, superset_group, notes)
+        and nw.created_by = ${ownerId} and nw.created_at = ${now} and nw.client_id is null`,
+    sql`insert into workout_exercises (workout_id, exercise_id, position, target_sets, target_reps_min, target_reps_max, target_reps_per_set, bodyweight, target_seconds, rest_seconds, section, target_distance_m, target_pace_seconds, target_hr_zone, superset_group, notes)
       select nw.id,
         (select min(ne.id) from exercises ne where ne.business_id = ${businessId} and ne.name = oe.name),
         we.position, we.target_sets, we.target_reps_min, we.target_reps_max, we.target_reps_per_set,
@@ -75,9 +76,9 @@ export async function copyStarterLibrary(db: Db, businessId: number, ownerId: nu
       join workouts nw on nw.source_workout_id = we.workout_id
         and nw.created_by = ${ownerId} and nw.created_at = ${now} and nw.client_id is null
       join exercises oe on oe.id = we.exercise_id
-      where exists (select 1 from exercises ne where ne.business_id = ${businessId} and ne.name = oe.name)`),
-    db.run(sql`update workouts set source_workout_id = null
-      where created_by = ${ownerId} and created_at = ${now} and client_id is null`),
+      where exists (select 1 from exercises ne where ne.business_id = ${businessId} and ne.name = oe.name)`,
+    sql`update workouts set source_workout_id = null
+      where created_by = ${ownerId} and created_at = ${now} and client_id is null`,
   ])
 }
 

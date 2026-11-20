@@ -3,6 +3,8 @@
 import {
   activityLogs,
   bodyCheckins,
+  checkInAnswers,
+  checkIns,
   type Db,
   exercises,
   foodEntries,
@@ -38,6 +40,7 @@ export async function exportMyData(db: Db, me: Me) {
     meals,
     chat,
     favourites,
+    checkInRows,
   ] = await Promise.all([
     db
       .select({
@@ -166,6 +169,23 @@ export async function exportMyData(db: Db, me: Me) {
       })
       .from(foodFavourites)
       .where(eq(foodFavourites.userId, me.id)),
+    // Their check-ins and their own answers (the coach's private notes aren't theirs).
+    db
+      .select({
+        date: checkIns.dueDate,
+        status: checkIns.status,
+        week: checkInAnswers.week,
+        sleep: checkInAnswers.sleep,
+        stress: checkInAnswers.stress,
+        hunger: checkInAnswers.hunger,
+        wins: checkInAnswers.wins,
+        struggles: checkInAnswers.struggles,
+        notes: checkInAnswers.notes,
+      })
+      .from(checkIns)
+      .leftJoin(checkInAnswers, eq(checkInAnswers.checkInId, checkIns.id))
+      .where(eq(checkIns.clientId, me.id))
+      .orderBy(asc(checkIns.dueDate)),
   ])
 
   const setsBySession = new Map<number, Array<Omit<(typeof sets)[number], 'sessionId'>>>()
@@ -195,13 +215,14 @@ export async function exportMyData(db: Db, me: Me) {
       endedAt: iso(s.endedAt),
       sets: setsBySession.get(id) ?? [],
     })),
-    checkIns: checkins,
+    weighIns: checkins,
     food,
     water: water.map((w) => ({ ...w, at: iso(w.at) })),
     activities,
     steps,
     savedMeals: meals,
     favouriteFoods: favourites,
+    coachCheckIns: checkInRows,
     chat: chat.map((m) => ({
       from: m.senderId === me.id ? 'you' : 'coach',
       body: m.body,

@@ -64,7 +64,7 @@ export function weightChange(fromKg: number, toKg: number): string {
 export interface AppNotification {
   /** Stable per thing and day, so "seen" can be remembered. */
   id: string
-  kind: 'weigh_in' | 'workout' | 'program' | 'feedback' | 'chat' | 'food'
+  kind: 'weigh_in' | 'workout' | 'program' | 'feedback' | 'chat' | 'food' | 'check_in'
   title: string
   body: string
   /** Feedback: the workout it's on. */
@@ -201,5 +201,29 @@ export function chatNotification(chat: ChatUnread | null | undefined): AppNotifi
     title:
       chat.unread === 1 ? `New message from ${from}` : `${chat.unread} new messages from ${from}`,
     body: preview.length > 120 ? `${preview.slice(0, 119)}…` : preview,
+  }
+}
+
+/** The next check-in, in the bell: the day before, on the day, and once it's overdue. */
+export function checkInNotification(
+  ci: { id: number; dueDate: string; coachName: string | null; answered: boolean } | null,
+  today: string,
+): AppNotification | null {
+  if (!ci) return null
+  const until = daysBetween(today, ci.dueDate)
+  if (until > 1) return null
+  const coach = ci.coachName?.split(' ')[0] || 'your coach'
+  return {
+    id: `check-in:${ci.id}:${ci.answered ? 'answered' : 'open'}`,
+    kind: 'check_in',
+    title:
+      until === 1
+        ? `Check-in with ${coach} tomorrow`
+        : until === 0
+          ? `Today’s your check-in with ${coach}`
+          : `Check-in with ${coach} is due`,
+    body: ci.answered
+      ? 'Your answers are in; you can still change them.'
+      : 'Fill in your check-in so your coach can see how it went.',
   }
 }

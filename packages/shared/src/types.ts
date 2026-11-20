@@ -1,5 +1,6 @@
 import type {
   ActivityLevel,
+  BodyGoal,
   EnrollmentStatus,
   Equipment,
   ExerciseCategory,
@@ -67,6 +68,8 @@ export interface ClientProfile {
   /** The pace they aim for in kg a week (negative = lose); set with their daily targets. */
   weeklyChangeKg: number | null
   mainGoal: Goal | null
+  /** What their body should do: what check-ins measure them against. */
+  bodyGoal: BodyGoal | null
   focusAreas: Goal[]
   places: TrainingPlace[]
   experience: ExperienceLevel | null

@@ -2,6 +2,7 @@
 // reads them by these names; the SQL columns are snake_case.
 import {
   ACTIVITY_LEVELS,
+  BODY_GOALS,
   EXPERIENCE_LEVELS,
   GOALS,
   ROLES,
@@ -141,6 +142,8 @@ export const clientProfiles = sqliteTable('client_profiles', {
   activityLevel: text('activity_level', { enum: ACTIVITY_LEVELS }),
   weeklyChangeKg: real('weekly_change_kg'),
   mainGoal: text('main_goal', { enum: GOALS }),
+  // What their body should do (lose fat, maintain…): what check-ins measure them against.
+  bodyGoal: text('body_goal', { enum: BODY_GOALS }),
   // JSON arrays of Goal and TrainingPlace values.
   focusAreas: text('focus_areas', { mode: 'json' }).$type<string[]>().notNull().default([]),
   places: text('places', { mode: 'json' }).$type<string[]>().notNull().default([]),

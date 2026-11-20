@@ -56,6 +56,7 @@ import { closeIdleWorkout } from '../sessions'
 import { findStarterProgram, listStarterPrograms } from '../starter'
 import { buildStats } from '../stats'
 import { setPassword, toMe } from '../users'
+import { meCheckInRoutes } from './check-ins'
 import { assignProgram, enrollmentQuery } from './enrollments'
 import { loadTargets, meFoodRoutes, saveTargets } from './food'
 import { meInvitationRoutes } from './invitations'
@@ -390,7 +391,9 @@ export const meRoutes = new Hono<AppEnv>()
     await saveProfile(
       c.var.db,
       user.id,
-      onTheirOwn(user) ? input : { ...input, goalWeightKg: undefined, activityLevel: undefined },
+      onTheirOwn(user)
+        ? input
+        : { ...input, goalWeightKg: undefined, activityLevel: undefined, bodyGoal: undefined },
     )
     return c.json({ profile: await loadProfile(c.var.db, user.id) })
   })
@@ -566,3 +569,4 @@ export const meRoutes = new Hono<AppEnv>()
   /** Your water: what you drank today and your daily goal (routes/water.ts). */
   .route('/water', meWaterRoutes)
   .route('/invitations', meInvitationRoutes)
+  .route('/check-in', meCheckInRoutes)

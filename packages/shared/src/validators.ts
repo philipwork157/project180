@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   ACTIVITY_LEVELS,
+  BODY_GOALS,
   EQUIPMENT,
   EXERCISE_CATEGORIES,
   EXPERIENCE_LEVELS,
@@ -50,6 +51,8 @@ export const clientProfileInput = z.object({
   /** Left out = unchanged (the phone app never sends it; only their coach sets it). */
   activityLevel: z.enum(ACTIVITY_LEVELS).nullish(),
   mainGoal: z.enum(GOALS).nullish(),
+  /** Left out = unchanged (with a coach, only their coach sets it). */
+  bodyGoal: z.enum(BODY_GOALS).nullish(),
   focusAreas: z.array(z.enum(GOALS)).max(GOALS.length).default([]),
   places: z.array(z.enum(TRAINING_PLACES)).max(TRAINING_PLACES.length).default([]),
   experience: z.enum(EXPERIENCE_LEVELS).nullish(),
@@ -76,6 +79,13 @@ export const createUserInput = z.object({
   program: z.object({ programId: z.number().int().positive(), startDate: isoDate }).nullish(),
   /** Email them their sign-in details. */
   sendWelcome: z.boolean().default(false),
+  /** Their first check-in (clients of the coach adding them). */
+  checkIn: z
+    .object({
+      dueDate: isoDate,
+      repeatWeeks: z.union([z.literal(1), z.literal(2), z.literal(4)]).nullable(),
+    })
+    .nullish(),
 })
 
 export const assignCoachInput = z.object({ coachId: z.number().int().positive() })

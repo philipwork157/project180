@@ -47,8 +47,14 @@ export async function refuseBlocked(db: Db, email: string, token: string | null)
 export const STAFF_ONLY_MESSAGE =
   'This sign-in is for coaches and owners. Clients sign in on the Project 180 app.'
 
-export const DASHBOARD_ONLY_MESSAGE =
-  'This account is for the dashboard. Sign in there instead of the app.'
+/**
+ * What a wrong password answers (Better Auth's own body), reused when the phone app refuses the
+ * platform admin, so the two can't be told apart from outside.
+ */
+export const WRONG_PASSWORD_ANSWER = {
+  code: 'INVALID_EMAIL_OR_PASSWORD',
+  message: 'Invalid email or password',
+} as const
 
 /**
  * Admin Worker only (STAFF_ONLY): after a right password, if the person isn't staff, removes

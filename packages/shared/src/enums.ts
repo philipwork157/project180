@@ -79,6 +79,37 @@ export const GOAL_LABELS: Record<Goal, string> = {
   eat_better: 'Eat better',
 }
 
+/**
+ * What a client wants their body to do: what the check-in report measures them against (am I
+ * eating below maintenance to lose fat?). Separate from their training focus (GOALS).
+ */
+export const BODY_GOALS = [
+  'lose_fat',
+  'maintain',
+  'gain_weight',
+  'build_muscle',
+  'get_stronger',
+  'recomp',
+] as const
+export type BodyGoal = (typeof BODY_GOALS)[number]
+export const BODY_GOAL_LABELS: Record<BodyGoal, string> = {
+  lose_fat: 'Lose fat',
+  maintain: 'Maintain weight',
+  gain_weight: 'Gain weight',
+  build_muscle: 'Build muscle',
+  get_stronger: 'Get stronger',
+  recomp: 'Recomp (lose fat, keep muscle)',
+}
+/** The pace (kg a week) each body goal suggests for the calorie calculator. */
+export const BODY_GOAL_PACE: Record<BodyGoal, number> = {
+  lose_fat: -0.5,
+  maintain: 0,
+  gain_weight: 0.25,
+  build_muscle: 0.25,
+  get_stronger: 0,
+  recomp: 0,
+}
+
 export const EXPERIENCE_LEVELS = ['beginner', 'intermediate', 'advanced'] as const
 export type ExperienceLevel = (typeof EXPERIENCE_LEVELS)[number]
 export const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {

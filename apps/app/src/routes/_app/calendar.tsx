@@ -1,9 +1,9 @@
-import { planQuery } from '@project180/client'
+import { myCheckInQuery, planQuery } from '@project180/client'
 import { formatDay, type PlanDay } from '@project180/shared'
 import { Button, cn, EmptyState } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { CalendarClock, CalendarDays, Check, Moon, Play, Scale } from 'lucide-react'
+import { CalendarClock, CalendarDays, Check, ClipboardCheck, Moon, Play, Scale } from 'lucide-react'
 import { useState } from 'react'
 import { ScreenHeader } from '../../components/screen-header'
 import { SessionDetails } from '../../components/session-details'
@@ -23,6 +23,7 @@ function label(date: string, opts: Intl.DateTimeFormatOptions) {
 function CalendarPage() {
   const { me } = Route.useRouteContext()
   const plan = useQuery(planQuery)
+  const checkIn = useQuery(myCheckInQuery).data
   const start = useStartWorkout()
   const [selected, setSelected] = useState<PlanDay | null>(null)
   const p = plan.data?.plan
@@ -123,7 +124,11 @@ function CalendarPage() {
               <ol className="grid grid-cols-7 gap-1.5 md:gap-2">
                 {days.map((d) => (
                   <li key={d.date}>
-                    <DayCell day={d} onSelect={() => setSelected(d)} />
+                    <DayCell
+                      day={d}
+                      checkIn={checkIn?.dueDate === d.date}
+                      onSelect={() => setSelected(d)}
+                    />
                   </li>
                 ))}
               </ol>
@@ -165,6 +170,12 @@ function CalendarPage() {
               <h2 className="mt-1 font-display font-extrabold text-[26px]">
                 {selected.workoutName ?? 'Rest day'}
               </h2>
+              {checkIn?.dueDate === selected.date && (
+                <p className="mt-2 inline-flex items-center gap-2 font-bold text-[13px] text-sand-text">
+                  <ClipboardCheck className="size-4" aria-hidden />
+                  Check-in with {checkIn.coachName?.split(' ')[0] || 'your coach'}
+                </p>
+              )}
               {selected.checkinRequired && (
                 <p className="mt-2 inline-flex items-center gap-2 font-bold text-[13px] text-sand-text">
                   <Scale className="size-4" aria-hidden />
@@ -215,7 +226,22 @@ function CalendarPage() {
 }
 
 /** One calendar day. Done = solid lime, to do = card with violet ring, missed = clay, rest = quiet dashed. */
-function DayCell({ day: d, onSelect }: { day: PlanDay; onSelect: () => void }) {
+function DayCell({
+  day: d,
+  checkIn,
+  onSelect,
+}: {
+  day: PlanDay
+  /** Their check-in with their coach is on this day: a sand dot in the corner. */
+  checkIn: boolean
+  onSelect: () => void
+}) {
+  const dot = checkIn && (
+    <span
+      aria-hidden
+      className="absolute top-1.5 right-1.5 size-2.5 rounded-full bg-sand ring-2 ring-surface"
+    />
+  )
   const weekday = label(d.date, { weekday: 'short' })
   const dayNumber = Number(d.date.slice(8))
   const base =
@@ -227,7 +253,7 @@ function DayCell({ day: d, onSelect }: { day: PlanDay; onSelect: () => void }) {
       <button
         type="button"
         onClick={onSelect}
-        aria-label={`${weekday} ${dayNumber}: rest day`}
+        aria-label={`${weekday} ${dayNumber}: rest day${checkIn ? ', check-in with your coach' : ''}`}
         className={cn(base, 'border border-border border-dashed text-ink-muted', todayRing)}
       >
         <span className="font-extrabold text-[10px] uppercase tracking-wide">{weekday}</span>
@@ -235,6 +261,7 @@ function DayCell({ day: d, onSelect }: { day: PlanDay; onSelect: () => void }) {
         <Moon className="size-4 opacity-70" aria-hidden />
         <span className="hidden font-bold text-[10px] md:block">Rest</span>
         {d.isToday && <TodayTag />}
+        {dot}
       </button>
     )
   }
@@ -245,7 +272,7 @@ function DayCell({ day: d, onSelect }: { day: PlanDay; onSelect: () => void }) {
     <button
       type="button"
       onClick={onSelect}
-      aria-label={`${weekday} ${dayNumber}: ${d.workoutName ?? 'workout'}, ${done ? 'done' : missed ? 'missed' : 'to do'}`}
+      aria-label={`${weekday} ${dayNumber}: ${d.workoutName ?? 'workout'}, ${done ? 'done' : missed ? 'missed' : 'to do'}${checkIn ? ', check-in with your coach' : ''}`}
       className={cn(
         base,
         done ? 'bg-lime text-on-lime' : 'bg-surface text-ink shadow-card',
@@ -278,6 +305,7 @@ function DayCell({ day: d, onSelect }: { day: PlanDay; onSelect: () => void }) {
         {d.workoutName}
       </span>
       {d.isToday && <TodayTag />}
+      {dot}
     </button>
   )
 }

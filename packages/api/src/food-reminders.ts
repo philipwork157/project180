@@ -1,9 +1,11 @@
 // The evening food reminder: people who turned it on in Profile and have logged fewer than two
 // meals today get one push. The same reminder shows in the bell (foodReminderNotification), as
 // every push must, because many phones never turn push on.
-import { createDb, type Db, foodEntries, users } from '@project180/db'
-import { FOOD_REMINDER_MIN_MEALS, todayIn } from '@project180/shared'
+
+import { checkInAnswers, checkIns, createDb, type Db, foodEntries, users } from '@project180/db'
+import { addDays, FOOD_REMINDER_MIN_MEALS, todayIn } from '@project180/shared'
 import { and, countDistinct, eq, inArray, isNull } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/sqlite-core'
 import type { Bindings } from './env'
 import { sendPush } from './push'
 
@@ -48,7 +50,68 @@ export async function sendFoodReminders(env: Bindings, db: Db, now = new Date())
   return { due: due.length, sent }
 }
 
+/**
+ * Check-in reminders, at the same evening run: "tomorrow" the evening before, and "today" on the
+ * day for anyone who hasn't filled in their check-in yet. The bell shows the same (appNotifications).
+ */
+export async function sendCheckInReminders(env: Bindings, db: Db, now = new Date()) {
+  const today = todayIn('Africa/Johannesburg', now)
+  const tomorrow = addDays(today, 1)
+  const coach = alias(users, 'reminder_coach')
+  const due = await db
+    .select({
+      clientId: checkIns.clientId,
+      dueDate: checkIns.dueDate,
+      coachName: coach.name,
+      answered: checkInAnswers.checkInId,
+    })
+    .from(checkIns)
+    .innerJoin(users, eq(users.id, checkIns.clientId))
+    .leftJoin(coach, eq(coach.id, checkIns.coachId))
+    .leftJoin(checkInAnswers, eq(checkInAnswers.checkInId, checkIns.id))
+    .where(
+      and(
+        eq(checkIns.status, 'scheduled'),
+        inArray(checkIns.dueDate, [today, tomorrow]),
+        isNull(users.blockedAt),
+      ),
+    )
+  // One push per message (the coach's name is in it).
+  const groups = new Map<string, { ids: number[]; title: string; body: string }>()
+  for (const d of due) {
+    const name = d.coachName?.split(' ')[0] || 'your coach'
+    const isToday = d.dueDate === today
+    if (isToday && d.answered !== null) continue
+    const key = `${isToday}:${name}`
+    const group = groups.get(key) ?? {
+      ids: [],
+      title: isToday ? `Today’s your check-in with ${name}` : `Check-in with ${name} tomorrow`,
+      body: isToday
+        ? 'Fill in your check-in so your coach can see how it went. Tap to open it.'
+        : 'Take a minute to fill in your check-in before then. Tap to open it.',
+    }
+    group.ids.push(d.clientId)
+    groups.set(key, group)
+  }
+  let sent = 0
+  for (const g of groups.values()) {
+    const r = await sendPush(env, db, g.ids, {
+      title: g.title,
+      body: g.body,
+      url: '/?checkIn=1',
+      tag: 'check-in',
+    })
+    sent += r.sent
+  }
+  return { due: due.length, sent }
+}
+
 /** The same, given the Worker's bindings (for the scheduled handler). */
-export function runFoodReminders(env: Bindings) {
-  return sendFoodReminders(env, createDb(env.DB))
+export async function runFoodReminders(env: Bindings) {
+  const db = createDb(env.DB)
+  const [food, checkIn] = await Promise.all([
+    sendFoodReminders(env, db),
+    sendCheckInReminders(env, db),
+  ])
+  return { ...food, checkIns: checkIn }
 }

@@ -4,6 +4,8 @@ import type {
   ChatSummary,
   ChatThread,
   ChatUnread,
+  CheckInList,
+  CheckInReport,
   ClaudeConfig,
   ClaudeCosts,
   ClaudeFeatureSettings,
@@ -23,6 +25,7 @@ import type {
   Invitation,
   InvitationForMe,
   Me,
+  MyCheckIn,
   MyPlan,
   MyStats,
   PeoplePage,
@@ -656,3 +659,29 @@ export const foodFavouritesQuery = queryOptions({
   queryFn: async () =>
     (await api<{ favourites: FavouriteFood[] }>('/me/food/favourites')).favourites,
 })
+
+/** The signed-in client's next check-in with their coach, and their answers so far. */
+export const myCheckInQuery = queryOptions({
+  queryKey: ['me', 'check-in'],
+  queryFn: async () => (await api<{ checkIn: MyCheckIn | null }>('/me/check-in')).checkIn,
+})
+
+/** Staff: a client's next check-in and the last ones done. */
+export const checkInsQuery = (userId: number) =>
+  queryOptions({
+    queryKey: ['admin', 'user', userId, 'check-ins'],
+    queryFn: async () =>
+      (await api<{ checkIns: CheckInList }>(`/admin/users/${userId}/check-ins`)).checkIns,
+  })
+
+/** Staff: the check-in report for the current period, or the one ending in a past check-in. */
+export const checkInReportQuery = (userId: number, checkInId: number | null) =>
+  queryOptions({
+    queryKey: ['admin', 'user', userId, 'check-in-report', checkInId],
+    queryFn: async () =>
+      (
+        await api<{ report: CheckInReport }>(
+          `/admin/users/${userId}/check-ins/report${checkInId ? `?checkInId=${checkInId}` : ''}`,
+        )
+      ).report,
+  })

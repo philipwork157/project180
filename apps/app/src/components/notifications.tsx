@@ -3,6 +3,7 @@ import {
   foodRemindersQuery,
   meQuery,
   myChatUnreadQuery,
+  myCheckInQuery,
   myFeedbackQuery,
   planQuery,
 } from '@project180/client'
@@ -10,6 +11,7 @@ import {
   type AppNotification,
   appNotifications,
   chatNotification,
+  checkInNotification,
   feedbackNotifications,
   foodReminderNotification,
   isClient,
@@ -54,6 +56,7 @@ export function useAppNotifications(): AppNotification[] {
   const { status, today } = useWeighInStatus()
   const reminders = useQuery(foodRemindersQuery).data ?? false
   const food = useQuery({ ...foodDayQuery(today ?? ''), enabled: reminders && !!today }).data
+  const checkIn = useQuery({ ...myCheckInQuery, enabled: !!me && isClient(me.role) }).data
   // Unread messages first, then your coach's new likes and comments.
   const message = chatNotification(chat)
   const fromCoach = [...(message ? [message] : []), ...feedbackNotifications(feedback ?? [])]
@@ -74,6 +77,20 @@ export function useAppNotifications(): AppNotification[] {
         })
       : null
   if (reminder) fromCoach.push(reminder)
+  // Their check-in with their coach: the day before, on the day and while it's overdue.
+  const checkInNews =
+    today && checkIn
+      ? checkInNotification(
+          {
+            id: checkIn.id,
+            dueDate: checkIn.dueDate,
+            coachName: checkIn.coachName,
+            answered: checkIn.answers !== null,
+          },
+          today,
+        )
+      : null
+  if (checkInNews) fromCoach.unshift(checkInNews)
   if (!plan?.plan || !today) return fromCoach
   const day = plan.plan.days.find((d) => d.isToday) ?? null
   const planned = appNotifications({

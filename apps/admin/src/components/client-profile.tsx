@@ -3,6 +3,9 @@ import {
   ACTIVITY_LABELS,
   ACTIVITY_LEVELS,
   type ActivityLevel,
+  BODY_GOAL_LABELS,
+  BODY_GOALS,
+  type BodyGoal,
   type ClientProfile,
   type ClientProfileInput,
   EXPERIENCE_LABELS,
@@ -41,6 +44,7 @@ export interface ProfileDraft {
   heightCm: string
   goalWeightKg: string
   activityLevel: ActivityLevel | null
+  bodyGoal: BodyGoal | null
   mainGoal: Goal | null
   focusAreas: Goal[]
   places: TrainingPlace[]
@@ -58,6 +62,7 @@ export const EMPTY_PROFILE: ProfileDraft = {
   heightCm: '',
   goalWeightKg: '',
   activityLevel: null,
+  bodyGoal: null,
   mainGoal: null,
   focusAreas: [],
   places: [],
@@ -81,6 +86,7 @@ export function profileToDraft(p: ClientProfile): ProfileDraft {
     heightCm: p.heightCm?.toString() ?? '',
     goalWeightKg: p.goalWeightKg?.toString() ?? '',
     activityLevel: p.activityLevel,
+    bodyGoal: p.bodyGoal,
     mainGoal: p.mainGoal,
     focusAreas: p.focusAreas,
     places: p.places,
@@ -100,6 +106,7 @@ export function draftToInput(d: ProfileDraft): ClientProfileInput {
     heightCm: num(d.heightCm),
     goalWeightKg: num(d.goalWeightKg),
     activityLevel: d.activityLevel,
+    bodyGoal: d.bodyGoal,
     mainGoal: d.mainGoal,
     focusAreas: d.focusAreas,
     places: d.places,
@@ -246,10 +253,20 @@ export function GoalFields({
 }) {
   return (
     <div className="flex flex-col gap-5">
-      <Field label="Main goal">
+      <Field label="Body goal" hint="What their body should do. Check-ins measure them against it.">
         {() => (
           <ChoiceChips
-            label="Main goal"
+            label="Body goal"
+            options={BODY_GOALS.map((g) => ({ value: g, label: BODY_GOAL_LABELS[g] }))}
+            value={draft.bodyGoal}
+            onChange={(bodyGoal) => onChange({ bodyGoal })}
+          />
+        )}
+      </Field>
+      <Field label="Training focus">
+        {() => (
+          <ChoiceChips
+            label="Training focus"
             options={goalOptions}
             value={draft.mainGoal}
             onChange={(mainGoal) =>
@@ -358,7 +375,12 @@ export function ProfileSummary({ userId, name }: { userId: number; name: string 
   if (!p) return null
   const age = ageFrom(p.birthDate)
   const empty =
-    !p.mainGoal && !p.heightCm && !p.latestWeightKg && p.focusAreas.length === 0 && !p.notes
+    !p.bodyGoal &&
+    !p.mainGoal &&
+    !p.heightCm &&
+    !p.latestWeightKg &&
+    p.focusAreas.length === 0 &&
+    !p.notes
   const facts: Array<{ icon: ReactNode; text: string }> = []
   if (p.latestWeightKg)
     facts.push({
@@ -388,7 +410,8 @@ export function ProfileSummary({ userId, name }: { userId: number; name: string 
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-1.5">
-              {p.mainGoal && <Chip tone="brand">{GOAL_LABELS[p.mainGoal]}</Chip>}
+              {p.bodyGoal && <Chip tone="brand">{BODY_GOAL_LABELS[p.bodyGoal]}</Chip>}
+              {p.mainGoal && <Chip>{GOAL_LABELS[p.mainGoal]}</Chip>}
               {p.focusAreas.map((g) => (
                 <Chip key={g}>{GOAL_LABELS[g]}</Chip>
               ))}
@@ -479,7 +502,8 @@ export function ProfileDetails({ userId, name }: { userId: number; name: string 
     {
       title: 'Goals',
       rows: [
-        ['Main goal', p.mainGoal && GOAL_LABELS[p.mainGoal]],
+        ['Body goal', p.bodyGoal && BODY_GOAL_LABELS[p.bodyGoal]],
+        ['Training focus', p.mainGoal && GOAL_LABELS[p.mainGoal]],
         ['Also working on', list(p.focusAreas.map((g) => GOAL_LABELS[g]))],
         ['Experience', p.experience && EXPERIENCE_LABELS[p.experience]],
         ['Days a week', p.daysPerWeek ? `${p.daysPerWeek} days` : null],

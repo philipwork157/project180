@@ -1,11 +1,19 @@
 import { planQuery, statsQuery } from '@project180/client'
-import { formatNumber, isClient, type Me, type MyPlan, type PlanDay } from '@project180/shared'
+import {
+  formatNumber,
+  isClient,
+  type Me,
+  type MyPlan,
+  type PlanDay,
+  todayIn,
+} from '@project180/shared'
 import { Button, cn, StatCard, TurnArc } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { CalendarCheck, Check, Clock, Moon, Play, Timer } from 'lucide-react'
 import { motion } from 'motion/react'
 import { useState } from 'react'
+import { CheckInCard } from '../../components/check-in'
 import { Elapsed } from '../../components/elapsed'
 import { InvitationCards } from '../../components/invitation-card'
 import { NotificationsButton } from '../../components/notifications'
@@ -17,6 +25,9 @@ import { useWeighInStatus, WeighInCard, WeighInSheet } from '../../components/we
 import { useStartWorkout } from '../../lib/use-start-workout'
 
 export const Route = createFileRoute('/_app/')({
+  // ?checkIn=1 (the check-in push and bell) opens the check-in form.
+  validateSearch: (search: Record<string, unknown>): { checkIn?: 1 } =>
+    search.checkIn === 1 || search.checkIn === '1' ? { checkIn: 1 } : {},
   component: TodayPage,
 })
 
@@ -27,6 +38,7 @@ function greeting(hour: number) {
 }
 
 function TodayPage() {
+  const openCheckIn = Route.useSearch().checkIn === 1
   const { me } = Route.useRouteContext()
   const plan = useQuery(planQuery)
   const stats = useQuery(statsQuery(1))
@@ -100,6 +112,9 @@ function TodayPage() {
         </motion.div>
       )}
 
+      {isClient(me.role) && (
+        <CheckInCard today={p?.today ?? todayIn(me.timezone)} openOnLoad={openCheckIn} />
+      )}
       {weighIn.status && <WeighInCard status={weighIn.status} onOpen={() => setWeighing(true)} />}
       {weighIn.today && (
         <WeighInSheet

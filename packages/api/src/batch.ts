@@ -1,7 +1,7 @@
 import type { Db } from '@project180/db'
-import { getTableColumns } from 'drizzle-orm'
+import { getTableColumns, type SQL } from 'drizzle-orm'
 import type { BatchItem } from 'drizzle-orm/batch'
-import type { SQLiteTable } from 'drizzle-orm/sqlite-core'
+import { SQLiteSyncDialect, type SQLiteTable } from 'drizzle-orm/sqlite-core'
 
 /** D1 allows at most 100 bound values in one statement ("too many SQL variables"). */
 const MAX_VARIABLES = 100
@@ -30,6 +30,25 @@ export function insertMany<T extends SQLiteTable>(
 export async function runAll(db: Db, statements: BatchItem<'sqlite'>[]) {
   const [first, ...rest] = statements
   if (first) await db.batch([first, ...rest])
+}
+
+const dialect = new SQLiteSyncDialect()
+
+/**
+ * Raw SQL statements with bound values (sql`... ${id} ...`) as one D1 batch, all or nothing.
+ * Use this instead of db.batch([db.run(sql`...`)]): drizzle's D1 driver can't batch a raw
+ * statement that has bound values (it looks for a prepared statement that raw queries don't
+ * have, and throws "Cannot read properties of undefined (reading 'bind')").
+ */
+export async function runSqlBatch(db: Db, statements: SQL[]) {
+  if (statements.length === 0) return
+  const d1 = db.$client
+  await d1.batch(
+    statements.map((statement) => {
+      const { sql, params } = dialect.sqlToQuery(statement)
+      return d1.prepare(sql).bind(...params)
+    }),
+  )
 }
 
 /** Splits ids into slices small enough for one statement (for deletes and updates in a batch). */

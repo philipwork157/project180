@@ -38,8 +38,15 @@ describe('platform admin access', () => {
       method: 'POST',
       body: { email: PLATFORM.email, password: PLATFORM.password },
     })
-    expect(app.status).toBe(403)
-    expect(app.data.code).toBe('DASHBOARD_ONLY')
+    // Answered exactly like a wrong password (never "this is an admin account"), with no session.
+    const wrong = await call<Json>('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: PLATFORM.email, password: 'not-the-password-1' },
+    })
+    expect(app.status).toBe(401)
+    expect(app.status).toBe(wrong.status)
+    expect(app.data).toEqual({ code: wrong.data.code, message: wrong.data.message })
+    expect(app.headers.get('set-cookie') ?? '').not.toContain('session_token=')
     const dashboard = await signInPlatform()
     const me = await asPlatform('/me', dashboard)
     expect(me.data.user.role).toBe('platform')

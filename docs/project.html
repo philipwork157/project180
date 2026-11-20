@@ -107,7 +107,7 @@
 <header class="hero">
   <div class="kicker">Project 180 · TRAIN. FUEL. FEEL. LIVE.</div>
   <h1>How Project 180 works</h1>
-  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>19 November 2026</b>.</p>
+  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>20 November 2026</b>.</p>
 </header>
 
 <div class="layout">
@@ -280,7 +280,7 @@
         <li>Change <code>packages/db/src/schema</code>, then <code>bun run db:apply</code>. Never hand-edit a generated migration; one-off data moves are custom migrations (<code>drizzle-kit generate --custom</code>).</li>
         <li><b>Never rebuild a table on D1</b> (a <code>__new_</code> table in the SQL): it can cascade-delete child rows. Add nullable columns, new tables or indexes instead.</li>
         <li>D1 takes at most 100 values per statement: multi-row inserts use <code>insertMany</code> + <code>runAll</code>.</li>
-        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>, <code>0040_favourites</code>.</li>
+        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>, <code>0040_favourites</code>, <code>0041_check_ins</code>.</li>
       </ul>
     </section>
 
@@ -371,7 +371,7 @@ bun run admin:create:live  # your platform admin (name+platform@…), then your 
         <thead><tr><th>When (South African time)</th><th>What</th></tr></thead>
         <tbody>
           <tr><td>04:00 daily (<code>0 2 * * *</code> UTC)</td><td>Daily cleanup: expired sign-ins, old sign-in counters, idle workouts closed, orphaned push subscriptions, old photo counters, expired email links; expired email links, errors after 30 days, old invitations and sign-in tries after 90, the record after 2 years; queued programs start. A failed job is saved as an error.</td></tr>
-          <tr><td>19:30 daily (<code>30 17 * * *</code> UTC)</td><td>Food reminders: a push to people who turned them on and logged little.</td></tr>
+          <tr><td>19:30 daily (<code>30 17 * * *</code> UTC)</td><td>Food reminders (a push to people who turned them on and logged little) and check-in reminders (the evening before, and on the day if the form isn't filled in).</td></tr>
         </tbody>
       </table></div>
     </section>
@@ -400,6 +400,8 @@ bun run admin:create:live  # your platform admin (name+platform@…), then your 
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">20 Nov</span> Coach sign-up fixed: copying the starter library crashed as soon as a starter business was picked (drizzle can't batch raw SQL with bound values), leaving a coach with an account but no verify email. It now runs as one native D1 batch (<code>runSqlBatch</code> in packages/api/src/batch.ts). The phone app answers the platform admin exactly like a wrong password (the sign-in record still says "Platform admin tried the app").</li>
+        <li><span class="pill">20 Nov</span> Check-ins: a <b>body goal</b> per client (lose fat, maintain, gain weight, build muscle, get stronger, recomp); the coach sets the <b>check-in date</b> and how often (in the add-client wizard or the new <b>Check-ins</b> tab); the client sees it on Today, Profile and their calendar, gets a push the evening before and on the day (the 19:30 job), and fills in a short form. The tab's <b>report</b> covers the days since the last check-in: a verdict against the goal (in a deficit?), weight and measurements, calories and macros against target and maintenance, meals, water, steps, workouts, their answers, flags, and the coach's notes. Migration <code>0041_check_ins</code>.</li>
         <li><span class="pill">20 Nov</span> Faster food logging: <b>Describe</b> (say what you ate, Claude turns it into foods; counts as one of the day's photo estimates), <b>Look it up</b> on a renamed or uncertain food (the food database first, Claude only if it knows nothing), and <b>Favourites</b> (star a food to log it again in one tap). Migration <code>0040_favourites</code>.</li>
         <li><span class="pill">20 Nov</span> Food: the numbers follow the grams everywhere (photo review, typing a food, editing a logged one): change 20 g to 80 g and calories, protein, carbs, fat, fibre, sugar and sodium all scale. Meal photos now also estimate fibre, sugar and sodium.</li>
         <li><span class="pill">19 Nov</span> Going live checklist added to this page; starting on Cloudflare's free plan (limits listed there). The Database card counts every table in one query (the free plan allows 50 a request).</li>

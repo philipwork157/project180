@@ -7,6 +7,7 @@ import {
   BellOff,
   CalendarDays,
   ChevronRight,
+  ClipboardCheck,
   Dumbbell,
   Heart,
   MessageCircle,
@@ -42,6 +43,7 @@ const LOOK: Record<AppNotification['kind'], { icon: typeof Scale; tint: string }
   feedback: { icon: Heart, tint: 'bg-brand-soft text-brand-text' },
   chat: { icon: MessageCircle, tint: 'bg-brand-soft text-brand-text' },
   food: { icon: Utensils, tint: 'bg-clay/20 text-clay-text' },
+  check_in: { icon: ClipboardCheck, tint: 'bg-sand/25 text-sand-text' },
 }
 
 function NotificationsPage() {
@@ -70,6 +72,7 @@ function NotificationsPage() {
     if (n.kind === 'program') return void navigate({ to: '/calendar' })
     // The evening food reminder: open Fuel.
     if (n.kind === 'food') return void navigate({ to: '/fuel' })
+    if (n.kind === 'check_in') return void navigate({ to: '/', search: { checkIn: 1 } })
     // A like or comment from your coach: open that workout.
     if (n.kind === 'feedback' && n.sessionId)
       return void navigate({ to: '/progress', search: { workout: n.sessionId } })

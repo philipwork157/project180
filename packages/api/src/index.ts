@@ -30,13 +30,13 @@ import { clearFailures, minutesLocked, recordFailure } from './sign-in-limit'
 import { recordSignIn, type SignInOutcome } from './sign-in-log'
 import {
   BLOCKED_MESSAGE,
-  DASHBOARD_ONLY_MESSAGE,
   refuseBlocked,
   refuseExpiredTempPassword,
   refuseNonStaff,
   refusePlatformInApp,
   STAFF_ONLY_MESSAGE,
   TEMP_PASSWORD_EXPIRED_MESSAGE,
+  WRONG_PASSWORD_ANSWER,
 } from './temp-password'
 
 export { dailyCleanup, runDailyCleanup } from './cleanup'
@@ -140,12 +140,13 @@ export function createApp() {
           return c.json({ code: 'STAFF_ONLY', message, error: message }, 403)
         }
       }
-      // The platform admin signs in to the dashboard only.
+      // The platform admin signs in to the dashboard only. The phone app answers exactly as for a
+      // wrong password, so it never confirms the account exists or that it's an admin; the real
+      // reason is in the sign-in record (Platform > Sign-ins: "Platform admin tried the app").
       if (c.var.appKind === 'app' && keys.email) {
         if (await refusePlatformInApp(db, keys.email, token)) {
           await log('dashboard_only')
-          const message = DASHBOARD_ONLY_MESSAGE
-          return c.json({ code: 'DASHBOARD_ONLY', message, error: message }, 403)
+          return c.json(WRONG_PASSWORD_ANSWER, 401)
         }
       }
       await log('ok')

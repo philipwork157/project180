@@ -1,6 +1,7 @@
 // Invitations (a coach invites someone by email), the record of who did what (the platform
 // admin's audit list) and the errors the site ran into (for alerts).
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { users } from './auth'
 import { businesses } from './businesses'
 import { createdAt, id, timestamp } from './columns'
@@ -125,3 +126,51 @@ export const signInEvents = sqliteTable(
     index('sign_in_events_ip_created_idx').on(t.ip, t.createdAt),
   ],
 )
+
+export const CHECK_IN_STATUSES = ['scheduled', 'done', 'cancelled'] as const
+
+/**
+ * A check-in between a client and their coach on a date. At most one is scheduled per client;
+ * marking it done schedules the next one `repeat_weeks` later. The report covers the days from
+ * the previous check-in to this one.
+ */
+export const checkIns = sqliteTable(
+  'check_ins',
+  {
+    id: id(),
+    clientId: integer('client_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    coachId: integer('coach_id').references(() => users.id, { onDelete: 'set null' }),
+    // Their local day, YYYY-MM-DD.
+    dueDate: text('due_date').notNull(),
+    // Weeks until the next one; null = just this once.
+    repeatWeeks: integer('repeat_weeks'),
+    status: text('status', { enum: CHECK_IN_STATUSES }).notNull().default('scheduled'),
+    coachNotes: text('coach_notes'),
+    doneAt: timestamp('done_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('check_ins_client_status_due_idx').on(t.clientId, t.status, t.dueDate),
+    index('check_ins_coach_idx').on(t.coachId),
+    // One scheduled check-in per client.
+    uniqueIndex('check_ins_one_scheduled_uq').on(t.clientId).where(sql`${t.status} = 'scheduled'`),
+  ],
+)
+
+/** The client's answers before a check-in: how the period went, in their words. */
+export const checkInAnswers = sqliteTable('check_in_answers', {
+  checkInId: integer('check_in_id')
+    .primaryKey()
+    .references(() => checkIns.id, { onDelete: 'cascade' }),
+  // 1 (bad) to 5 (great).
+  week: integer('week').notNull(),
+  sleep: integer('sleep').notNull(),
+  stress: integer('stress').notNull(),
+  hunger: integer('hunger').notNull(),
+  wins: text('wins'),
+  struggles: text('struggles'),
+  notes: text('notes'),
+  updatedAt: timestamp('updated_at').notNull(),
+})

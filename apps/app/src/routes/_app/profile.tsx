@@ -2,15 +2,17 @@ import {
   authClient,
   forgetLocalData,
   getThemePreference,
+  myCheckInQuery,
   setThemePreference,
   type ThemePreference,
 } from '@project180/client'
 import { isClient } from '@project180/shared'
 import { Button, cn } from '@project180/ui'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
+import { checkInLine } from '../../components/check-in'
 import { DeleteAccount } from '../../components/delete-account'
 import { FoodReminderSetting } from '../../components/food-reminder-setting'
 import { DownloadMyData } from '../../components/my-data'
@@ -37,6 +39,7 @@ function ProfilePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [theme, setTheme] = useState(getThemePreference)
+  const checkIn = useQuery({ ...myCheckInQuery, enabled: isClient(me.role) }).data
   const [confirmSignOut, setConfirmSignOut] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
@@ -70,6 +73,7 @@ function ProfilePage() {
               {me.businessName && me.businessName !== me.coachName && ` · ${me.businessName}`}
             </p>
           )}
+          {checkIn && <p className="mt-1 text-[13px] text-sand-text">{checkInLine(checkIn)}</p>}
         </div>
       </section>
 

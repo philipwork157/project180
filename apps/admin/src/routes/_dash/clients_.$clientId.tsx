@@ -33,6 +33,7 @@ import {
 import { type ReactNode, useState } from 'react'
 import { AssignForm } from '../../components/assign-form'
 import { ClientChat } from '../../components/client-chat'
+import { ClientCheckIns } from '../../components/client-check-ins'
 import { ProfileDetails, ProfileSummary } from '../../components/client-profile'
 import {
   BlockButton,
@@ -46,10 +47,11 @@ import { PersonProgressPanel } from '../../components/person-progress'
 import { PersonStats } from '../../components/person-stats'
 import { QuickWorkoutsSwitch } from '../../components/quick-workouts-switch'
 
-const TABS = ['overview', 'program', 'progress', 'food', 'chat', 'account'] as const
+const TABS = ['overview', 'checkins', 'program', 'progress', 'food', 'chat', 'account'] as const
 export type ClientTab = (typeof TABS)[number]
 const TAB_LABELS: Record<ClientTab, string> = {
   overview: 'Overview',
+  checkins: 'Check-ins',
   program: 'Program',
   progress: 'Progress',
   food: 'Food',
@@ -173,7 +175,7 @@ function ClientPage() {
         aria-label={`${first}’s pages`}
         className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto border-border border-b px-4 md:mx-0 md:px-0"
       >
-        {TABS.filter((t) => client || t !== 'chat').map((t) => (
+        {TABS.filter((t) => client || (t !== 'chat' && t !== 'checkins')).map((t) => (
           <Link
             key={t}
             to="/clients/$clientId"
@@ -232,6 +234,9 @@ function ClientPage() {
           </div>
           {client && <ProfileSummary userId={clientId} name={person.name} />}
         </div>
+      )}
+      {tab === 'checkins' && client && (
+        <ClientCheckIns userId={clientId} name={person.name} onOpenFood={() => goTo('food')} />
       )}
       {tab === 'program' && (
         <PersonProgressPanel

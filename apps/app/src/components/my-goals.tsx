@@ -3,9 +3,11 @@ import {
   type ClientProfile,
   EXPERIENCE_LABELS,
   EXPERIENCE_LEVELS,
+  enduranceSummary,
   GOAL_LABELS,
   GOALS,
   paceLabel,
+  raceSummary,
   TRAINING_PLACE_LABELS,
   TRAINING_PLACES,
 } from '@project180/shared'
@@ -35,7 +37,7 @@ export function MyGoals({ onOwn = false }: { onOwn?: boolean }) {
   const [editing, setEditing] = useState(false)
   const p = profile.data
   if (!p) return <div className="h-28 animate-pulse rounded-lg bg-surface" />
-  const set = Boolean(p.mainGoal || p.focusAreas.length)
+  const set = Boolean(p.mainGoal || p.focusAreas.length || raceSummary(p))
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -69,13 +71,16 @@ export function MyGoals({ onOwn = false }: { onOwn?: boolean }) {
                 .filter(Boolean)
                 .join(' · ')}
             </p>
-            {p.targetEvent && (
+            {raceSummary(p) && (
               <p className="font-bold text-[14px]">
-                Training for {p.targetEvent}
+                Training for {raceSummary(p)}
                 {p.targetEventDate && (
                   <span className="font-semibold text-ink-muted"> on {p.targetEventDate}</span>
                 )}
               </p>
+            )}
+            {enduranceSummary(p) && (
+              <p className="font-semibold text-[14px] text-ink-muted">{enduranceSummary(p)}</p>
             )}
           </>
         ) : (

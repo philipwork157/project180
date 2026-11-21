@@ -314,12 +314,16 @@ export function inviteEmail(input: {
   link: string
   days: number
   existing: boolean
+  /** Their coach already set the account up (Add client): they only choose a password. */
+  prepared?: boolean
 }): Omit<EmailMessage, 'to'> {
   const first = input.name.split(' ')[0] ?? input.name
   const lead = `${input.coachName} (${input.businessName}) invited you to train with them on Project 180: your program, food, progress and a chat with your coach, all in one app.`
-  const how = input.existing
-    ? 'You already have an account: open the link, sign in and accept. Everything you’ve logged stays yours.'
-    : 'Open the link and choose a password to start.'
+  const how = input.prepared
+    ? `${input.coachName} has already set up your account, goals and program. Open the link, choose a password and you’re in.`
+    : input.existing
+      ? 'You already have an account: open the link, sign in and accept. Everything you’ve logged stays yours.'
+      : 'Open the link and choose a password to start.'
   const privacy =
     'To help your coach support you, Project 180 records when you use the app, roughly how long, and which devices you’re signed in on, alongside the workouts and check-ins you log. Only you, your coach and the Project 180 team can see it.'
   const html = layout(
@@ -327,7 +331,14 @@ export function inviteEmail(input: {
     [
       p(escapeHtml(lead)),
       p(escapeHtml(how)),
-      button(input.link, input.existing ? 'Accept the invitation' : 'Create my account'),
+      button(
+        input.link,
+        input.prepared
+          ? 'Choose my password'
+          : input.existing
+            ? 'Accept the invitation'
+            : 'Create my account',
+      ),
       small(
         `The link works for ${input.days} days. If you don’t know ${escapeHtml(input.coachName)}, ignore this email.`,
       ),

@@ -10,6 +10,10 @@ export interface SetState {
   seconds: string
   /** Kilometres, for distance + time exercises. */
   distance?: string
+  /** Cardio extras, all optional: average heart rate, watts, climb in metres. */
+  hr?: string
+  watts?: string
+  climb?: string
   done: boolean
   sync: 'idle' | 'saving' | 'failed'
 }
@@ -54,6 +58,10 @@ export function buildBoard(session: SessionDetail): Board {
         reps: reps?.toString() ?? '',
         seconds: seconds?.toString() ?? '',
         distance: metres != null ? String(Math.round(metres) / 1000) : '',
+        // Heart rate and power change every time: only what was logged, never last time's.
+        hr: l?.avgHr?.toString() ?? '',
+        watts: l?.avgWatts?.toString() ?? '',
+        climb: l?.elevationM?.toString() ?? '',
         done: Boolean(l),
         sync: 'idle',
       }
@@ -86,7 +94,19 @@ export function setPayload(exerciseId: number, set: SetState, isWarmup: boolean)
     reps: toInt(set.reps),
     durationSeconds: toInt(set.seconds),
     distanceM: km !== null ? Math.round(km * 1000) : null,
+    avgHr: wholeIn(set.hr, 30, 240),
+    avgWatts: wholeIn(set.watts, 1, 2500),
+    elevationM: wholeIn(set.climb, 1, 20_000),
   }
+}
+
+/**
+ * A whole number from an optional box, or null when it's empty or out of range: a typo never
+ * makes the server refuse the set (it would keep retrying), it just isn't saved.
+ */
+function wholeIn(v: string | undefined, min: number, max: number): number | null {
+  const n = toInt(v ?? '')
+  return n !== null && n >= min && n <= max ? n : null
 }
 
 /** Ticked sets whose save failed (poor signal): the ones to send again. */

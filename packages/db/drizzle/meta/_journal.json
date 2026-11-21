@@ -295,6 +295,41 @@
       "when": 1795162542141,
       "tag": "0041_check_ins",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1795174786532,
+      "tag": "0042_invitation_user",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1795245526319,
+      "tag": "0043_endurance_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1795246070985,
+      "tag": "0044_endurance_workouts",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1795253980960,
+      "tag": "0045_invitation_emailed",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1795253981691,
+      "tag": "0046_invitation_emailed_backfill",
+      "breakpoints": true
     }
   ]
 }

@@ -158,7 +158,7 @@ function Calculator({
 
   return (
     <div className="flex flex-col gap-5 pb-6">
-      <div className="pr-12">
+      <div>
         <h2 className="font-display font-extrabold text-[24px] leading-7">Your daily targets</h2>
         <p className="mt-1 text-[14px] text-ink-muted">
           Worked out from your body and your goal. Change them any time.

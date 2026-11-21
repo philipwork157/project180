@@ -192,6 +192,9 @@ describe('Build with Claude', () => {
     expect(body.messages[0].content[0].text).toContain(
       `${ids.row} | Dumbbell Row | back | dumbbell | reps`,
     )
+    // The library is cached with the instructions; the coach's request is not.
+    expect(body.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' })
+    expect(body.messages[0].content[1].cache_control).toBeUndefined()
   })
 
   it('creates nothing when Claude only picks exercises that aren’t in the library', async () => {

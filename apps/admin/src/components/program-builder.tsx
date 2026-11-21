@@ -1,14 +1,24 @@
 import { ApiError, api, programBuilderQuery, programQuery } from '@project180/client'
 import type { ProgramBuildResult } from '@project180/shared'
-import { Button, buttonClasses, Drawer, Field, Spinner, Textarea, toast } from '@project180/ui'
+import {
+  Button,
+  buttonClasses,
+  DictateButton,
+  Drawer,
+  Field,
+  Spinner,
+  Textarea,
+  toast,
+} from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Check, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 const EXAMPLES = [
-  '8 weeks, 3 days a week, full body, beginner, gym',
-  '4 weeks fat loss at home, no equipment, 4 days a week, 30 min sessions',
+  'A basic 4 week program',
+  'A fully fledged 4 week program, 3 days a week, gym: pre-mobility, main work, abs, cardio and a cool-down every day',
+  '8 weeks fat loss at home, no equipment, 4 days a week, 30 min sessions, core finisher',
   '12 week strength block, upper/lower split, 4 days, intermediate, weekly weigh-in',
 ]
 
@@ -76,7 +86,7 @@ function BuilderForm({ onClose }: { onClose: () => void }) {
     >
       <Field
         label="What should it be?"
-        hint="Weeks, days per week, equipment, level and goal help most."
+        hint="Weeks, days per week, equipment, level and goal help most. Ask for a fully fledged program to get mobility, abs, cardio and a cool-down every day, or name the parts in the order you want them."
         error={error}
       >
         {(id) => (
@@ -84,13 +94,19 @@ function BuilderForm({ onClose }: { onClose: () => void }) {
             id={id}
             rows={5}
             maxLength={1000}
-            placeholder="e.g. 8 weeks, 3 days a week, full body, beginner, gym"
+            placeholder="e.g. A fully fledged 4 week program: pre-mobility, main work, abs, cardio, cool-down"
             value={prompt}
             disabled={build.isPending}
             onChange={(e) => setPrompt(e.target.value)}
           />
         )}
       </Field>
+      <DictateButton
+        value={prompt}
+        onChange={setPrompt}
+        maxLength={1000}
+        disabled={build.isPending}
+      />
       <div className="flex flex-col gap-2">
         <span className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
           Try one

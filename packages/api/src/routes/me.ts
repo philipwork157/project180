@@ -386,14 +386,26 @@ export const meRoutes = new Hono<AppEnv>()
   .put('/profile', async (c) => {
     const { user } = c.var
     const input = await parseBody(c.req.raw, clientProfileInput)
-    // With a coach, their goal weight and activity level are the coach's, set with their daily
-    // targets. On their own, they set them themselves.
+    // With a coach, their goal weight, activity level, body goal, race goal and endurance
+    // numbers are the coach's. On their own, they set them themselves.
     await saveProfile(
       c.var.db,
       user.id,
       onTheirOwn(user)
         ? input
-        : { ...input, goalWeightKg: undefined, activityLevel: undefined, bodyGoal: undefined },
+        : {
+            ...input,
+            goalWeightKg: undefined,
+            activityLevel: undefined,
+            bodyGoal: undefined,
+            raceKind: undefined,
+            goalTimeSeconds: undefined,
+            bestTimeSeconds: undefined,
+            maxHr: undefined,
+            restingHr: undefined,
+            thresholdPaceSeconds: undefined,
+            ftpWatts: undefined,
+          },
     )
     return c.json({ profile: await loadProfile(c.var.db, user.id) })
   })

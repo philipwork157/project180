@@ -13,6 +13,7 @@ playwright-report
 routeTree.gen.ts
 packages/db/seed/library.sql
 packages/db/seed/philip.sql
+packages/db/seed/starter-programs.sql
 .vitest
 
 # Photo source, cloned locally to pick exercise photos (see CLAUDE.md > Exercise photos).

@@ -236,7 +236,7 @@ function ActivitySheet({
           if (valid) add.mutate({ clientUuid, date, kind, minutes: mins })
         }}
       >
-        <div className="flex flex-col gap-1 pr-12">
+        <div className="flex flex-col gap-1">
           <h2 className="font-bold text-[22px]">Add activity</h2>
           <p className="text-[14px] text-ink-muted">
             Anything outside your workouts. It’s added to today’s calories.
@@ -337,7 +337,7 @@ function StepsSheet({
           if (valid) save.mutate({ date, steps: n })
         }}
       >
-        <div className="flex flex-col gap-1 pr-12">
+        <div className="flex flex-col gap-1">
           <h2 className="font-bold text-[22px]">Steps</h2>
           <p className="text-[14px] text-ink-muted">
             Copy them from your phone’s health app or your watch. The first{' '}

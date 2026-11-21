@@ -9,6 +9,7 @@ import type {
   Goal,
   GroupKind,
   MuscleGroup,
+  RaceKind,
   Role,
   SessionStatus,
   Sex,
@@ -76,6 +77,17 @@ export interface ClientProfile {
   daysPerWeek: number | null
   targetEvent: string | null
   targetEventDate: string | null
+  /** The one race or competition they're working towards. */
+  raceKind: RaceKind | null
+  /** Goal time and current best (PB) for a timed race, in seconds. */
+  goalTimeSeconds: number | null
+  bestTimeSeconds: number | null
+  /** Endurance numbers (set by their coach): zones, paces and power come from these. */
+  maxHr: number | null
+  restingHr: number | null
+  /** Threshold (about 1-hour race) pace, seconds per km. */
+  thresholdPaceSeconds: number | null
+  ftpWatts: number | null
   notes: string | null
   /** Latest weigh-in, for the card. */
   latestWeightKg: number | null
@@ -170,6 +182,14 @@ export interface WorkoutExerciseItem {
   /** Seconds per km. */
   targetPaceSeconds: number | null
   targetHrZone: number | null
+  /** Bike power as a percent of the client's FTP (90 = 90% FTP). */
+  targetPowerPct?: number | null
+  /** Cadence: rpm on the bike, steps a minute running. */
+  targetCadence?: number | null
+  /** How hard it should feel, 1–10 (RPE). Any exercise, strength included. */
+  targetRpe?: number | null
+  /** Climbing in metres (trail runs, hill rides). */
+  targetElevationM?: number | null
   supersetGroup: number | null
   notes: string | null
   /** In a session: the exercise the workout asked for, when the client swapped it. */
@@ -378,6 +398,10 @@ export interface LoggedSet {
   durationSeconds: number | null
   distanceM: number | null
   rpe: number | null
+  /** Cardio extras from a watch or bike computer: average heart rate, watts, climb in metres. */
+  avgHr?: number | null
+  avgWatts?: number | null
+  elevationM?: number | null
 }
 
 export interface PreviousSet {

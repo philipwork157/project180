@@ -120,7 +120,7 @@ function CheckInForm({ checkIn, onDone }: { checkIn: MyCheckIn; onDone: () => vo
         save.mutate({ ...(ratings as Ratings), wins, struggles, notes })
       }}
     >
-      <div className="flex flex-col gap-1 pr-12">
+      <div className="flex flex-col gap-1">
         <h2 className="font-display font-extrabold text-[24px] leading-7">Your check-in</h2>
         <p className="text-[14px] text-ink-muted">
           How the last while went, for your coach. Your food, water, workouts and weigh-ins are

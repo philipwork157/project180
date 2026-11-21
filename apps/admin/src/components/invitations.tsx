@@ -1,24 +1,16 @@
-// Clients page: invite someone by email (a Drawer), and the invitations still waiting for an
-// answer, each with Resend and Cancel. Someone new signs up from the email's link; someone
-// already training on their own accepts in the app and keeps everything they logged.
-import { ApiError, api, coachesQuery, invitationsQuery } from '@project180/client'
-import { INVITE_DAYS, type Invitation, isOwner, type Me, timeAgo } from '@project180/shared'
-import {
-  Button,
-  Card,
-  ConfirmDialog,
-  Drawer,
-  Field,
-  IconButton,
-  Input,
-  Select,
-  toast,
-} from '@project180/ui'
+// Clients page: the people still waiting to join. Add client only sets the account up; the
+// coach sends the link from here when they're ready: Email the link, or Copy the link (a set-up
+// account, for WhatsApp). Someone already training on their own gets a plain invitation and
+// accepts it in the app. Plain invitations can be cancelled.
+import { ApiError, api, invitationsQuery } from '@project180/client'
+import { INVITE_DAYS, type Invitation, timeAgo } from '@project180/shared'
+import { Card, ConfirmDialog, IconButton, toast } from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Mail, RotateCw, X } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { Copy, Mail, X } from 'lucide-react'
+import { useState } from 'react'
 
-type Reply = { invitations: Invitation[] }
+type Reply = { invitations: Invitation[]; link?: string }
 
 function useSetInvitations() {
   const qc = useQueryClient()
@@ -29,114 +21,54 @@ function useSetInvitations() {
   }
 }
 
-export function InviteDrawer({
-  open,
-  onClose,
-  me,
-}: {
-  open: boolean
-  onClose: () => void
-  me: Me
-}) {
-  const owner = isOwner(me.role)
-  const coaches = useQuery({ ...coachesQuery, enabled: owner && open })
-  const setInvitations = useSetInvitations()
-  const [error, setError] = useState<string>()
-  const send = useMutation({
-    mutationFn: (body: { name: string; email: string; coachId?: number }) =>
-      api<Reply>('/admin/invitations', { method: 'POST', body }),
-    onSuccess: ({ invitations }, body) => {
-      setInvitations(invitations)
-      toast({ title: 'Invitation sent', description: `${body.name} gets an email with a link.` })
-      onClose()
-    },
-    onError: (err) =>
-      setError(err instanceof ApiError ? err.message : 'Couldn’t send it. Try again.'),
+const onError = (err: Error) =>
+  toast({
+    title: 'Couldn’t send it',
+    description: err instanceof ApiError ? err.message : 'Try again.',
+    tone: 'error',
   })
-
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const form = new FormData(e.currentTarget)
-    setError(undefined)
-    const coachId = Number(form.get('coach'))
-    send.mutate({
-      name: String(form.get('name')),
-      email: String(form.get('email')),
-      ...(owner && coachId ? { coachId } : {}),
-    })
-  }
-
-  return (
-    <Drawer
-      open={open}
-      onClose={() => {
-        if (send.isPending) return
-        setError(undefined)
-        onClose()
-      }}
-      title="Invite a client"
-      description={`They get an email with a link that works for ${INVITE_DAYS} days. No passwords to hand out: they choose their own.`}
-    >
-      <form id="invite-form" onSubmit={onSubmit} className="flex flex-col gap-4">
-        <Field label="Their name">
-          {(id) => <Input id={id} name="name" autoComplete="off" required autoFocus />}
-        </Field>
-        <Field
-          label="Email"
-          hint="Already using the app on their own? They accept on their Today screen and keep everything they’ve logged."
-        >
-          {(id) => <Input id={id} name="email" type="email" autoComplete="off" required />}
-        </Field>
-        {owner && (
-          <Field label="Coach">
-            {(id) => (
-              <Select id={id} name="coach" defaultValue={me.id}>
-                {(coaches.data ?? [{ id: me.id, name: me.name }]).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.id === me.id ? `${c.name} (you)` : c.name}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-        )}
-        {error && (
-          <p role="alert" className="font-semibold text-[14px] text-danger">
-            {error}
-          </p>
-        )}
-        <Button
-          type="submit"
-          size="lg"
-          block
-          loading={send.isPending}
-          icon={<Mail className="size-5" aria-hidden />}
-        >
-          Send invitation
-        </Button>
-      </form>
-    </Drawer>
-  )
-}
 
 /** Invitations still waiting for an answer. Hidden when there are none. */
 export function PendingInvitations() {
   const invitations = useQuery(invitationsQuery)
   const setInvitations = useSetInvitations()
   const [cancelling, setCancelling] = useState<Invitation | null>(null)
-  const resend = useMutation({
+  const email = useMutation({
     mutationFn: (invite: Invitation) =>
       api<Reply>(`/admin/invitations/${invite.id}/resend`, { method: 'POST' }),
     onSuccess: ({ invitations }, invite) => {
       setInvitations(invitations)
-      toast({ title: 'Sent again', description: `A fresh link is on its way to ${invite.name}.` })
-    },
-    onError: (err) =>
       toast({
-        title: 'Couldn’t send it',
-        description: err instanceof ApiError ? err.message : 'Try again.',
-        tone: 'error',
-      }),
+        title: invite.emailedAt ? 'Emailed again' : 'Link emailed',
+        description: `A fresh link is on its way to ${invite.email}.`,
+      })
+    },
+    onError,
+  })
+  // A set-up account's link, to paste into WhatsApp or a message. A fresh link each time.
+  const copy = useMutation({
+    mutationFn: (invite: Invitation) =>
+      api<Reply>(`/admin/invitations/${invite.id}/link`, { method: 'POST' }),
+    onSuccess: async ({ invitations, link }, invite) => {
+      setInvitations(invitations)
+      const first = invite.name.split(' ')[0] ?? invite.name
+      const message = `Hi ${first}, I’ve set you up on Project 180: your program and goals are ready.\n\nTap this link to choose your password and you’re in:\n${link}\n\nIt works for ${INVITE_DAYS} days. On your phone, “Add to Home Screen” once you’re in to install the app.`
+      const copied =
+        Boolean(link) &&
+        (await navigator.clipboard.writeText(message).then(
+          () => true,
+          () => false,
+        ))
+      toast(
+        copied
+          ? {
+              title: 'Message copied',
+              description: `Paste it into WhatsApp for ${first}. Any older link stopped working.`,
+            }
+          : { title: 'Couldn’t copy it', description: 'Try again.', tone: 'error' },
+      )
+    },
+    onError,
   })
   const cancel = useMutation({
     mutationFn: (invite: Invitation) =>
@@ -155,9 +87,14 @@ export function PendingInvitations() {
   const now = Date.now()
   return (
     <Card className="mb-5 p-0 md:p-0">
-      <h2 className="px-5 pt-5 font-bold text-[16px] md:px-6">
-        Waiting for an answer ({invitations.data.length})
-      </h2>
+      <div className="flex flex-col gap-1 px-5 pt-5 md:px-6">
+        <h2 className="font-bold text-[16px]">Waiting to join ({invitations.data.length})</h2>
+        {invitations.data.some((i) => !i.emailedAt) && (
+          <p className="text-[13px] text-ink-muted">
+            Send each person their link when you’re ready: email it, or copy it for WhatsApp.
+          </p>
+        )}
+      </div>
       <ul className="flex w-full flex-col">
         {invitations.data.map((invite) => {
           const expired = new Date(invite.expiresAt).getTime() < now
@@ -170,31 +107,56 @@ export function PendingInvitations() {
                 <Mail className="size-4" aria-hidden />
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate font-semibold text-[15px]">{invite.name}</span>
+                {invite.userId ? (
+                  <Link
+                    to="/clients/$clientId"
+                    params={{ clientId: String(invite.userId) }}
+                    className="truncate font-semibold text-[15px] hover:underline"
+                  >
+                    {invite.name}
+                  </Link>
+                ) : (
+                  <span className="truncate font-semibold text-[15px]">{invite.name}</span>
+                )}
                 <span className="truncate text-[13px] text-ink-muted">
                   {invite.email}
                   {invite.coachName && ` · for ${invite.coachName}`}
-                  {' · '}
-                  {expired ? (
-                    <b className="text-clay-text">link expired</b>
+                </span>
+                {/* Its own line, so it never gets cut off on a phone. */}
+                <span className="text-[13px] text-ink-muted">
+                  {!invite.emailedAt ? (
+                    <b className="text-sand-text">Not sent yet</b>
+                  ) : expired ? (
+                    <b className="text-clay-text">Link expired</b>
                   ) : (
-                    `sent ${timeAgo(invite.createdAt)}`
+                    `${invite.userId ? 'Set up · ' : ''}emailed ${timeAgo(invite.emailedAt)}`
                   )}
                 </span>
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 <IconButton
-                  label={expired ? 'Send a new link' : 'Send again'}
-                  icon={<RotateCw aria-hidden />}
-                  disabled={resend.isPending}
-                  onClick={() => resend.mutate(invite)}
+                  label={invite.emailedAt ? 'Email the link again' : 'Email the link'}
+                  icon={<Mail aria-hidden />}
+                  disabled={email.isPending}
+                  onClick={() => email.mutate(invite)}
                 />
-                <IconButton
-                  label="Cancel invitation"
-                  icon={<X aria-hidden />}
-                  tone="danger"
-                  onClick={() => setCancelling(invite)}
-                />
+                {invite.userId && (
+                  <IconButton
+                    label="Copy the link (for WhatsApp)"
+                    icon={<Copy aria-hidden />}
+                    disabled={copy.isPending}
+                    onClick={() => copy.mutate(invite)}
+                  />
+                )}
+                {/* A set-up account stays a client: resend its link instead. */}
+                {!invite.userId && (
+                  <IconButton
+                    label="Cancel invitation"
+                    icon={<X aria-hidden />}
+                    tone="danger"
+                    onClick={() => setCancelling(invite)}
+                  />
+                )}
               </span>
             </li>
           )

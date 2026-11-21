@@ -56,9 +56,16 @@ export function visibleTo(table: LibraryColumns, user: Me, archived: boolean | '
     return isStaff(user.role) && table.businessId
       ? and(state, inMyBusiness(table.businessId, user))
       : and(state, sql`0`)
+  // Your own library items, by who made them. A client's copy is never reached that way: the
+  // coach who assigned it keeps created_by after the client moves to another coach, so copies
+  // go only by whose client they are now (copiesFor).
+  const clientId = table.clientId
   return and(
     state,
-    or(isStaff(user.role) ? eq(table.createdBy, user.id) : undefined, copiesFor(table, user)),
+    or(
+      isStaff(user.role) ? and(eq(table.createdBy, user.id), isNull(clientId)) : undefined,
+      copiesFor(table, user),
+    ),
   )
 }
 
@@ -84,15 +91,19 @@ export function assertCanEdit(user: Me, row: { createdBy: number; businessId: nu
 
 /**
  * Workouts and programs: only their creator, or (a client's personal copy) whoever coaches
- * that client. Owners get no exception here: other coaches' plans stay private.
+ * that client now. Owners get no exception here: other coaches' plans stay private.
  */
 export async function assertCanEditItem(
   db: Db,
   user: Me,
   row: { createdBy: number; clientId: number | null },
 ) {
-  if (row.createdBy === user.id) return
-  if (row.clientId !== null && isStaff(user.role)) {
+  // A library item: its creator. A copy: the person it's for (staff's own copies), or their
+  // coach now, never the coach who made it if the client has since moved on.
+  if (row.clientId === null) {
+    if (row.createdBy === user.id) return
+  } else if (row.clientId === user.id) return
+  else if (isStaff(user.role)) {
     const [client] = await db
       .select({ coachId: users.coachId })
       .from(users)

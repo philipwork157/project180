@@ -90,6 +90,64 @@ describe('new client wizard', () => {
     expect(put.data.profile).toMatchObject({ mainGoal: 'triathlon', daysPerWeek: 5 })
   })
 
+  it('saves a race goal and endurance numbers that only the coach can change', async () => {
+    const cookie = await owner()
+    const created = await call<Json>('/admin/users', { method: 'POST', cookie, body: SAM })
+    const id = created.data.user.id
+    const race = {
+      mainGoal: 'running',
+      focusAreas: ['cycling'],
+      targetEvent: 'Two Oceans',
+      targetEventDate: '2027-04-17',
+      raceKind: 'half_marathon',
+      goalTimeSeconds: 6300,
+      bestTimeSeconds: 6730,
+      maxHr: 188,
+      restingHr: 52,
+      thresholdPaceSeconds: 270,
+      ftpWatts: 240,
+    }
+    const saved = await call<Json>(`/admin/users/${id}/profile`, {
+      method: 'PUT',
+      cookie,
+      body: race,
+    })
+    expect(saved.status).toBe(200)
+    expect(saved.data.profile).toMatchObject(race)
+
+    // The client saving their goals from the app can't change the coach's numbers.
+    const sam = await signIn(SAM.email, SAM.password)
+    const put = await call<Json>('/me/profile', {
+      method: 'PUT',
+      cookie: sam,
+      body: { mainGoal: 'trail_running', raceKind: 'marathon', maxHr: 200, ftpWatts: null },
+    })
+    expect(put.status).toBe(200)
+    expect(put.data.profile).toMatchObject({
+      mainGoal: 'trail_running',
+      raceKind: 'half_marathon',
+      goalTimeSeconds: 6300,
+      maxHr: 188,
+      ftpWatts: 240,
+    })
+
+    // Left out keeps what's saved; null clears it.
+    const cleared = await call<Json>(`/admin/users/${id}/profile`, {
+      method: 'PUT',
+      cookie,
+      body: { mainGoal: 'running', ftpWatts: null },
+    })
+    expect(cleared.data.profile).toMatchObject({ maxHr: 188, ftpWatts: null })
+
+    // Impossible numbers are refused.
+    const bad = await call<Json>(`/admin/users/${id}/profile`, {
+      method: 'PUT',
+      cookie,
+      body: { maxHr: 400 },
+    })
+    expect(bad.status).toBe(400)
+  })
+
   it("keeps a client's profile away from other coaches", async () => {
     const cookie = await owner()
     await call('/admin/users', {

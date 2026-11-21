@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { EXERCISES, MOBILITY } from '../seed/exercises'
+import { ENDURANCE_EXERCISES } from '../seed/exercises-endurance'
 import { EXTRA_EXERCISES } from '../seed/exercises-extra'
 import { MORE_EXERCISES } from '../seed/exercises-more'
 import { EXERCISE_IMAGES } from '../seed/images'
@@ -36,11 +37,22 @@ const now = Date.now()
 const target = seedTarget(process.argv)
 const { admin, business, hasAdmin, inBusiness, workoutsOfBusiness } = target
 
-const ALL = [...EXERCISES, ...MORE_EXERCISES, ...EXTRA_EXERCISES, ...MOBILITY]
+const ALL = [
+  ...EXERCISES,
+  ...MORE_EXERCISES,
+  ...EXTRA_EXERCISES,
+  ...ENDURANCE_EXERCISES,
+  ...MOBILITY,
+]
 
 // Catch typos and duplicates before touching the database.
 const names = new Set<string>()
-for (const [name] of [...EXERCISES, ...MORE_EXERCISES, ...EXTRA_EXERCISES]) {
+for (const [name] of [
+  ...EXERCISES,
+  ...MORE_EXERCISES,
+  ...EXTRA_EXERCISES,
+  ...ENDURANCE_EXERCISES,
+]) {
   if (names.has(name.toLowerCase())) throw new Error(`"${name}" is in the exercise lists twice`)
   names.add(name.toLowerCase())
 }

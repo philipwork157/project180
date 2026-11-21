@@ -1,6 +1,15 @@
 import { ApiError, api, workoutBuilderQuery, workoutQuery } from '@project180/client'
 import { repsLabel, type WorkoutBuildResult } from '@project180/shared'
-import { Button, buttonClasses, Drawer, Field, Spinner, Textarea, toast } from '@project180/ui'
+import {
+  Button,
+  buttonClasses,
+  DictateButton,
+  Drawer,
+  Field,
+  Spinner,
+  Textarea,
+  toast,
+} from '@project180/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Check, Sparkles } from 'lucide-react'
@@ -8,6 +17,7 @@ import { useState } from 'react'
 
 const EXAMPLES = [
   '45 min upper body, dumbbells only, beginner',
+  'Fully fledged lower body, gym: pre-mobility, main work, abs, cardio and a cool-down',
   'Full body at home, no equipment, 30 minutes',
   'Glutes and hamstrings, gym, intermediate, finish with a core circuit',
 ]
@@ -74,7 +84,7 @@ function BuilderForm({ onClose }: { onClose: () => void }) {
     >
       <Field
         label="What should it be?"
-        hint="Time, equipment, level and focus help most."
+        hint="Time, equipment, level and focus help most. Ask for a fully fledged workout to get mobility, abs, cardio and a cool-down, or name the parts in your order."
         error={error}
       >
         {(id) => (
@@ -89,6 +99,12 @@ function BuilderForm({ onClose }: { onClose: () => void }) {
           />
         )}
       </Field>
+      <DictateButton
+        value={prompt}
+        onChange={setPrompt}
+        maxLength={1000}
+        disabled={build.isPending}
+      />
       <div className="flex flex-col gap-2">
         <span className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
           Try one

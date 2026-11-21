@@ -11,13 +11,26 @@ import {
   EXPERIENCE_LABELS,
   EXPERIENCE_LEVELS,
   type ExperienceLevel,
+  enduranceSummary,
+  estimateMaxHr,
+  formatPacePerKm,
+  formatRaceTime,
   GOAL_LABELS,
   GOALS,
   type Goal,
+  hrZoneLabel,
+  isTimedRace,
+  parseRaceTime,
+  RACE_KIND_LABELS,
+  RACE_KINDS,
+  type RaceKind,
+  racePacePerKm,
+  raceSummary,
   type Sex,
   TRAINING_PLACE_LABELS,
   TRAINING_PLACES,
   type TrainingPlace,
+  wantsEnduranceNumbers,
 } from '@project180/shared'
 import {
   Button,
@@ -30,6 +43,7 @@ import {
   Field,
   Input,
   MultiChoiceChips,
+  Select,
   Textarea,
   toast,
 } from '@project180/ui'
@@ -52,6 +66,15 @@ export interface ProfileDraft {
   daysPerWeek: number | null
   targetEvent: string
   targetEventDate: string | null
+  raceKind: RaceKind | null
+  /** Typed as h:mm:ss or mm:ss. */
+  goalTime: string
+  bestTime: string
+  maxHr: string
+  restingHr: string
+  /** Typed as m:ss per km. */
+  thresholdPace: string
+  ftpWatts: string
   notes: string
 }
 
@@ -70,6 +93,13 @@ export const EMPTY_PROFILE: ProfileDraft = {
   daysPerWeek: null,
   targetEvent: '',
   targetEventDate: null,
+  raceKind: null,
+  goalTime: '',
+  bestTime: '',
+  maxHr: '',
+  restingHr: '',
+  thresholdPace: '',
+  ftpWatts: '',
   notes: '',
 }
 
@@ -77,6 +107,20 @@ const num = (v: string) => {
   const n = Number.parseFloat(v.replace(',', '.'))
   return Number.isFinite(n) ? n : null
 }
+
+/** A whole number from a box: empty = null (cleared); not a number = undefined (unchanged). */
+const whole = (v: string) => {
+  if (!v.trim()) return null
+  const n = Number(v.trim())
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+
+/** A typed time: empty = null (cleared); half-typed or wrong = undefined (unchanged). */
+const time = (v: string) => (v.trim() ? (parseRaceTime(v) ?? undefined) : null)
+
+/** The same check the form shows next to a time box. */
+const timeError = (v: string, example: string) =>
+  v.trim() && parseRaceTime(v) === null ? `Type it like ${example}` : undefined
 
 export function profileToDraft(p: ClientProfile): ProfileDraft {
   return {
@@ -94,6 +138,13 @@ export function profileToDraft(p: ClientProfile): ProfileDraft {
     daysPerWeek: p.daysPerWeek,
     targetEvent: p.targetEvent ?? '',
     targetEventDate: p.targetEventDate,
+    raceKind: p.raceKind,
+    goalTime: formatRaceTime(p.goalTimeSeconds),
+    bestTime: formatRaceTime(p.bestTimeSeconds),
+    maxHr: p.maxHr?.toString() ?? '',
+    restingHr: p.restingHr?.toString() ?? '',
+    thresholdPace: formatRaceTime(p.thresholdPaceSeconds),
+    ftpWatts: p.ftpWatts?.toString() ?? '',
     notes: p.notes ?? '',
   }
 }
@@ -113,7 +164,15 @@ export function draftToInput(d: ProfileDraft): ClientProfileInput {
     experience: d.experience,
     daysPerWeek: d.daysPerWeek,
     targetEvent: d.targetEvent.trim() || null,
-    targetEventDate: d.targetEvent.trim() ? d.targetEventDate : null,
+    targetEventDate: d.targetEvent.trim() || d.raceKind ? d.targetEventDate : null,
+    raceKind: d.raceKind,
+    // Goal time and PB only mean something for a race on the clock.
+    goalTimeSeconds: isTimedRace(d.raceKind) ? time(d.goalTime) : null,
+    bestTimeSeconds: isTimedRace(d.raceKind) ? time(d.bestTime) : null,
+    maxHr: whole(d.maxHr),
+    restingHr: whole(d.restingHr),
+    thresholdPaceSeconds: time(d.thresholdPace),
+    ftpWatts: whole(d.ftpWatts),
     notes: d.notes.trim() || null,
   }
 }
@@ -315,8 +374,59 @@ export function GoalFields({
           />
         )}
       </Field>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
-        <Field label="Training for an event?" hint="Optional, e.g. Two Oceans half marathon">
+      <RaceFields draft={draft} onChange={onChange} />
+      {(wantsEnduranceNumbers([draft.mainGoal, ...draft.focusAreas]) ||
+        draft.maxHr ||
+        draft.restingHr ||
+        draft.thresholdPace ||
+        draft.ftpWatts) && <EnduranceFields draft={draft} onChange={onChange} />}
+      <Field label="Injuries or anything to know" hint="Only what helps you coach them">
+        {(id) => (
+          <Textarea
+            id={id}
+            value={draft.notes}
+            onChange={(e) => onChange({ notes: e.target.value })}
+          />
+        )}
+      </Field>
+    </div>
+  )
+}
+
+/** The race or competition they're working towards, with a goal time and PB when timed. */
+function RaceFields({
+  draft,
+  onChange,
+}: {
+  draft: ProfileDraft
+  onChange: (patch: Partial<ProfileDraft>) => void
+}) {
+  const timed = isTimedRace(draft.raceKind)
+  const goalPace = racePacePerKm(draft.raceKind, parseRaceTime(draft.goalTime))
+  const bestPace = racePacePerKm(draft.raceKind, parseRaceTime(draft.bestTime))
+  return (
+    <div className="flex flex-col gap-4 rounded-md bg-surface-raised p-4">
+      <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+        Race or competition
+      </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="What are they training for?" hint="Optional">
+          {(id) => (
+            <Select
+              id={id}
+              value={draft.raceKind ?? ''}
+              onChange={(e) => onChange({ raceKind: (e.target.value || null) as RaceKind | null })}
+            >
+              <option value="">Nothing in particular</option>
+              {RACE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {RACE_KIND_LABELS[k]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+        <Field label="Event name" hint="Optional, e.g. Two Oceans, Comrades, Hyrox Cape Town">
           {(id) => (
             <Input
               id={id}
@@ -325,7 +435,7 @@ export function GoalFields({
             />
           )}
         </Field>
-        {draft.targetEvent.trim() && (
+        {(draft.raceKind || draft.targetEvent.trim()) && (
           <Field label="Event date">
             {(id) => (
               <DatePicker
@@ -337,15 +447,122 @@ export function GoalFields({
           </Field>
         )}
       </div>
-      <Field label="Injuries or anything to know" hint="Only what helps you coach them">
-        {(id) => (
-          <Textarea
-            id={id}
-            value={draft.notes}
-            onChange={(e) => onChange({ notes: e.target.value })}
-          />
-        )}
-      </Field>
+      {timed && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field
+            label="Goal time"
+            hint={goalPace ? `${formatPacePerKm(goalPace)} needed` : 'h:mm:ss, e.g. 1:45:00'}
+            error={timeError(draft.goalTime, '1:45:00 or 24:30')}
+          >
+            {(id) => (
+              <Input
+                id={id}
+                inputMode="numeric"
+                placeholder="1:45:00"
+                value={draft.goalTime}
+                onChange={(e) => onChange({ goalTime: e.target.value })}
+              />
+            )}
+          </Field>
+          <Field
+            label="Current best (PB)"
+            hint={bestPace ? `${formatPacePerKm(bestPace)} now` : 'Optional'}
+            error={timeError(draft.bestTime, '1:52:10 or 26:05')}
+          >
+            {(id) => (
+              <Input
+                id={id}
+                inputMode="numeric"
+                placeholder="1:52:10"
+                value={draft.bestTime}
+                onChange={(e) => onChange({ bestTime: e.target.value })}
+              />
+            )}
+          </Field>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Heart rate, threshold pace and FTP: the numbers that turn "Zone 2" or "90% FTP" in a workout
+ * into real beats and watts for this client. Shown for endurance focus areas.
+ */
+function EnduranceFields({
+  draft,
+  onChange,
+}: {
+  draft: ProfileDraft
+  onChange: (patch: Partial<ProfileDraft>) => void
+}) {
+  const guess = estimateMaxHr(ageFrom(draft.birthDate))
+  const maxHr = whole(draft.maxHr) ?? null
+  const zone2 = hrZoneLabel(2, maxHr, whole(draft.restingHr) ?? null)
+  return (
+    <div className="flex flex-col gap-4 rounded-md bg-surface-raised p-4">
+      <div className="flex flex-col gap-1">
+        <p className="font-extrabold text-[11px] text-ink-muted uppercase tracking-[0.08em]">
+          Endurance numbers
+        </p>
+        <p className="font-semibold text-[13px] text-ink-muted">
+          Optional. Heart-rate zones and power targets in workouts use these.
+          {zone2 && ` Zone 2 for them: ${zone2}.`}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Field
+          label="Max heart rate"
+          hint={guess && !draft.maxHr ? `About ${guess} from age` : 'bpm'}
+        >
+          {(id) => (
+            <Input
+              id={id}
+              inputMode="numeric"
+              placeholder={guess ? String(guess) : '185'}
+              value={draft.maxHr}
+              onChange={(e) => onChange({ maxHr: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field label="Resting heart rate" hint="bpm, first thing in the morning">
+          {(id) => (
+            <Input
+              id={id}
+              inputMode="numeric"
+              placeholder="55"
+              value={draft.restingHr}
+              onChange={(e) => onChange({ restingHr: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field
+          label="Threshold pace"
+          hint="Per km, about their 1-hour race pace"
+          error={timeError(draft.thresholdPace, '4:30')}
+        >
+          {(id) => (
+            <Input
+              id={id}
+              inputMode="numeric"
+              placeholder="4:30"
+              value={draft.thresholdPace}
+              onChange={(e) => onChange({ thresholdPace: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field label="Cycling FTP" hint="Watts, from a 20-minute test">
+          {(id) => (
+            <Input
+              id={id}
+              inputMode="numeric"
+              placeholder="220"
+              value={draft.ftpWatts}
+              onChange={(e) => onChange({ ftpWatts: e.target.value })}
+            />
+          )}
+        </Field>
+      </div>
     </div>
   )
 }
@@ -392,11 +609,12 @@ export function ProfileSummary({ userId, name }: { userId: number; name: string 
       icon: <Ruler aria-hidden />,
       text: [p.heightCm && `${p.heightCm} cm`, age && `${age} yrs`].filter(Boolean).join(' · '),
     })
-  if (p.targetEvent) {
+  const race = raceSummary(p)
+  if (race) {
     const d = p.targetEventDate ? daysUntil(p.targetEventDate) : null
     facts.push({
       icon: <CalendarClock aria-hidden />,
-      text: `${p.targetEvent}${d !== null && d >= 0 ? ` · in ${d} days` : ''}`,
+      text: `${race}${d !== null && d >= 0 ? ` · in ${d} days` : ''}`,
     })
   }
   return (
@@ -509,12 +727,13 @@ export function ProfileDetails({ userId, name }: { userId: number; name: string 
         ['Days a week', p.daysPerWeek ? `${p.daysPerWeek} days` : null],
         ['Where they train', list(p.places.map((x) => TRAINING_PLACE_LABELS[x]))],
         [
-          'Event',
-          p.targetEvent &&
-            [p.targetEvent, p.targetEventDate && birthLabel(p.targetEventDate)]
+          'Race or competition',
+          raceSummary(p) &&
+            [raceSummary(p), p.targetEventDate && birthLabel(p.targetEventDate)]
               .filter(Boolean)
               .join(' · '),
         ],
+        ['Endurance numbers', enduranceSummary(p)],
         ['Injuries or anything to know', p.notes],
       ],
     },

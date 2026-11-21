@@ -400,7 +400,7 @@ function SaveMealSheet({
           if (meal) save.mutate({ name: name.trim() || `My ${label.toLowerCase()}`, date, meal })
         }}
       >
-        <div className="flex flex-col gap-1 pr-12">
+        <div className="flex flex-col gap-1">
           <h2 className="font-bold text-[22px]">Save as a meal</h2>
           <p className="text-[14px] text-ink-muted">
             Saves this {label.toLowerCase()} so you can add it again in one tap, from My meals in

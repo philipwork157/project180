@@ -6,10 +6,11 @@ import { checkInAnswers, checkIns, createDb, type Db, foodEntries, users } from 
 import { addDays, FOOD_REMINDER_MIN_MEALS, todayIn } from '@project180/shared'
 import { and, countDistinct, eq, inArray, isNull } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
+import { inChunks } from './batch'
 import type { Bindings } from './env'
 import { sendPush } from './push'
 
-/** Sends the reminder to everyone it's due for. A fixed number of queries. */
+/** Sends the reminder to everyone it's due for. One query per 80 people, all at once. */
 export async function sendFoodReminders(env: Bindings, db: Db, now = new Date()) {
   const people = await db
     .select({ id: users.id, timezone: users.timezone })
@@ -18,23 +19,21 @@ export async function sendFoodReminders(env: Bindings, db: Db, now = new Date())
   if (people.length === 0) return { due: 0, sent: 0 }
   const dayOf = new Map(people.map((p) => [p.id, todayIn(p.timezone, now)]))
   const days = [...new Set(dayOf.values())]
-  const logged = await db
-    .select({
-      userId: foodEntries.userId,
-      date: foodEntries.date,
-      meals: countDistinct(foodEntries.meal),
-    })
-    .from(foodEntries)
-    .where(
-      and(
-        inArray(
-          foodEntries.userId,
-          people.map((p) => p.id),
-        ),
-        inArray(foodEntries.date, days),
-      ),
-    )
-    .groupBy(foodEntries.userId, foodEntries.date)
+  // In slices: D1 allows 100 bound values per statement, and this list grows with every user.
+  const logged = await inChunks(
+    people.map((p) => p.id),
+    (slice) =>
+      db
+        .select({
+          userId: foodEntries.userId,
+          date: foodEntries.date,
+          meals: countDistinct(foodEntries.meal),
+        })
+        .from(foodEntries)
+        .where(and(inArray(foodEntries.userId, slice), inArray(foodEntries.date, days)))
+        .groupBy(foodEntries.userId, foodEntries.date),
+    80 - days.length,
+  )
   const meals = new Map(
     logged.filter((r) => r.date === dayOf.get(r.userId)).map((r) => [r.userId, r.meals]),
   )

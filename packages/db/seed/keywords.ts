@@ -80,9 +80,29 @@ const RULES: Array<[RegExp, string]> = [
     'cardio, conditioning, hiit',
   ],
   [/run|jog|treadmill|track/i, 'running, run, cardio'],
-  [/bike|cycling|ride|spin/i, 'cycling, bike, cardio'],
+  [/bike|cycling|\bride|spin/i, 'cycling, bike, cardio'],
   [/row(ing)? machine|ski erg/i, 'rower, erg, cardio, conditioning'],
-  [/swim/i, 'swimming, pool, cardio'],
+  [/swim|pull buoy|css/i, 'swimming, pool, cardio'],
+  [
+    /strides|fartlek|progression run|race-pace|5 km time trial|track intervals|hill repeats \(run|compromised run/i,
+    'running, run, cardio, speed',
+  ],
+  [/downhill|power hiking|trail hill/i, 'trail running, trail, mountain, hills, cardio'],
+  [
+    /trainer ride|sweet spot|ftp|vo2|cadence drills|hill repeats \(bike|mountain bike|recovery ride/i,
+    'cycling, bike, power, watts, ftp, cardio',
+  ],
+  [/threshold intervals \(bike|threshold intervals \(run/i, 'threshold, tempo, lactate'],
+  [/transition practice|brick/i, 'triathlon, transition, t1, t2'],
+  [
+    /hyrox|sled pull|sandbag lunges|compromised run|skierg|wall ball|sled push|burpee broad jump|farmer/i,
+    'hyrox, functional, race, conditioning',
+  ],
+  [/board press|pin press|larsen|spoto/i, 'bench press, bench, chest, triceps'],
+  [
+    /board press|pin press|pin squat|larsen|spoto|paused deadlift|block pull/i,
+    'powerlifting, competition lift, lockout, strength',
+  ],
   [/walk|hik/i, 'walking, steps, low impact, cardio'],
   [
     /stretch|pose|foam roll|circles|swings|cat-cow|inchworm|world's greatest|release|floss|rock|dislocate|open book|thread the needle|wall slide|wall angel|90\/90|airplane|pry|twist|savasana|dog|salutation|lunge with|knee hug|quad pull|leg swing|carioca|a-skip|butt kicks|swimmer|halo/i,

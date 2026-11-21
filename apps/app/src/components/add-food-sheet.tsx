@@ -253,7 +253,7 @@ function AddFood({
         }}
       />
       {back}
-      <div className="pr-12">
+      <div>
         <h2 className="font-display font-extrabold text-[24px] leading-7">
           {step.kind === 'review'
             ? step.source === 'photo' || step.source === 'describe'

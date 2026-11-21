@@ -34,6 +34,9 @@
     "db:recipes": "bun packages/db/scripts/seed-recipes.ts",
     "db:recipes:dev": "bun packages/db/scripts/seed-recipes.ts --env dev",
     "db:recipes:remote": "bun packages/db/scripts/seed-recipes.ts --remote",
+    "db:starter": "bun packages/db/scripts/seed-starter-programs.ts",
+    "db:starter:dev": "bun packages/db/scripts/seed-starter-programs.ts --env dev",
+    "db:starter:remote": "bun packages/db/scripts/seed-starter-programs.ts --remote",
     "db:philip": "bun packages/db/scripts/seed-philip.ts",
     "db:philip:dev": "bun packages/db/scripts/seed-philip.ts --env dev",
     "prepare": "lefthook install || true"

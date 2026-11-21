@@ -1,9 +1,18 @@
-import { ApiError, api, coachesQuery, programsQuery, usersQuery } from '@project180/client'
+import {
+  ApiError,
+  api,
+  coachesQuery,
+  invitationsQuery,
+  programsQuery,
+  usersQuery,
+} from '@project180/client'
 import {
   type CreateUserInput,
   createUserInput,
   GOAL_LABELS,
   generateTempPassword,
+  INVITE_DAYS,
+  type Invitation,
   isOwner,
   isStaff,
   type Me,
@@ -48,12 +57,25 @@ type EmailResult = { status: 'sent' | 'logged' | 'failed'; to: string; error?: s
 interface Created {
   name: string
   email: string
-  password: string
+  /** Staff only: the temporary password. Clients get a link instead. */
+  password: string | null
   phone: string
   emailResult: EmailResult
+  /** Clients: the link to choose their password. Not sent yet: the coach sends it. */
+  link: string | null
+  /** The invitation, to email it from here when the coach is ready. */
+  invitationId: number | null
+  /** The email already belonged to someone training on their own: they were invited instead. */
+  invited: boolean
 }
 
-/** Add a client (or, for owners, a coach) in four short steps. */
+type CreateReply = { email: EmailResult; link?: string; invited?: true; invitationId?: number }
+
+/**
+ * Add a client (or, for owners, a coach) in four short steps. A client gets a link to choose
+ * their own password (by email, and to copy or send on WhatsApp); their profile, goals, program
+ * and check-in are ready when they open it. Coaches get a temporary password.
+ */
 export function NewClientDrawer({
   open,
   onClose,
@@ -104,13 +126,17 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
 
   const create = useMutation({
     mutationFn: (input: CreateUserInput) =>
-      api<{ email: EmailResult }>('/admin/users', { method: 'POST', body: input }),
+      api<CreateReply>('/admin/users', { method: 'POST', body: input }),
   })
 
   function checkWho(): string | undefined {
-    const parsed = createUserInput
-      .pick({ name: true, email: true, password: true })
-      .safeParse({ name, email, password })
+    // Clients choose their own password from the link; only staff get a temporary one.
+    const who = createUserInput.pick({ name: true, email: true, password: true })
+    const parsed = (isClient ? who : who.required({ password: true })).safeParse({
+      name,
+      email,
+      password: isClient ? undefined : password,
+    })
     return parsed.success ? undefined : parsed.error.issues[0]?.message
   }
 
@@ -135,7 +161,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
       const res = await create.mutateAsync({
         name,
         email,
-        password,
+        ...(isClient ? {} : { password }),
         role: owner ? role : 'member',
         coachId: owner && isClient ? coachId : undefined,
         profile: draftToInput(profile),
@@ -148,20 +174,28 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                 repeatWeeks: checkInRepeat === 'once' ? null : (Number(checkInRepeat) as 1 | 2 | 4),
               }
             : null,
-        sendWelcome,
+        sendWelcome: isClient ? false : sendWelcome,
       })
       void queryClient.invalidateQueries({ queryKey: usersQuery.queryKey })
       void queryClient.invalidateQueries({ queryKey: ['enrollments'] })
+      void queryClient.invalidateQueries({ queryKey: invitationsQuery.queryKey })
       toast({
-        title: isClient ? 'Client added' : 'Coach added',
-        description: `${name} can sign in now.`,
+        title: res.invited ? 'Invitation ready' : isClient ? 'Client added' : 'Coach added',
+        description: res.invited
+          ? `${name} already uses the app: they accept on their Today screen.`
+          : isClient
+            ? `Send ${name} their link when you’re ready.`
+            : `${name} can sign in now.`,
       })
       setCreated({
         name,
         email: email.trim().toLowerCase(),
-        password,
+        password: isClient ? null : password,
         phone: profile.phone,
-        emailResult: res.email,
+        emailResult: res.email ?? null,
+        link: res.link ?? null,
+        invitationId: res.invitationId ?? null,
+        invited: Boolean(res.invited),
       })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not add them. Try again.')
@@ -191,11 +225,19 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
       open={open}
       onClose={onClose}
       title={
-        created ? `${created.name.split(' ')[0]} is in` : owner ? 'Add a person' : 'Add a client'
+        created
+          ? created.invited
+            ? `${created.name.split(' ')[0]} is invited`
+            : `${created.name.split(' ')[0]} is set up`
+          : owner
+            ? 'Add a person'
+            : 'Add a client'
       }
       description={
         created
-          ? 'Share their sign-in details.'
+          ? created.link || created.invited
+            ? 'Nothing has been sent yet.'
+            : 'Share their sign-in details.'
           : `Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`
       }
       footer={footer}
@@ -277,30 +319,43 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                       )}
                     </Field>
                   </div>
-                  <Field
-                    label="Temporary password"
-                    hint={`Works for ${TEMP_PASSWORD_DAYS} days. They choose their own the first time they sign in.`}
-                    error={error}
-                  >
-                    {(id) => (
-                      <div className="flex gap-2">
-                        <Input
-                          id={id}
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          className="font-mono"
-                        />
-                        <Button
-                          variant="secondary"
-                          className="shrink-0"
-                          icon={<RefreshCw className="size-4" aria-hidden />}
-                          onClick={() => setPassword(generateTempPassword())}
-                        >
-                          New
-                        </Button>
-                      </div>
-                    )}
-                  </Field>
+                  {isClient ? (
+                    <p className="rounded-md bg-surface-raised p-4 text-[14px] text-ink-muted">
+                      {first === 'them' ? 'They get' : `${first} gets`} a link by email (you can
+                      also send it on WhatsApp) to choose their own password. Everything you set up
+                      here is ready when they open it.
+                    </p>
+                  ) : (
+                    <Field
+                      label="Temporary password"
+                      hint={`Works for ${TEMP_PASSWORD_DAYS} days. They choose their own the first time they sign in.`}
+                      error={error}
+                    >
+                      {(id) => (
+                        <div className="flex gap-2">
+                          <Input
+                            id={id}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="font-mono"
+                          />
+                          <Button
+                            variant="secondary"
+                            className="shrink-0"
+                            icon={<RefreshCw className="size-4" aria-hidden />}
+                            onClick={() => setPassword(generateTempPassword())}
+                          >
+                            New
+                          </Button>
+                        </div>
+                      )}
+                    </Field>
+                  )}
+                  {error && isClient && step === 0 && (
+                    <p role="alert" className="font-semibold text-[14px] text-danger">
+                      {error}
+                    </p>
+                  )}
                   {owner && (
                     <div className="grid gap-4 sm:grid-cols-2">
                       <Field label="Role">
@@ -316,7 +371,7 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                           </Select>
                         )}
                       </Field>
-                      {isClient && (
+                      {isClient && (coaches.data?.length ?? 0) > 1 && (
                         <Field label="Coach">
                           {(id) => (
                             <Select
@@ -425,22 +480,24 @@ function Wizard({ open, onClose, me }: { open: boolean; onClose: () => void; me:
                       </Field>
                     </div>
                   )}
-                  <label className="flex cursor-pointer items-start gap-3 rounded-md bg-surface-raised p-4">
-                    <input
-                      type="checkbox"
-                      checked={sendWelcome}
-                      onChange={(e) => setSendWelcome(e.target.checked)}
-                      className="mt-0.5 size-5 accent-[var(--brand)]"
-                    />
-                    <span>
-                      <span className="block font-bold text-[15px]">
-                        Email {first} their sign-in details
+                  {!isClient && (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-md bg-surface-raised p-4">
+                      <input
+                        type="checkbox"
+                        checked={sendWelcome}
+                        onChange={(e) => setSendWelcome(e.target.checked)}
+                        className="mt-0.5 size-5 accent-[var(--brand)]"
+                      />
+                      <span>
+                        <span className="block font-bold text-[15px]">
+                          Email {first} their sign-in details
+                        </span>
+                        <span className="text-[13px] text-ink-muted">
+                          A welcome email with the link and temporary password.
+                        </span>
                       </span>
-                      <span className="text-[13px] text-ink-muted">
-                        A welcome email with the link and temporary password.
-                      </span>
-                    </span>
-                  </label>
+                    </label>
+                  )}
                   <Summary
                     rows={[
                       ['Name', name || '–'],
@@ -484,26 +541,76 @@ function Summary({ rows }: { rows: Array<[string, string | undefined]> }) {
 }
 
 function Done({ created }: { created: Created }) {
+  const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
+  // Emailing makes a fresh link (the old one stops working), so the message follows it.
+  const [link, setLink] = useState(created.link)
+  const [emailedTo, setEmailedTo] = useState<string | null>(null)
+  const sendEmail = useMutation({
+    mutationFn: () =>
+      api<{ invitations: Invitation[]; link?: string }>(
+        `/admin/invitations/${created.invitationId}/resend`,
+        { method: 'POST' },
+      ),
+    onSuccess: (res) => {
+      queryClient.setQueryData(invitationsQuery.queryKey, res.invitations)
+      if (res.link) setLink(res.link)
+      setEmailedTo(created.email)
+      toast({ title: 'Link emailed', description: `On its way to ${created.email}.` })
+    },
+    onError: (err) =>
+      toast({
+        title: 'Couldn’t send it',
+        description: err instanceof ApiError ? err.message : 'Try again.',
+        tone: 'error',
+      }),
+  })
   const first = created.name.split(' ')[0] ?? created.name
-  const message = `Hi ${first}, you're set up on Project 180.\n\nSign in: ${APP_URL}/login\nEmail: ${created.email}\nTemporary password: ${created.password}\n\nYou'll choose your own password when you first sign in. On your phone, open the link and "Add to Home Screen" to install it.`
-  const wa = `https://wa.me/${created.phone ? whatsappNumber(created.phone) : ''}?text=${encodeURIComponent(message)}`
-  const r = created.emailResult
-  const emailLine = !r
+  const message = created.invited
     ? null
-    : r.status === 'sent'
-      ? r.to === created.email
-        ? { ok: true, text: `Welcome email sent to ${r.to}.` }
-        : { ok: true, text: `Dev: the welcome email went to ${r.to} instead of ${created.email}.` }
-      : r.status === 'logged'
+    : link
+      ? `Hi ${first}, I’ve set you up on Project 180: your program and goals are ready.\n\nTap this link to choose your password and you’re in:\n${link}\n\nIt works for ${INVITE_DAYS} days. On your phone, “Add to Home Screen” once you’re in to install the app.`
+      : `Hi ${first}, you're set up on Project 180.\n\nSign in: ${APP_URL}/login\nEmail: ${created.email}\nTemporary password: ${created.password}\n\nYou'll choose your own password when you first sign in. On your phone, open the link and "Add to Home Screen" to install it.`
+  const wa = message
+    ? `https://wa.me/${created.phone ? whatsappNumber(created.phone) : ''}?text=${encodeURIComponent(message)}`
+    : null
+  const r = created.emailResult
+  const emailLine = emailedTo
+    ? {
+        ok: true,
+        text: created.invited
+          ? `Emailed ${emailedTo} too. They can accept from the email or their Today screen.`
+          : `Emailed ${emailedTo} a link to choose their password (works ${INVITE_DAYS} days). The message below has the same new link.`,
+      }
+    : created.invited
+      ? {
+          ok: true,
+          text: `${created.email} already uses the app on their own, so they get an invitation instead: it’s waiting on their Today screen, and nothing was emailed. They keep everything they’ve logged. Their body details, goals and program weren’t saved: set them up on their client page once they’ve accepted.`,
+        }
+      : created.link
         ? {
-            ok: false,
-            text: 'Email isn’t set up yet (no AWS keys), so nothing was sent. Share the details below.',
+            ok: true,
+            neutral: true,
+            text: `Nothing has been sent to ${first} yet. When you’re ready, email the link, send it on WhatsApp or copy the message. You’ll also find ${first} under Waiting to join on Clients.`,
           }
-        : {
-            ok: false,
-            text: `The email couldn’t be sent: ${r.error ?? 'unknown error'}. Share the details below.`,
-          }
+        : !r
+          ? null
+          : r.status === 'sent'
+            ? r.to === created.email
+              ? { ok: true, text: `Welcome email sent to ${r.to}.` }
+              : {
+                  ok: true,
+                  text: `Dev: the welcome email went to ${r.to} instead of ${created.email}.`,
+                }
+            : r.status === 'logged'
+              ? {
+                  ok: false,
+                  text: 'Email isn’t set up yet (no AWS keys), so nothing was sent. Share the details below.',
+                }
+              : {
+                  ok: false,
+                  text: `The email couldn’t be sent: ${r.error ?? 'unknown error'}. Share the details below.`,
+                }
 
   return (
     <div className="flex flex-col gap-5">
@@ -518,39 +625,57 @@ function Done({ created }: { created: Created }) {
         <p
           className={cn(
             'flex items-start gap-2 rounded-md p-3 font-semibold text-[14px]',
-            emailLine.ok ? 'bg-brand-soft text-brand-text' : 'bg-sand/25 text-sand-text',
+            'neutral' in emailLine
+              ? 'bg-surface-raised text-ink'
+              : emailLine.ok
+                ? 'bg-brand-soft text-brand-text'
+                : 'bg-sand/25 text-sand-text',
           )}
         >
           <Mail className="mt-0.5 size-4 shrink-0" aria-hidden />
           {emailLine.text}
         </p>
       )}
-      <pre className="whitespace-pre-wrap rounded-md bg-surface-raised p-4 font-sans text-[14px] leading-6">
-        {message}
-      </pre>
-      <div className="flex flex-wrap gap-2">
+      {created.invitationId !== null && !emailedTo && (
         <Button
-          variant="secondary"
-          icon={
-            copied ? (
-              <Check className="size-4" aria-hidden />
-            ) : (
-              <Copy className="size-4" aria-hidden />
-            )
-          }
-          onClick={async () => {
-            await navigator.clipboard.writeText(message)
-            setCopied(true)
-            setTimeout(() => setCopied(false), 1500)
-          }}
+          className="self-start"
+          icon={<Mail className="size-4" aria-hidden />}
+          loading={sendEmail.isPending}
+          onClick={() => sendEmail.mutate()}
         >
-          {copied ? 'Copied' : 'Copy details'}
+          {created.invited ? `Email ${first} too` : `Email the link to ${first}`}
         </Button>
-        <a href={wa} target="_blank" rel="noreferrer" className={buttonClasses('secondary')}>
-          <MessageCircle className="size-4" aria-hidden />
-          Send on WhatsApp
-        </a>
-      </div>
+      )}
+      {message && wa && (
+        <>
+          <pre className="whitespace-pre-wrap break-words rounded-md bg-surface-raised p-4 font-sans text-[14px] leading-6">
+            {message}
+          </pre>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              icon={
+                copied ? (
+                  <Check className="size-4" aria-hidden />
+                ) : (
+                  <Copy className="size-4" aria-hidden />
+                )
+              }
+              onClick={async () => {
+                await navigator.clipboard.writeText(message)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
+              }}
+            >
+              {copied ? 'Copied' : link ? 'Copy message' : 'Copy details'}
+            </Button>
+            <a href={wa} target="_blank" rel="noreferrer" className={buttonClasses('secondary')}>
+              <MessageCircle className="size-4" aria-hidden />
+              Send on WhatsApp
+            </a>
+          </div>
+        </>
+      )}
     </div>
   )
 }

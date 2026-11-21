@@ -5,6 +5,7 @@ import {
   BODY_GOALS,
   EXPERIENCE_LEVELS,
   GOALS,
+  RACE_KINDS,
   ROLES,
   SEXES,
   WEIGHT_UNITS,
@@ -151,6 +152,17 @@ export const clientProfiles = sqliteTable('client_profiles', {
   daysPerWeek: integer('days_per_week'),
   targetEvent: text('target_event'),
   targetEventDate: text('target_event_date'),
+  // The one race or competition they're working towards; timed races also take a goal time
+  // and their current best (PB), in seconds.
+  raceKind: text('race_kind', { enum: RACE_KINDS }),
+  goalTimeSeconds: integer('goal_time_seconds'),
+  bestTimeSeconds: integer('best_time_seconds'),
+  // Endurance numbers (coach sets them): heart-rate zones, run paces and bike power are worked
+  // out from these. Threshold pace is seconds per km; FTP is watts.
+  maxHr: integer('max_hr'),
+  restingHr: integer('resting_hr'),
+  thresholdPaceSeconds: integer('threshold_pace_seconds'),
+  ftpWatts: integer('ftp_watts'),
   // Injuries, limitations, anything the coach should know.
   notes: text('notes'),
   createdAt: createdAt(),

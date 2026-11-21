@@ -24,7 +24,8 @@ const STORY = {
 
 /**
  * The link in a coach's invitation email. Someone new chooses a password and is signed in
- * straight away; someone with an account signs in and accepts on Today.
+ * straight away; someone with an account signs in and accepts on Today. When their coach already
+ * set the account up (Add client), they only choose a password and land on Today, ready to go.
  */
 function InvitePage() {
   const { token } = Route.useSearch()
@@ -62,11 +63,16 @@ function InvitePage() {
       </AuthShell>
     )
 
-  const { coachName, businessName, existing } = invitation.data
+  const { coachName, businessName, existing, prepared } = invitation.data
+  const first = invitation.data.name.split(' ')[0] || invitation.data.name
   return (
     <AuthShell
-      title={`${coachName} invited you`}
-      subtitle={`Train with ${businessName} on Project 180: your program, food, progress and a chat with your coach.`}
+      title={prepared ? `Welcome, ${first}` : `${coachName} invited you`}
+      subtitle={
+        prepared
+          ? `${coachName} has set up your program and goals on Project 180. Choose a password and you’re in.`
+          : `Train with ${businessName} on Project 180: your program, food, progress and a chat with your coach.`
+      }
       story={STORY}
     >
       {existing ? (
@@ -80,13 +86,29 @@ function InvitePage() {
           </Link>
         </div>
       ) : (
-        <NewAccountForm token={token} email={invitation.data.email} name={invitation.data.name} />
+        <NewAccountForm
+          token={token}
+          email={invitation.data.email}
+          name={invitation.data.name}
+          prepared={Boolean(prepared)}
+        />
       )}
     </AuthShell>
   )
 }
 
-function NewAccountForm({ token, email, name }: { token: string; email: string; name: string }) {
+function NewAccountForm({
+  token,
+  email,
+  name,
+  prepared,
+}: {
+  token: string
+  email: string
+  name: string
+  /** Their coach set the account up: only a password to choose. */
+  prepared: boolean
+}) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [error, setError] = useState<{
@@ -113,7 +135,7 @@ function NewAccountForm({ token, email, name }: { token: string; email: string; 
     try {
       await acceptInvitationNew({
         token,
-        name: String(form.get('name')),
+        name: prepared ? name : String(form.get('name')),
         password,
         acceptTerms: true,
       })
@@ -134,12 +156,17 @@ function NewAccountForm({ token, email, name }: { token: string; email: string; 
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <Field label="Your name">
-        {(id) => (
-          <Input id={id} name="name" autoComplete="name" defaultValue={name} required autoFocus />
-        )}
-      </Field>
-      <Field label="Email" hint="The invitation was sent here.">
+      {!prepared && (
+        <Field label="Your name">
+          {(id) => (
+            <Input id={id} name="name" autoComplete="name" defaultValue={name} required autoFocus />
+          )}
+        </Field>
+      )}
+      <Field
+        label="Email"
+        hint={prepared ? 'You sign in with this.' : 'The invitation was sent here.'}
+      >
         {(id) => <Input id={id} value={email} readOnly className="text-ink-muted" />}
       </Field>
       <Field
@@ -147,7 +174,15 @@ function NewAccountForm({ token, email, name }: { token: string; email: string; 
         hint="At least 8 characters."
         error={error?.field === 'password' ? error.text : undefined}
       >
-        {(id) => <PasswordInput id={id} name="password" autoComplete="new-password" required />}
+        {(id) => (
+          <PasswordInput
+            id={id}
+            name="password"
+            autoComplete="new-password"
+            required
+            autoFocus={prepared}
+          />
+        )}
       </Field>
       <Field label="Type it again" error={error?.field === 'repeat' ? error.text : undefined}>
         {(id) => <PasswordInput id={id} name="repeat" autoComplete="new-password" required />}
@@ -190,7 +225,7 @@ function NewAccountForm({ token, email, name }: { token: string; email: string; 
         loading={pending}
         className="mt-2 rounded-md shadow-none"
       >
-        Create my account
+        {prepared ? 'Choose password and start' : 'Create my account'}
       </Button>
     </form>
   )

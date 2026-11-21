@@ -11,6 +11,8 @@ import {
   type ProgramBuildResult,
   type ProgramDayInput,
   programInput,
+  WORKOUT_SECTIONS,
+  type WorkoutSection,
 } from '@project180/shared'
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
@@ -36,29 +38,38 @@ import {
 const TIMEOUT_MS = 170_000
 export const MAX_WEEKS = 16
 const MAX_NEW_WORKOUTS = 8
+/** Room for a full day: mobility, main work, abs, cardio and a cool-down. */
+const MAX_EXERCISES_PER_WORKOUT = 16
 /** How many library workouts Claude is shown (newest first). */
 const MAX_LISTED_WORKOUTS = 150
 
-const INSTRUCTIONS = `You are a strength and conditioning coach building one multi-week training program for a coaching app in South Africa. The coach describes what they want; you lay it out over the weeks.
+const INSTRUCTIONS = `You are a strength and conditioning coach building one multi-week training program for a coaching app in South Africa. The coach describes what they want; you lay it out over the weeks. Always deliver a complete, ready-to-use program, even from a short request like "a basic 4 week program": fill in whatever the coach leaves out (days per week, split, level, sets, reps, rest) with sensible defaults instead of leaving gaps.
 
 You are given two lists:
-1. The coach's existing workouts (id | name | minutes | exercises). Reuse one by putting its id in existing_workout_id when it fits the request well.
+1. The coach's existing workouts (id | name | minutes | exercises by section). Reuse one by putting its id in existing_workout_id when it fits the request well.
 2. The exercise library (id | name | muscle group | equipment | tracked by). When no existing workout fits, design a new workout in "new_workouts" using ONLY exercise ids from this list, and schedule it by its key in new_workout.
+
+What goes into each training day:
+- Basic request (the coach doesn't ask for more): a short warm-up, the main work and a short cool-down.
+- Full program: when the coach asks for a "full", "fully fledged" or "complete" program, or names parts such as mobility, pre-mobility, warm-up, abs, core, cardio, conditioning, finisher, stretching or cool-down, EVERY training day gets those parts. Do this unless the coach says a part is only for some days.
+- Order: the order the coach gives. If they ask for a full program without an order, use this one: 1) mobility warm-up (pre-mobility drills and dynamic stretches, warm_up section, about 3 to 4 exercises); 2) the main strength work (main section); 3) abs/core (main section, after the strength work, often as a circuit); 4) cardio or conditioning (main section, last, timed); 5) cool-down stretches (cool_down section, about 3 to 4 stretches).
+- List every workout's exercises in the exact order they are done. Mobility and warm-up drills always go in warm_up, stretching after the session always goes in cool_down, and everything else in main.
+- Pick each part from the right kind of exercise in the library: mobility and stretches from mobility/stretch exercises, abs from core exercises, cardio from cardio exercises (tracked by time). If the library has nothing for a part, leave it out and name what you wanted in "missing".
+- Only reuse an existing workout when its exercises already contain the parts the coach asked for; otherwise build a new one.
 
 Program rules:
 - duration_weeks: what the coach asks for, 1 to ${MAX_WEEKS} (4 if they don't say).
-- schedule: one entry per training day. week runs 1..duration_weeks, day runs 1..7 within each program week (day 1 is the first day of the week). Days without an entry are rest days. Respect the number of training days per week the coach asks for and spread them sensibly (not 3 hard days in a row unless asked).
+- schedule: one entry per training day. week runs 1..duration_weeks, day runs 1..7 within each program week (day 1 is the first day of the week). Days without an entry are rest days. Respect the number of training days per week the coach asks for (3 if they don't say) and spread them sensibly (not 3 hard days in a row unless asked).
 - Every entry has exactly one of existing_workout_id or new_workout (the other null).
 - Keep the number of different workouts small and reuse them across weeks (an A/B or A/B/C rotation is typical). At most ${MAX_NEW_WORKOUTS} new workouts.
 - Progression: a short note in "note" on how to progress week to week (e.g. add a set or load) is enough; don't make a new workout per week.
 - weigh_in_day: a day 1..7 for a weekly weigh-in only if the coach asks for weigh-ins or check-ins, otherwise null.
 
-New workout rules (same as building a single workout):
-- key: a short label like "A", "B", "C". name: short and clear, like "Full Body A" (max 60 characters). description: one sentence.
-- Sections: warm_up (short, light), main, cool_down (stretching or mobility). Only add a warm-up or cool-down if it suits the request.
-- Each exercise: sets (1–10), rest_seconds (0–300). For exercises tracked by reps give reps_min and reps_max (equal for a fixed number); for exercises tracked by time give seconds instead and leave reps null.
+New workout rules:
+- key: a short label like "A", "B", "C". name: short and clear, like "Full Body A" (max 60 characters). description: one sentence that names the parts, like "Mobility, lower body strength, core circuit, bike intervals and stretches."
+- Each exercise: sets (1–10), rest_seconds (0–300). For exercises tracked by reps give reps_min and reps_max (equal for a fixed number); for exercises tracked by time give seconds instead and leave reps null. Mobility and stretches: 1 or 2 sets, short rest.
 - Supersets and circuits: give the exercises the same group number (1, 2, …) and describe each group once in that workout's "groups". Exercises not in a group have group null.
-- 3 to 10 exercises per workout. Keep notes short and practical, or null.
+- Up to ${MAX_EXERCISES_PER_WORKOUT} exercises per workout (a basic workout usually needs 5 to 8; a full one with every part 12 to 16). estimated_minutes includes every part. Keep notes short and practical, or null.
 - If an exercise you want is not in the library, pick the closest one that is and name the one you wanted in "missing".
 
 Program name: short and clear, like "Beginner Full Body 8 Weeks" (max 60 characters). description: one or two sentences for the coach.
@@ -147,6 +158,8 @@ export interface LibraryWorkout {
   name: string
   estimatedMinutes: number | null
   exerciseNames: string[]
+  /** The same exercises with their section, in order, so Claude can see how the coach builds. */
+  exercises?: Array<{ name: string; section: WorkoutSection }>
 }
 
 /** The coach's library workouts as Claude sees them (no client copies, nothing archived). */
@@ -161,24 +174,39 @@ export async function workoutsFor(db: Db, user: Me): Promise<LibraryWorkout[]> {
     rows.map((r) => r.id),
     (ids) =>
       db
-        .select({ workoutId: workoutExercises.workoutId, name: exercises.name })
+        .select({
+          workoutId: workoutExercises.workoutId,
+          name: exercises.name,
+          section: workoutExercises.section,
+        })
         .from(workoutExercises)
         .innerJoin(exercises, eq(exercises.id, workoutExercises.exerciseId))
         .where(inArray(workoutExercises.workoutId, ids))
         .orderBy(asc(workoutExercises.workoutId), asc(workoutExercises.position)),
   )
-  const namesOf = new Map<number, string[]>()
-  for (const i of items) namesOf.set(i.workoutId, [...(namesOf.get(i.workoutId) ?? []), i.name])
-  return rows.map((r) => ({ ...r, exerciseNames: namesOf.get(r.id) ?? [] }))
+  const of = new Map<number, Array<{ name: string; section: WorkoutSection }>>()
+  for (const i of items)
+    of.set(i.workoutId, [...(of.get(i.workoutId) ?? []), { name: i.name, section: i.section }])
+  return rows.map((r) => {
+    const list = of.get(r.id) ?? []
+    return { ...r, exerciseNames: list.map((e) => e.name), exercises: list }
+  })
 }
 
 function workoutsText(list: LibraryWorkout[]) {
   if (list.length === 0) return '(none yet)'
+  const short = { warm_up: 'warm-up', main: 'main', cool_down: 'cool-down' } as const
   return list
     .map((w) => {
-      const names = w.exerciseNames.slice(0, 10).join(', ')
-      const more = w.exerciseNames.length > 10 ? ', …' : ''
-      return `${w.id} | ${w.name} | ${w.estimatedMinutes ?? '?'} min | ${names}${more}`
+      const items =
+        w.exercises ?? w.exerciseNames.map((name) => ({ name, section: 'main' as const }))
+      const parts = WORKOUT_SECTIONS.flatMap((section) => {
+        const names = items.filter((e) => e.section === section).map((e) => e.name)
+        if (names.length === 0) return []
+        const shown = names.slice(0, 8).join(', ')
+        return [`${short[section]}: ${shown}${names.length > 8 ? ', …' : ''}`]
+      })
+      return `${w.id} | ${w.name} | ${w.estimatedMinutes ?? '?'} min | ${parts.join('; ')}`
     })
     .join('\n')
 }
@@ -198,13 +226,15 @@ export function askClaudeForProgram(
       failMessage: 'Claude couldn’t build that program. Try again, or describe it differently.',
       system: INSTRUCTIONS,
       texts: [
-        `Existing workouts (id | name | minutes | exercises):\n${workoutsText(existing)}`,
+        `Existing workouts (id | name | minutes | exercises by section):\n${workoutsText(existing)}`,
         `Exercise library (id | name | muscle group | equipment | tracked by):\n${libraryText(library)}`,
         `The coach asks for:\n${prompt}`,
       ],
+      // Instructions, workouts and library are the same between builds: cache them.
+      cachedTexts: 2,
       schema: REPLY_SCHEMA,
       check: replySchema,
-      maxTokens: 20000,
+      maxTokens: 24000,
       timeoutMs: TIMEOUT_MS,
       size: (r) => `${r.duration_weeks} weeks, ${r.new_workouts.length} new workouts`,
     },

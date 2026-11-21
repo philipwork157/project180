@@ -107,7 +107,7 @@
 <header class="hero">
   <div class="kicker">Project 180 · TRAIN. FUEL. FEEL. LIVE.</div>
   <h1>How Project 180 works</h1>
-  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>20 November 2026</b>.</p>
+  <p>The stack, how the code is laid out, who can see what, every script, the environment and how to ship. Updated with every change. Last updated <b>21 November 2026</b>.</p>
 </header>
 
 <div class="layout">
@@ -117,6 +117,7 @@
     <a href="#layout">Code layout</a>
     <a href="#people">Roles and businesses</a>
     <a href="#accounts">Sign-up and accounts</a>
+    <a href="#sports">Coaching any sport</a>
     <a href="#claude">Claude and costs</a>
     <a href="#scripts">Scripts</a>
     <a href="#database">Database and migrations</a>
@@ -204,11 +205,27 @@
         <li><b>Forgot password</b>: a one-time link (60 minutes) in both apps; signs out everywhere.</li>
         <li><b>Welcome wizard</b> (<code>/welcome</code>): only for people who signed up themselves. Goal, about you, daily plan; skippable.</li>
         <li><b>Delete my account</b>: Profile in the app (clients), with their password. Owners delete people from the client page.</li>
-        <li><b>Invitations</b>: Clients → Invite client sends an email (link works 14 days). Someone new opens <code>/invite</code> in the app and chooses a password (signed in at once, no wizard). Someone already training on their own sees the invitation on Today; accepting moves them into the business with all their history. Pending invitations show on the Clients page with Resend and Cancel.</li>
-        <li><b>Temporary passwords</b>: still possible ("Add with a password"); staff-set passwords must be changed at first sign-in.</li>
+        <li><b>Add client</b> (Clients → Add client; owners: Add person): one wizard (Who, Body, Goals, Program and first check-in). No coach to pick unless the business has more than one coach. The account is made at once with everything set up, but can't be signed in to yet; the client gets an email link (14 days), and the coach also gets the link to copy or send on WhatsApp. Opening <code>/invite</code> shows "Welcome, name", asks only for a password (and the terms tick), and lands them on Today with their program ready. No welcome wizard, no temporary password. The link stops working once used or once they've signed in some other way. Code: <code>POST /admin/users</code> without a password, <code>invitations.user_id</code>.</li>
+        <li><b>Waiting to join</b>: the Clients page lists clients who haven't chosen a password yet (Send again makes a fresh link and copies it for WhatsApp) and plain invitations (Send again, Cancel).</li>
+        <li><b>Already on their own</b>: if the email belongs to someone training on their own, Add client sends them an invitation instead; they accept on Today and keep all their history (the body, goals and program from the wizard aren't saved: set them up after they accept).</li>
+        <li><b>Temporary passwords</b>: coaches get one when an owner adds them; for a client it's the emergency button on their Profile &amp; access tab (it also opens an account whose link was never used). Staff-set passwords must be changed at first sign-in.</li>
         <li><b>Download my data</b>: Profile in the app, one JSON file of everything they logged (<code>GET /me/export</code>).</li>
         <li><b>Limits</b>: 5 wrong passwords per email / 20 per network per 15 minutes; 5 sign-ups per network per hour; 3 emails per address and 10 per network per hour.</li>
         <li><b>Terms and privacy</b>: <code>/terms</code> and <code>/privacy</code> in both apps (draft text in <code>packages/ui/src/legal.tsx</code>; have it checked by a lawyer).</li>
+      </ul>
+    </section>
+
+    <section class="card" id="sports">
+      <h2>Coaching any sport</h2>
+      <p>Bodybuilding, fat loss, powerlifting, road and trail running, cycling, swimming, triathlon, Hyrox, CrossFit and sport-specific clients all fit the same flow.</p>
+      <ul>
+        <li><b>Training focus</b> (<code>GOALS</code> in packages/shared/src/enums.ts) says what kind of athlete someone is; the <b>body goal</b> stays separate and drives calories and check-ins.</li>
+        <li><b>One race or competition</b> per client on <code>client_profiles</code>: <code>race_kind</code> (<code>RACE_KINDS</code>: 5 km to Ironman, Hyrox, bodybuilding show, powerlifting meet…), event name and date, and for races on the clock a goal time and current PB in seconds. Road distances show the pace needed.</li>
+        <li><b>Endurance numbers</b> (coach sets them, shown for endurance focus areas): max and resting heart rate, threshold pace per km, cycling FTP. Helpers in <code>packages/shared/src/endurance.ts</code> turn them into real targets: heart-rate zones in bpm (heart-rate reserve when the resting rate is known), watts from % FTP.</li>
+        <li>With a coach, the client can't change the race goal or endurance numbers (<code>PUT /me/profile</code> ignores them); left out of a save keeps what's there.</li>
+        <li><b>Workout builder</b>: cardio rows also take power (% FTP), cadence and climb; every row, strength included, can take an effort (RPE 1–10). Distance intervals are sets × distance with rest (6 × 800 m). The phone shows each client's own beats and watts.</li>
+        <li><b>Logging</b>: cardio sets can also save average heart rate, watts and climb ("Add heart rate &amp; power" on the card); the coach's review shows them with the pace.</li>
+        <li><b>Starter exercises</b>: <code>packages/db/seed/exercises-endurance.ts</code> (runs, trail, bike, swim, triathlon, Hyrox stations, powerlifting variations), added by <code>bun run db:seed</code>.</li>
       </ul>
     </section>
 
@@ -224,6 +241,15 @@
         </tbody>
       </table></div>
       <p>Every call is saved in <code>claude_calls</code> with tokens and cost (USD, at that day's price; prices in <code>packages/shared/src/claude.ts</code>). Never the photo, note or prompt. Needs <code>ANTHROPIC_API_KEY</code>.</p>
+      <h3>Build with Claude (workouts and programs)</h3>
+      <ul>
+        <li><b>Uses only your exercise library.</b> It never adds exercises; anything it wanted but couldn't find is listed after the build ("Claude would also have used …").</li>
+        <li><b>A short request still gives a complete program</b> ("A basic 4 week program"): Claude fills in days, split, sets and reps, with a short warm-up and cool-down.</li>
+        <li><b>Fully fledged:</b> ask for a "fully fledged" (full, complete) program, or name the parts, and every training day gets them, in your order. Without an order: mobility warm-up → main strength → abs/core → cardio → cool-down stretches. Mobility goes in Warm-up, stretches in Cool-down, abs and cardio at the end of Main. Up to 16 exercises per workout.</li>
+        <li>Claude sees your existing workouts by section (warm-up, main, cool-down), so it can follow how you build, and reuses one only if it already has the parts asked for.</li>
+        <li><b>Cost:</b> the instructions and library are cached, so builds within about 5 minutes of each other pay about a tenth for that part. For cheap testing pick Haiku 5.5 and a low limit on Platform → Claude. Code: <code>packages/api/src/program-builder.ts</code>, <code>workout-builder.ts</code>.</li>
+        <li><b>Speak instead of typing:</b> the "Speak instead" button under both boxes uses the browser's own speech-to-text (free, no Claude tokens; English, South Africa). Chrome, Edge and Safari only; it hides in Firefox. The browser sends the audio to its own speech service (Google in Chrome, Apple in Safari). Component: <code>DictateButton</code> in <code>packages/ui/src/dictate.tsx</code>; the admin's <code>_headers</code> allows <code>microphone=(self)</code>.</li>
+      </ul>
     </section>
 
     <section class="card" id="scripts">
@@ -260,6 +286,7 @@
         <tbody>
           <tr><td><code>bun run admin:create</code> (<code>:dev</code>, <code>:live</code>)</td><td>Makes an owner, coach or platform admin (asks name, email, role, business, password). Refuses to turn a coach with clients or a library into the platform admin.</td></tr>
           <tr><td><code>bun run db:seed</code> (<code>:dev</code>, <code>:remote</code>)</td><td>Starter exercises (with photos) and workouts. Add <code>-- --business "Name"</code> for one business; otherwise the first owner's. Safe to run again.</td></tr>
+          <tr><td><code>bun run db:starter</code> (<code>:dev</code>, <code>:remote</code>)</td><td>Adds the 5 ready-made starter programs and their 16 workouts to the starter library (the business picked on the Platform page; <code>-- --business "Name"</code> for another). Run its library seed first. Safe to run again: anything that already exists by name is left alone.</td></tr>
           <tr><td><code>bun run db:recipes</code> (<code>:dev</code>, <code>:remote</code>)</td><td>Starter recipes, same <code>--business</code> option.</td></tr>
           <tr><td><code>bun run db:philip</code> (<code>:dev</code>)</td><td>Philip's own program (personal seed).</td></tr>
         </tbody>
@@ -280,7 +307,7 @@
         <li>Change <code>packages/db/src/schema</code>, then <code>bun run db:apply</code>. Never hand-edit a generated migration; one-off data moves are custom migrations (<code>drizzle-kit generate --custom</code>).</li>
         <li><b>Never rebuild a table on D1</b> (a <code>__new_</code> table in the SQL): it can cascade-delete child rows. Add nullable columns, new tables or indexes instead.</li>
         <li>D1 takes at most 100 values per statement: multi-row inserts use <code>insertMany</code> + <code>runAll</code>.</li>
-        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>, <code>0040_favourites</code>, <code>0041_check_ins</code>.</li>
+        <li>Latest migrations: <code>0031_claude_calls</code>, <code>0032_food_extras</code>, <code>0033_businesses</code>, <code>0034_businesses_backfill</code> (moves the original gym into "Project 180"), <code>0035_email_tokens</code>, <code>0036_onboarding</code>, <code>0037_terms</code>, <code>0038_records</code> (invitations, who-did-what record, errors), <code>0039_sign_ins</code>, <code>0040_favourites</code>, <code>0041_check_ins</code>, <code>0042_invitation_user</code> (links an invitation to the account a coach set up; added column only, deleting a person clears it in <code>deletePersonForGood</code>), <code>0043_endurance_profile</code> (race goal and endurance numbers on <code>client_profiles</code>), <code>0044_endurance_workouts</code> (power, cadence, effort and climb targets on workout and session rows; heart rate, watts and climb on <code>set_logs</code>), <code>0045_invitation_emailed</code> (<code>invitations.emailed_at</code>: null = not sent yet) and <code>0046_invitation_emailed_backfill</code> (marks older invitations as emailed). All only add columns or fill one.</li>
       </ul>
     </section>
 
@@ -400,6 +427,16 @@ bun run admin:create:live  # your platform admin (name+platform@…), then your 
     <section class="card" id="changes">
       <h2>Latest changes</h2>
       <ul class="log">
+        <li><span class="pill">21 Nov</span> Starter programs for people on their own, from code: <code>bun run db:starter</code> (and <code>:dev</code>, <code>:remote</code>) adds Beginner Full Body (3 days), Push Pull Legs (3 and 6 days), Upper Lower (4 days) and Fat Loss: Strength &amp; Cardio (4 days) to the starter library, with warm-ups, cool-downs, effort targets, a weekly weigh-in and a progression note each week. Data in <code>packages/db/seed/starter-programs.ts</code>.</li>
+        <li><span class="pill">21 Nov</span> Add client no longer emails straight away: the client is set up and nothing is sent until you choose. Send the link from the last screen (Email the link, Send on WhatsApp, Copy message) or later from Waiting to join on Clients (Email the link, Copy the link), where each person shows "Not sent yet" or when it was emailed. Every new link replaces the older one. Migrations <code>0045_invitation_emailed</code> and <code>0046_invitation_emailed_backfill</code>.</li>
+        <li><span class="pill">21 Nov</span> Coach any sport. More training focuses (bodybuilding, powerlifting, trail running, cycling, swimming, Hyrox, CrossFit, sport-specific), one race or competition per client with goal time and PB, and endurance numbers (max/resting heart rate, threshold pace, FTP) that make zones and power targets personal. The workout builder adds power, cadence, climb and effort (RPE, strength too); the phone logs heart rate, watts and climb on cardio sets. About 40 new starter exercises. Migrations <code>0043_endurance_profile</code> and <code>0044_endurance_workouts</code>.</li>
+        <li><span class="pill">20 Nov</span> One Add client flow: capture name, email, body, goals, program and first check-in, and the client gets a link (email, or copy/WhatsApp) to choose their password; everything is ready when they land in the app. The separate Invite client button is gone; someone already on their own gets an invitation automatically. Migration <code>0042_invitation_user</code>.</li>
+        <li><span class="pill">20 Nov</span> Inviting or adding a client no longer asks a coach working alone to pick a coach: the Coach box only shows when the business has more than one coach; otherwise the client is yours.</li>
+        <li><span class="pill">20 Nov</span> "Speak instead" in Build with Claude (workouts and programs): tap, talk, and your words appear in the box as you speak; tap Stop, check the text, then build. Free browser speech-to-text, no tokens. The admin now allows the microphone for its own pages only.</li>
+        <li><span class="pill">20 Nov</span> Build with Claude: always a complete program, even from "A basic 4 week program"; ask for a fully fledged program (or name the parts) and every day gets mobility, main work, abs, cardio and a cool-down in your order. Up to 16 exercises per workout (was 10), Claude sees existing workouts by section, the library is cached between builds (cheaper testing), and new example prompts in both builders.</li>
+        <li><span class="pill">20 Nov</span> Bottom sheets in the app (Add activity, Describe what you ate, Water and the rest): the handle and round close button now sit in their own bar at the top that never scrolls, and only the content below it scrolls. Content no longer slides underneath the close button; a thin line appears under the bar once you scroll (<code>apps/app/src/components/sheet.tsx</code>).</li>
+        <li><span class="pill">20 Nov</span> Calendar for people on their own: with no program it no longer says "your coach assigns your program" (they have no coach). It shows the ready-made starter programs to pick from, the same list as on Today, and filling the calendar starts from there. Clients with a coach still see the old message.</li>
+        <li><span class="pill">20 Nov</span> Security and scale audit. A client's program and workout copies now belong to whoever coaches them <b>now</b>: before, the coach who assigned them could still open, change or reuse them after the client moved to another coach (<code>visibleTo</code> / <code>assertCanEditItem</code> in packages/api/src/library.ts; test <code>coach-change.test.ts</code>). The 19:30 food reminder no longer fails once more than about 100 people have it on (D1's 100-value limit; now in slices, with a test), and the same fix for the Platform Businesses list past 100 businesses and for burned calories over long ranges. Accepting an invitation as someone new is limited per network address, like sign-up.</li>
         <li><span class="pill">20 Nov</span> Coach sign-up fixed: copying the starter library crashed as soon as a starter business was picked (drizzle can't batch raw SQL with bound values), leaving a coach with an account but no verify email. It now runs as one native D1 batch (<code>runSqlBatch</code> in packages/api/src/batch.ts). The phone app answers the platform admin exactly like a wrong password (the sign-in record still says "Platform admin tried the app").</li>
         <li><span class="pill">20 Nov</span> Check-ins: a <b>body goal</b> per client (lose fat, maintain, gain weight, build muscle, get stronger, recomp); the coach sets the <b>check-in date</b> and how often (in the add-client wizard or the new <b>Check-ins</b> tab); the client sees it on Today, Profile and their calendar, gets a push the evening before and on the day (the 19:30 job), and fills in a short form. The tab's <b>report</b> covers the days since the last check-in: a verdict against the goal (in a deficit?), weight and measurements, calories and macros against target and maintenance, meals, water, steps, workouts, their answers, flags, and the coach's notes. Migration <code>0041_check_ins</code>.</li>
         <li><span class="pill">20 Nov</span> Faster food logging: <b>Describe</b> (say what you ate, Claude turns it into foods; counts as one of the day's photo estimates), <b>Look it up</b> on a renamed or uncertain food (the food database first, Claude only if it knows nothing), and <b>Favourites</b> (star a food to log it again in one tap). Migration <code>0040_favourites</code>.</li>

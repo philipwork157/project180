@@ -2,6 +2,7 @@ import {
   ApiError,
   api,
   meQuery,
+  myProfileQuery,
   planQuery,
   rememberLocalOwner,
   sessionQuery,
@@ -10,11 +11,13 @@ import {
 import {
   type Board,
   buildBoard,
+  enduranceTargets,
   type FinishResult,
   failedSets,
   formatDuration,
   GROUP_KIND_LABELS,
   hrZone,
+  hrZoneLabel,
   MUSCLE_GROUP_LABELS,
   type PreviousSet,
   repsLabel,
@@ -46,6 +49,7 @@ import {
   Check,
   ChevronDown,
   CloudOff,
+  HeartPulse,
   Plus,
   RotateCcw,
   Square,
@@ -54,7 +58,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Celebration } from '../components/celebration'
 import { Elapsed } from '../components/elapsed'
 import { useExerciseHowTo } from '../components/exercise-how-to'
@@ -724,14 +728,15 @@ function ExerciseCard({
   // Bodyweight in this workout: reps only, even if the exercise usually has a weight.
   const repsOnly = ex.trackingType === 'reps' || ex.bodyweight
   const complete = sets.length > 0 && sets.every((s) => s.done)
-  const endurance = [
-    ex.targetPaceSeconds != null && `${formatPace(ex.targetPaceSeconds)}/km`,
-    ex.targetHrZone != null &&
-      `Zone ${ex.targetHrZone} (${hrZone(ex.targetHrZone)?.name.toLowerCase()})`,
-  ].filter(Boolean)
-  const target =
+  // Their own heart rate and FTP turn "Zone 2" and "90% FTP" into beats and watts.
+  const me = useQuery({ ...myProfileQuery, staleTime: 10 * 60_000 }).data ?? null
+  const endurance = enduranceTargets(ex, me)
+  const zoneBpm = hrZoneLabel(ex.targetHrZone, me?.maxHr, me?.restingHr)
+  // Cardio can also log heart rate, watts and climb from a watch or bike computer.
+  const [extras, setExtras] = useState(() => sets.some((s) => s.hr || s.watts || s.climb))
+  const base =
     distance && ex.targetDistanceM != null
-      ? `${ex.targetSets} × ${formatKm(ex.targetDistanceM)}${endurance.length ? ` · ${endurance.join(' · ')}` : ''}`
+      ? `${ex.targetSets} × ${formatKm(ex.targetDistanceM)}`
       : timed
         ? ex.targetSeconds == null
           ? `${ex.targetSets} × –`
@@ -741,6 +746,13 @@ function ExerciseCard({
         : ex.targetRepsPerSet?.length
           ? `${repsLabel(ex)} reps${ex.bodyweight ? ' · bodyweight' : ''}`
           : `${ex.targetSets} × ${repsLabel(ex)}${repsLabel(ex) === 'max' ? ' reps' : ''}${ex.bodyweight ? ' · bodyweight' : ''}`
+  // Each target stays in one piece ("145–159 bpm"), the line only breaks between them.
+  const target = [base, ...endurance].map((t, i) => (
+    <span key={t} className="whitespace-nowrap">
+      {i > 0 && ' · '}
+      {t}
+    </span>
+  ))
   // Progressive overload: every set hit its target (or the top of the range) last time, so suggest going heavier.
   const topReps = ex.targetRepsMax ?? ex.targetRepsMin
   const targetFor = (i: number) => ex.targetRepsPerSet?.[i] ?? topReps ?? 0
@@ -809,7 +821,12 @@ function ExerciseCard({
             </Chip>
             <span className="font-semibold text-[13px] text-ink-muted">
               {target}
-              {!grouped && <> · rest {ex.restSeconds ? formatDuration(ex.restSeconds) : 'none'}</>}
+              {!grouped && (
+                <span className="whitespace-nowrap">
+                  {' '}
+                  · rest {ex.restSeconds ? formatDuration(ex.restSeconds) : 'none'}
+                </span>
+              )}
             </span>
             {howTo.watchButton}
           </div>
@@ -846,7 +863,11 @@ function ExerciseCard({
       </div>
       {hrZone(ex.targetHrZone) && (
         <p className="mt-3 rounded-md bg-steel/10 p-3 text-[14px]">
-          <span className="font-bold">Zone {ex.targetHrZone}:</span> {hrZone(ex.targetHrZone)?.feel}
+          <span className="font-bold">
+            Zone {ex.targetHrZone}
+            {zoneBpm && ` (${zoneBpm})`}:
+          </span>{' '}
+          {hrZone(ex.targetHrZone)?.feel}
         </p>
       )}
       {showNote && ex.notes && (
@@ -876,129 +897,167 @@ function ExerciseCard({
           const gain =
             !timed && !repsOnly && prev?.weightKg ? (toNumber(s.weight) ?? 0) - prev.weightKg : 0
           return (
-            <li
-              key={s.clientUuid}
-              style={rowColumns}
-              className={cn(
-                ROW_GRID,
-                'rounded-md p-1 transition-colors',
-                s.done && 'bg-surface-raised',
-              )}
-            >
-              <span className="tabular pl-1.5 font-bold font-display text-[18px] text-ink-muted">
-                {s.setNumber}
-              </span>
-              {prev && prevText ? (
-                <button
-                  type="button"
-                  aria-label={`Use last time's numbers for set ${s.setNumber}: ${prevText}`}
-                  onClick={() => {
-                    const patch = {
-                      weight: prev.weightKg?.toString() ?? s.weight,
-                      reps: prev.reps?.toString() ?? s.reps,
-                      seconds: prev.durationSeconds?.toString() ?? s.seconds,
-                      distance:
-                        prev.distanceM != null
-                          ? String(Math.round(prev.distanceM) / 1000)
-                          : s.distance,
-                    }
-                    navigator.vibrate?.(10)
-                    onEdit(s, patch)
-                    onCommit({ ...s, ...patch })
-                  }}
-                  className="tabular h-12 min-w-0 truncate rounded-sm px-1 text-left font-semibold text-[14px] text-ink-muted transition hover:bg-surface-raised hover:text-ink active:scale-95"
-                >
-                  {prevText}
-                </button>
-              ) : hasPrevious ? (
-                <span />
-              ) : null}
-              {distance ? (
-                <NumberCell
-                  label={`Set ${s.setNumber} distance in km`}
-                  decimal
-                  value={s.distance ?? ''}
-                  onChange={(v) => onEdit(s, { distance: v })}
-                  onBlur={() => onCommit(s)}
-                />
-              ) : timed ? (
-                <TimeCell set={s} minutes={inMinutes} onEdit={onEdit} onCommit={onCommit} />
-              ) : repsOnly ? null : (
-                <div className="relative min-w-0">
-                  <NumberCell
-                    label={`Set ${s.setNumber} weight in kg`}
-                    decimal
-                    value={s.weight}
-                    onChange={(v) => onEdit(s, { weight: v })}
-                    onBlur={() => onCommit(s)}
-                  />
-                  <AnimatePresence>
-                    {gain > 0 && (
-                      <motion.span
-                        key="gain"
-                        initial={{ opacity: 0, scale: 0.5, y: 4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
-                        className="tabular -top-2 pointer-events-none absolute right-1 inline-flex items-center gap-0.5 rounded-pill bg-lime px-1.5 py-px font-extrabold text-[10px] text-on-lime shadow-card"
-                      >
-                        <ArrowUp className="size-2.5" strokeWidth={3.5} aria-hidden />
-                        {+gain.toFixed(2)} kg
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </div>
-              )}
-              {distance ? (
-                <TimeCell set={s} minutes={inMinutes} onEdit={onEdit} onCommit={onCommit} />
-              ) : timed ? null : (
-                <NumberCell
-                  label={`Set ${s.setNumber} reps`}
-                  value={s.reps}
-                  onChange={(v) => onEdit(s, { reps: v })}
-                  onBlur={() => onCommit(s)}
-                />
-              )}
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.88 }}
-                aria-pressed={s.done}
-                aria-label={s.done ? `Undo set ${s.setNumber}` : `Complete set ${s.setNumber}`}
-                onClick={() => onToggle(s)}
+            <Fragment key={s.clientUuid}>
+              <li
+                style={rowColumns}
                 className={cn(
-                  'relative grid size-12 place-items-center rounded-sm transition-colors',
-                  s.done
-                    ? 'bg-lime text-on-lime'
-                    : 'bg-surface-raised text-ink-muted ring-[1.5px] ring-border-strong ring-inset',
+                  ROW_GRID,
+                  'rounded-md p-1 transition-colors',
+                  s.done && 'bg-surface-raised',
                 )}
               >
-                <motion.span
-                  key={s.done ? 'done' : 'todo'}
-                  initial={s.done ? { scale: 0.5 } : false}
-                  animate={{ scale: [0.5, 1.2, 1] }}
-                  transition={{ duration: 0.4 }}
-                >
-                  <Check className="size-6" strokeWidth={3} aria-hidden />
-                </motion.span>
-                {s.sync === 'failed' && (
-                  <span
-                    className="-top-1 -right-1 absolute size-3 rounded-full bg-sand ring-2 ring-surface"
-                    title="Not saved yet"
+                <span className="tabular pl-1.5 font-bold font-display text-[18px] text-ink-muted">
+                  {s.setNumber}
+                </span>
+                {prev && prevText ? (
+                  <button
+                    type="button"
+                    aria-label={`Use last time's numbers for set ${s.setNumber}: ${prevText}`}
+                    onClick={() => {
+                      const patch = {
+                        weight: prev.weightKg?.toString() ?? s.weight,
+                        reps: prev.reps?.toString() ?? s.reps,
+                        seconds: prev.durationSeconds?.toString() ?? s.seconds,
+                        distance:
+                          prev.distanceM != null
+                            ? String(Math.round(prev.distanceM) / 1000)
+                            : s.distance,
+                      }
+                      navigator.vibrate?.(10)
+                      onEdit(s, patch)
+                      onCommit({ ...s, ...patch })
+                    }}
+                    className="tabular h-12 min-w-0 truncate rounded-sm px-1 text-left font-semibold text-[14px] text-ink-muted transition hover:bg-surface-raised hover:text-ink active:scale-95"
+                  >
+                    {prevText}
+                  </button>
+                ) : hasPrevious ? (
+                  <span />
+                ) : null}
+                {distance ? (
+                  <NumberCell
+                    label={`Set ${s.setNumber} distance in km`}
+                    decimal
+                    value={s.distance ?? ''}
+                    onChange={(v) => onEdit(s, { distance: v })}
+                    onBlur={() => onCommit(s)}
+                  />
+                ) : timed ? (
+                  <TimeCell set={s} minutes={inMinutes} onEdit={onEdit} onCommit={onCommit} />
+                ) : repsOnly ? null : (
+                  <div className="relative min-w-0">
+                    <NumberCell
+                      label={`Set ${s.setNumber} weight in kg`}
+                      decimal
+                      value={s.weight}
+                      onChange={(v) => onEdit(s, { weight: v })}
+                      onBlur={() => onCommit(s)}
+                    />
+                    <AnimatePresence>
+                      {gain > 0 && (
+                        <motion.span
+                          key="gain"
+                          initial={{ opacity: 0, scale: 0.5, y: 4 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.5 }}
+                          className="tabular -top-2 pointer-events-none absolute right-1 inline-flex items-center gap-0.5 rounded-pill bg-lime px-1.5 py-px font-extrabold text-[10px] text-on-lime shadow-card"
+                        >
+                          <ArrowUp className="size-2.5" strokeWidth={3.5} aria-hidden />
+                          {+gain.toFixed(2)} kg
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+                {distance ? (
+                  <TimeCell set={s} minutes={inMinutes} onEdit={onEdit} onCommit={onCommit} />
+                ) : timed ? null : (
+                  <NumberCell
+                    label={`Set ${s.setNumber} reps`}
+                    value={s.reps}
+                    onChange={(v) => onEdit(s, { reps: v })}
+                    onBlur={() => onCommit(s)}
                   />
                 )}
-              </motion.button>
-            </li>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.88 }}
+                  aria-pressed={s.done}
+                  aria-label={s.done ? `Undo set ${s.setNumber}` : `Complete set ${s.setNumber}`}
+                  onClick={() => onToggle(s)}
+                  className={cn(
+                    'relative grid size-12 place-items-center rounded-sm transition-colors',
+                    s.done
+                      ? 'bg-lime text-on-lime'
+                      : 'bg-surface-raised text-ink-muted ring-[1.5px] ring-border-strong ring-inset',
+                  )}
+                >
+                  <motion.span
+                    key={s.done ? 'done' : 'todo'}
+                    initial={s.done ? { scale: 0.5 } : false}
+                    animate={{ scale: [0.5, 1.2, 1] }}
+                    transition={{ duration: 0.4 }}
+                  >
+                    <Check className="size-6" strokeWidth={3} aria-hidden />
+                  </motion.span>
+                  {s.sync === 'failed' && (
+                    <span
+                      className="-top-1 -right-1 absolute size-3 rounded-full bg-sand ring-2 ring-surface"
+                      title="Not saved yet"
+                    />
+                  )}
+                </motion.button>
+              </li>
+              {timed && extras && (
+                <li className="grid grid-cols-3 gap-1.5 pb-1 pl-9 sm:gap-2">
+                  <ExtraCell
+                    label="Avg HR"
+                    aria={`Set ${s.setNumber} average heart rate`}
+                    value={s.hr ?? ''}
+                    onChange={(hr) => onEdit(s, { hr })}
+                    onBlur={() => onCommit(s)}
+                  />
+                  <ExtraCell
+                    label="Watts"
+                    aria={`Set ${s.setNumber} average watts`}
+                    value={s.watts ?? ''}
+                    onChange={(watts) => onEdit(s, { watts })}
+                    onBlur={() => onCommit(s)}
+                  />
+                  <ExtraCell
+                    label="Climb m"
+                    aria={`Set ${s.setNumber} climb in metres`}
+                    value={s.climb ?? ''}
+                    onChange={(climb) => onEdit(s, { climb })}
+                    onBlur={() => onCommit(s)}
+                  />
+                </li>
+              )}
+            </Fragment>
           )
         })}
       </ul>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-2"
-        icon={<Plus className="size-4" aria-hidden />}
-        onClick={onAddSet}
-      >
-        Add set
-      </Button>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<Plus className="size-4" aria-hidden />}
+          onClick={onAddSet}
+        >
+          Add set
+        </Button>
+        {timed && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={extras}
+            icon={<HeartPulse className="size-4 text-steel-text" aria-hidden />}
+            onClick={() => setExtras(!extras)}
+          >
+            {extras ? 'Hide heart rate & power' : 'Add heart rate & power'}
+          </Button>
+        )}
+      </div>
       {howTo.sheet}
     </motion.section>
   )
@@ -1009,7 +1068,6 @@ const ROW_GRID = 'grid items-center gap-1.5 sm:gap-2'
 
 /** What you did on this set last time, e.g. "40 × 10". */
 const formatKm = (m: number) => `${Math.round(m) / 1000} km`
-const formatPace = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 function previousLabel(
   p: PreviousSet | undefined,
@@ -1077,6 +1135,43 @@ function TimeCell({
       }}
       onBlur={() => onCommit(set)}
     />
+  )
+}
+
+/** A small optional box under a cardio set (heart rate, watts, climb), with its label inside. */
+function ExtraCell({
+  label,
+  aria,
+  value,
+  onChange,
+  onBlur,
+}: {
+  label: string
+  aria: string
+  value: string
+  onChange: (value: string) => void
+  onBlur: () => void
+}) {
+  // The label sits inside the box on the left, so each small box says what it is.
+  return (
+    <span className="relative block min-w-0">
+      <span
+        aria-hidden
+        className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 font-extrabold text-[10px] text-ink-muted uppercase tracking-[0.06em]"
+      >
+        {label}
+      </span>
+      <Input
+        aria-label={aria}
+        inputMode="numeric"
+        value={value}
+        placeholder="–"
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
+        onBlur={onBlur}
+        className="tabular pr-2.5 pl-16 text-right font-bold font-display text-[17px] ring-border"
+      />
+    </span>
   )
 }
 

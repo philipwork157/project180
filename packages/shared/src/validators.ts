@@ -9,6 +9,7 @@ import {
   GOALS,
   GROUP_KINDS,
   MUSCLE_GROUPS,
+  RACE_KINDS,
   SEXES,
   TRACKING_TYPES,
   TRAINING_PLACES,
@@ -41,6 +42,14 @@ const optionalText = (max: number) =>
     .nullish()
     .transform((v) => v || null)
 
+/** A race time in seconds: up to 3 days (an ultra or an Ironman fits easily). */
+const raceSeconds = z
+  .number()
+  .int()
+  .min(1)
+  .max(3 * 24 * 3600)
+  .nullish()
+
 /** What a coach knows about a client: contact, body basics and goals. Everything is optional. */
 export const clientProfileInput = z.object({
   phone: optionalText(30),
@@ -59,6 +68,16 @@ export const clientProfileInput = z.object({
   daysPerWeek: z.number().int().min(1).max(7).nullish(),
   targetEvent: optionalText(120),
   targetEventDate: isoDate.nullish(),
+  // Race goal and endurance numbers. Left out = unchanged (the phone app's goals sheet doesn't
+  // send them; with a coach only their coach sets them).
+  raceKind: z.enum(RACE_KINDS).nullish(),
+  goalTimeSeconds: raceSeconds,
+  bestTimeSeconds: raceSeconds,
+  maxHr: z.number().int().min(100).max(230).nullish(),
+  restingHr: z.number().int().min(30).max(120).nullish(),
+  /** Seconds per km: 2:30 to 15:00 /km. */
+  thresholdPaceSeconds: z.number().int().min(150).max(900).nullish(),
+  ftpWatts: z.number().int().min(50).max(600).nullish(),
   notes: optionalText(2000),
 })
 export type ClientProfileInput = z.input<typeof clientProfileInput>
@@ -67,7 +86,11 @@ export type ClientProfileInput = z.input<typeof clientProfileInput>
 export const createUserInput = z.object({
   name,
   email,
-  password,
+  /**
+   * Staff need one (a temporary password). Clients usually come without: they get a link to
+   * choose their own (Add client). With one, it's a temporary password as before.
+   */
+  password: password.optional(),
   // Never 'platform': the platform admin is only ever made with `bun run admin:create`.
   role: z.enum(['owner', 'admin', 'member']).default('member'),
   /** Owners can pick the coach; a coach's new clients are always their own. */
@@ -170,6 +193,11 @@ export const workoutExerciseInput = z
     targetDistanceM: z.number().min(0).max(1_000_000).nullish(),
     targetPaceSeconds: optionalInt(3600),
     targetHrZone: z.number().int().min(1).max(5).nullish(),
+    /** Percent of FTP, cadence (rpm or steps a minute), effort 1–10, climb in metres. */
+    targetPowerPct: z.number().int().min(30).max(200).nullish(),
+    targetCadence: z.number().int().min(20).max(220).nullish(),
+    targetRpe: z.number().int().min(1).max(10).nullish(),
+    targetElevationM: optionalInt(10_000),
     supersetGroup: optionalInt(50),
     notes: z.string().trim().max(500).nullish(),
   })
@@ -303,6 +331,10 @@ export const setLogInput = z.object({
   durationSeconds: optionalInt(36000),
   distanceM: z.number().min(0).max(1_000_000).nullish(),
   rpe: z.number().min(1).max(10).nullish(),
+  /** From a watch or bike computer, all optional. */
+  avgHr: z.number().int().min(30).max(240).nullish(),
+  avgWatts: optionalInt(2500),
+  elevationM: optionalInt(20_000),
 })
 export type SetLogInput = z.input<typeof setLogInput>
 

@@ -229,6 +229,10 @@ async function snapshotTargets(db: Db, sessionId: number, workoutId: number) {
           targetDistanceM: e.targetDistanceM,
           targetPaceSeconds: e.targetPaceSeconds,
           targetHrZone: e.targetHrZone,
+          targetPowerPct: e.targetPowerPct ?? null,
+          targetCadence: e.targetCadence ?? null,
+          targetRpe: e.targetRpe ?? null,
+          targetElevationM: e.targetElevationM ?? null,
           supersetGroup: e.supersetGroup,
           groupKind: e.supersetGroup !== null ? (g?.kind ?? 'superset') : null,
           groupRounds: g?.rounds ?? null,
@@ -267,6 +271,10 @@ async function savedTargets(
       targetDistanceM: sessionExercises.targetDistanceM,
       targetPaceSeconds: sessionExercises.targetPaceSeconds,
       targetHrZone: sessionExercises.targetHrZone,
+      targetPowerPct: sessionExercises.targetPowerPct,
+      targetCadence: sessionExercises.targetCadence,
+      targetRpe: sessionExercises.targetRpe,
+      targetElevationM: sessionExercises.targetElevationM,
       supersetGroup: sessionExercises.supersetGroup,
       notes: sessionExercises.notes,
       groupKind: sessionExercises.groupKind,
@@ -333,6 +341,9 @@ export async function sessionDetail(db: Db, row: SessionRow): Promise<SessionDet
         durationSeconds: setLogs.durationSeconds,
         distanceM: setLogs.distanceM,
         rpe: setLogs.rpe,
+        avgHr: setLogs.avgHr,
+        avgWatts: setLogs.avgWatts,
+        elevationM: setLogs.elevationM,
       })
       .from(setLogs)
       .innerJoin(exercises, eq(exercises.id, setLogs.exerciseId))
@@ -717,6 +728,9 @@ export const sessionRoutes = new Hono<AppEnv>()
       durationSeconds: input.durationSeconds ?? null,
       distanceM: input.distanceM ?? null,
       rpe: input.rpe ?? null,
+      avgHr: input.avgHr ?? null,
+      avgWatts: input.avgWatts ?? null,
+      elevationM: input.elevationM ?? null,
       completedAt: new Date(),
     }
     // Already saved under another id (the phone reloaded before this set went through): one row

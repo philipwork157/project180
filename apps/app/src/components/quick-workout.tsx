@@ -288,7 +288,7 @@ function Builder({
 
   return (
     <div ref={top} className="flex scroll-mt-20 flex-col gap-5 pt-1">
-      <div className="flex flex-col gap-1 pr-14">
+      <div className="flex flex-col gap-1">
         <h2 className="font-display font-extrabold text-[24px] leading-7">Quick workout</h2>
         <p className="font-semibold text-[14px] text-ink-muted">
           Pick exercises, set your sets and reps, then start. Your coach sees it with your other

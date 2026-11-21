@@ -1,5 +1,5 @@
 import { myCheckInQuery, planQuery } from '@project180/client'
-import { formatDay, type PlanDay } from '@project180/shared'
+import { formatDay, isClient, type PlanDay } from '@project180/shared'
 import { Button, cn, EmptyState } from '@project180/ui'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { ScreenHeader } from '../../components/screen-header'
 import { SessionDetails } from '../../components/session-details'
 import { Sheet } from '../../components/sheet'
+import { StarterPrograms } from '../../components/starter-programs'
 import { useStartWorkout } from '../../lib/use-start-workout'
 
 export const Route = createFileRoute('/_app/calendar')({
@@ -30,13 +31,28 @@ function CalendarPage() {
 
   if (plan.isPending) return <div className="mt-24 h-96 animate-pulse rounded-xl bg-surface" />
   if (!p) {
+    // On your own (signed up in the app, no coach): nobody assigns you a program, so pick a
+    // ready-made one right here, like on Today.
+    const onOwn = isClient(me.role) && me.coachId === null
+    const hasCoach = isClient(me.role) && me.coachId !== null
     return (
       <>
         <ScreenHeader overline="Your program" title="Calendar" />
-        <EmptyState icon={<CalendarDays className="size-7" aria-hidden />} title="No program yet">
-          When your coach assigns your program, every workout, rest day and weigh-in fills this
-          calendar.
+        <EmptyState
+          icon={<CalendarDays className="size-7" aria-hidden />}
+          title={onOwn ? 'Pick a program to fill your calendar' : 'No program yet'}
+        >
+          {onOwn
+            ? 'Choose a ready-made plan below and every workout, rest day and weigh-in shows up here, week by week.'
+            : hasCoach
+              ? 'When your coach assigns your program, every workout, rest day and weigh-in fills this calendar.'
+              : 'Once you have a program, every workout, rest day and weigh-in fills this calendar.'}
         </EmptyState>
+        {onOwn && (
+          <div className="mt-6">
+            <StarterPrograms timezone={me.timezone} />
+          </div>
+        )}
       </>
     )
   }

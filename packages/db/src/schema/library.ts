@@ -116,6 +116,11 @@ export const workoutExercises = sqliteTable(
     targetDistanceM: real('target_distance_m'),
     targetPaceSeconds: integer('target_pace_seconds'),
     targetHrZone: integer('target_hr_zone'),
+    // Percent of the client's FTP, cadence (rpm or steps a minute), effort 1–10, climb in metres.
+    targetPowerPct: integer('target_power_pct'),
+    targetCadence: integer('target_cadence'),
+    targetRpe: integer('target_rpe'),
+    targetElevationM: integer('target_elevation_m'),
     // Same number = done together as a group (see workout_groups); null = on its own.
     supersetGroup: integer('superset_group'),
     notes: text('notes'),

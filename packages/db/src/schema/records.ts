@@ -32,7 +32,13 @@ export const invitations = sqliteTable(
     acceptedUserId: integer('accepted_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    // The account the coach already set up for them (Add client): accepting only sets their
+    // password. Null for a plain invitation, where accepting makes the account.
+    userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
     answeredAt: timestamp('answered_at'),
+    // When the link was last emailed. Null = not sent yet: Add client only sets the account up,
+    // and the coach sends the link (email, WhatsApp or copy) when they're ready.
+    emailedAt: timestamp('emailed_at'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -42,6 +48,7 @@ export const invitations = sqliteTable(
     index('invitations_email_status_idx').on(t.email, t.status),
     index('invitations_coach_idx').on(t.coachId),
     index('invitations_accepted_user_idx').on(t.acceptedUserId),
+    index('invitations_user_idx').on(t.userId),
   ],
 )
 

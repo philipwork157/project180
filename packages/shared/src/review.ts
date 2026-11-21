@@ -1,20 +1,32 @@
 // A coach's read of one session: per exercise, what was planned next to what was done.
+import { formatPacePerKm } from './endurance'
 import type { TrackingType } from './enums'
 import { formatDuration, formatWeight, repsLabel } from './format'
 import type { LoggedSet, PreviousSet, SessionDetail, WorkoutExerciseItem } from './types'
 
-type SetValues = Pick<LoggedSet, 'weightKg' | 'reps' | 'durationSeconds' | 'distanceM'>
+type SetValues = Pick<LoggedSet, 'weightKg' | 'reps' | 'durationSeconds' | 'distanceM'> &
+  Partial<Pick<LoggedSet, 'avgHr' | 'avgWatts' | 'elevationM'>>
 
 const km = (m: number) => `${formatWeight(m / 1000)} km`
 
-/** What a logged set was: "60 kg × 8", "12 reps", "0:45", "1.2 km · 6:30". */
+/**
+ * What a logged set was: "60 kg × 8", "12 reps", "0:45", "5 km · 26:00 · 5:12 /km · 148 bpm".
+ * Cardio adds the pace and whatever came from a watch or bike computer.
+ */
 export function setResultLabel(set: SetValues, trackingType: TrackingType): string {
-  if (trackingType === 'time')
-    return set.durationSeconds ? formatDuration(set.durationSeconds) : '–'
-  if (trackingType === 'distance_time') {
+  if (trackingType === 'time' || trackingType === 'distance_time') {
+    const distance = trackingType === 'distance_time'
+    const pace =
+      distance && set.distanceM && set.durationSeconds
+        ? formatPacePerKm(set.durationSeconds / (set.distanceM / 1000))
+        : null
     const parts = [
-      set.distanceM ? km(set.distanceM) : null,
+      distance && set.distanceM ? km(set.distanceM) : null,
       set.durationSeconds ? formatDuration(set.durationSeconds) : null,
+      pace,
+      set.avgHr ? `${set.avgHr} bpm` : null,
+      set.avgWatts ? `${set.avgWatts} W` : null,
+      set.elevationM ? `↑ ${set.elevationM} m` : null,
     ].filter(Boolean)
     return parts.length ? parts.join(' · ') : '–'
   }

@@ -66,12 +66,13 @@ export async function copyStarterLibrary(db: Db, businessId: number, ownerId: nu
       from workout_groups g
       join workouts nw on nw.source_workout_id = g.workout_id
         and nw.created_by = ${ownerId} and nw.created_at = ${now} and nw.client_id is null`,
-    sql`insert into workout_exercises (workout_id, exercise_id, position, target_sets, target_reps_min, target_reps_max, target_reps_per_set, bodyweight, target_seconds, rest_seconds, section, target_distance_m, target_pace_seconds, target_hr_zone, superset_group, notes)
+    sql`insert into workout_exercises (workout_id, exercise_id, position, target_sets, target_reps_min, target_reps_max, target_reps_per_set, bodyweight, target_seconds, rest_seconds, section, target_distance_m, target_pace_seconds, target_hr_zone, target_power_pct, target_cadence, target_rpe, target_elevation_m, superset_group, notes)
       select nw.id,
         (select min(ne.id) from exercises ne where ne.business_id = ${businessId} and ne.name = oe.name),
         we.position, we.target_sets, we.target_reps_min, we.target_reps_max, we.target_reps_per_set,
         we.bodyweight, we.target_seconds, we.rest_seconds, we.section, we.target_distance_m,
-        we.target_pace_seconds, we.target_hr_zone, we.superset_group, we.notes
+        we.target_pace_seconds, we.target_hr_zone, we.target_power_pct, we.target_cadence,
+        we.target_rpe, we.target_elevation_m, we.superset_group, we.notes
       from workout_exercises we
       join workouts nw on nw.source_workout_id = we.workout_id
         and nw.created_by = ${ownerId} and nw.created_at = ${now} and nw.client_id is null

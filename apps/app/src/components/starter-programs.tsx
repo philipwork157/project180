@@ -103,7 +103,7 @@ function StartSheet({
     <Sheet open={program !== null} onClose={onClose} label={program?.name ?? 'Start a program'}>
       {program && (
         <div className="flex flex-col gap-5 pb-6">
-          <div className="pr-12">
+          <div>
             <h2 className="font-display font-extrabold text-[24px] leading-7">{program.name}</h2>
             <p className="mt-1 text-[14px] text-ink-muted">
               {program.durationWeeks} weeks

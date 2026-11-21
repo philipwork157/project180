@@ -1,7 +1,9 @@
 // D1 allows at most 100 bound values in one SQL statement. Lists that pass every id at once
 // break as soon as the library passes 100 items, so these tests go past it on purpose.
 import { env } from 'cloudflare:test'
+import { createDb } from '@project180/db'
 import { describe, expect, it } from 'vitest'
+import { sendFoodReminders } from '../src/food-reminders'
 import { ADMIN, call, createAdmin, signIn } from './helpers'
 
 type Json = Record<string, any>
@@ -93,5 +95,19 @@ describe('a library past 100 items', () => {
     expect(list).toHaveLength(PROGRAMS)
     // Two workout days in its 2 weeks; the rest day and the week-3 day don't count.
     expect(list.every((p) => p.workoutDays === 2)).toBe(true)
+  })
+
+  it('sends the evening food reminder to more than 100 people', async () => {
+    const people = 150
+    const now = Date.now()
+    await env.DB.batch(
+      Array.from({ length: people }, (_, i) =>
+        env.DB.prepare(
+          'INSERT INTO users (name, email, created_at, updated_at, food_reminders) VALUES (?, ?, ?, ?, 1)',
+        ).bind(`Person ${i}`, `person${i}@example.com`, now, now),
+      ),
+    )
+    const result = await sendFoodReminders(env, createDb(env.DB))
+    expect(result.due).toBe(people)
   })
 })

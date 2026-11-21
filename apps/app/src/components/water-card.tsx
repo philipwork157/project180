@@ -190,7 +190,7 @@ function WaterLogSheet({
   return (
     <Sheet open={open} onClose={onClose} label="Water logged">
       <div className="flex flex-col gap-5 pb-6">
-        <div className="flex flex-col gap-1 pr-12">
+        <div className="flex flex-col gap-1">
           <h2 className="font-display font-extrabold text-[24px] leading-7">
             {isToday ? 'Water today' : 'Water this day'}
           </h2>
@@ -302,7 +302,7 @@ function GoalForm({ goalMl, onDone }: { goalMl: number | null; onDone: () => voi
         if (!invalid) save.mutate(ml)
       }}
     >
-      <div className="pr-12">
+      <div>
         <h2 className="font-display font-extrabold text-[24px] leading-7">Daily water goal</h2>
         <p className="mt-1 text-[14px] text-ink-muted">
           How much to drink a day. Your coach can change it too.

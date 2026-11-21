@@ -31,7 +31,7 @@ function EditFood({ entry, onDone }: { entry: FoodEntry; onDone: () => void }) {
   const remove = useDeleteFood(onDone)
   return (
     <div className="flex flex-col gap-5 pb-6">
-      <div className="pr-12">
+      <div>
         <h2 className="font-display font-extrabold text-[24px] leading-7">Edit food</h2>
         {entry.source === 'photo' && (
           <p className="mt-1 text-[14px] text-ink-muted">Estimated from a photo.</p>

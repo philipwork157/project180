@@ -154,6 +154,15 @@ describe('Build a program with Claude', () => {
     const body = JSON.parse(String(spy.mock.calls[0]?.[1]?.body))
     expect(body.messages[0].content[0].text).toContain(`${ids.legDay} | Leg Day A |`)
     expect(body.messages[0].content[1].text).toContain(`${ids.press} | Dumbbell Bench Press`)
+    // Existing workouts show their exercises by section, so Claude sees how the coach builds.
+    expect(body.messages[0].content[0].text).toMatch(/Leg Day A \| .* \| main: /)
+    // Instructions, workouts and library are cached; the coach's request is not.
+    expect(body.messages[0].content[1].cache_control).toEqual({ type: 'ephemeral' })
+    expect(body.messages[0].content[0].cache_control).toBeUndefined()
+    expect(body.messages[0].content[2].cache_control).toBeUndefined()
+    expect(body.messages[0].content[2].text).toContain('2 weeks, beginner, full body')
+    // Full programs: mobility, main, abs, cardio and cool-down are part of the instructions.
+    expect(body.system[0].text).toContain('fully fledged')
   })
 
   it('creates nothing when no training day is usable', async () => {

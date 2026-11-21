@@ -70,8 +70,14 @@ describe('setResultLabel', () => {
     expect(setResultLabel({ ...blank, durationSeconds: 45 }, 'time')).toBe('0:45')
     expect(
       setResultLabel({ ...blank, distanceM: 1200, durationSeconds: 390 }, 'distance_time'),
-    ).toBe('1.2 km · 6:30')
+    ).toBe('1.2 km · 6:30 · 5:25 /km')
     expect(setResultLabel(blank, 'time')).toBe('–')
+    expect(
+      setResultLabel(
+        { ...blank, durationSeconds: 3600, avgHr: 142, avgWatts: 205, elevationM: 640 },
+        'time',
+      ),
+    ).toBe('1:00:00 · 142 bpm · 205 W · ↑ 640 m')
   })
 })
 

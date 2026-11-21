@@ -170,6 +170,22 @@ describe('sending sets', () => {
       reps: 8,
       durationSeconds: 90,
       distanceM: 2500,
+      avgHr: null,
+      avgWatts: null,
+      elevationM: null,
+    })
+  })
+
+  it('sends heart rate, watts and climb, and drops typos instead of failing the set', () => {
+    expect(setPayload(1, set({ hr: '148', watts: '210', climb: '320' }), false)).toMatchObject({
+      avgHr: 148,
+      avgWatts: 210,
+      elevationM: 320,
+    })
+    expect(setPayload(1, set({ hr: '1480', watts: '-5', climb: 'abc' }), false)).toMatchObject({
+      avgHr: null,
+      avgWatts: null,
+      elevationM: null,
     })
   })
 

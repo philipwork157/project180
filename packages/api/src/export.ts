@@ -90,6 +90,9 @@ export async function exportMyData(db: Db, me: Me) {
         durationSeconds: setLogs.durationSeconds,
         distanceM: setLogs.distanceM,
         rpe: setLogs.rpe,
+        avgHr: setLogs.avgHr,
+        avgWatts: setLogs.avgWatts,
+        elevationM: setLogs.elevationM,
         notes: setLogs.notes,
       })
       .from(setLogs)

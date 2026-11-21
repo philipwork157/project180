@@ -48,6 +48,7 @@ import {
 } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { audit } from '../audit'
+import { inChunks } from '../batch'
 import { emailMode } from '../email'
 import type { AppEnv } from '../env'
 import { notFound, parseBody } from '../errors'
@@ -551,12 +552,13 @@ export const platformRoutes = new Hono<AppEnv>()
     const peopleOf = new Map(people.map((p) => [p.businessId, p]))
     const spendOf = new Map(spend.map((r) => [r.businessId, r]))
     const ownerIds = people.map((p) => p.ownerId).filter((v): v is number => v !== null)
-    const owners = ownerIds.length
-      ? await db
-          .select({ id: users.id, name: users.name, email: users.email })
-          .from(users)
-          .where(inArray(users.id, ownerIds))
-      : []
+    // In slices: one owner per business, and D1 allows 100 bound values per statement.
+    const owners = await inChunks(ownerIds, (slice) =>
+      db
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(inArray(users.id, slice)),
+    )
     const ownerOf = new Map(owners.map((o) => [o.id, o]))
     const businessRows: PlatformBusiness[] = list.map((b) => {
       const p = peopleOf.get(b.id)

@@ -7,6 +7,7 @@ import {
   enrollments,
   exerciseAlternatives,
   exercises,
+  invitations,
   programs,
   recipes,
   signInAttempts,
@@ -65,6 +66,8 @@ export async function deletePersonForGood(
     db.delete(programs).where(eq(programs.clientId, id)),
     db.delete(workouts).where(eq(workouts.clientId, id)),
     db.delete(signInAttempts).where(eq(signInAttempts.key, `email:${row?.email ?? ''}`)),
+    // The link to the account their coach set up (the column has no cascade: added later).
+    db.delete(invitations).where(eq(invitations.userId, id)),
     // Last: the person (sign-ins, devices and profile go with them).
     db.delete(users).where(eq(users.id, id)),
   ])

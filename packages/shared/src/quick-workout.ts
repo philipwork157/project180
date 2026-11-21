@@ -62,6 +62,10 @@ export function quickTargetFrom(item: WorkoutExerciseItem): QuickTarget {
     targetDistanceM: item.targetDistanceM,
     targetPaceSeconds: item.targetPaceSeconds,
     targetHrZone: item.targetHrZone,
+    targetPowerPct: item.targetPowerPct ?? null,
+    targetCadence: item.targetCadence ?? null,
+    targetRpe: item.targetRpe ?? null,
+    targetElevationM: item.targetElevationM ?? null,
     supersetGroup: item.supersetGroup,
     notes: item.notes,
   }

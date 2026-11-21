@@ -19,8 +19,8 @@ const STEPS: Array<{
 }> = [
   {
     key: 'client',
-    title: 'Add or invite your first client',
-    text: 'Invite them by email: they choose their own password.',
+    title: 'Add your first client',
+    text: 'Set up their goals and program; they get a link to choose their own password.',
     to: '/clients',
     action: 'Go to Clients',
   },

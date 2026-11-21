@@ -22,6 +22,7 @@ import {
   workoutKcal,
 } from '@project180/shared'
 import { and, asc, desc, eq, gte, inArray, isNotNull, lte } from 'drizzle-orm'
+import { inChunks } from './batch'
 
 /** Their weight on each day: the latest weigh-in on or before it (null before the first). */
 export async function weightOn(db: Db, userId: number, to: string) {
@@ -101,26 +102,23 @@ export async function loadBurn(
   const inRange = sessions
     .map((s) => ({ ...s, day: todayIn(person.timezone, s.startedAt) }))
     .filter((s) => s.day >= from && s.day <= to)
-  const sets =
-    inRange.length === 0
-      ? []
-      : await db
-          .select({
-            sessionId: setLogs.sessionId,
-            category: exercises.category,
-            name: exercises.name,
-            isWarmup: setLogs.isWarmup,
-            durationSeconds: setLogs.durationSeconds,
-            distanceM: setLogs.distanceM,
-          })
-          .from(setLogs)
-          .innerJoin(exercises, eq(exercises.id, setLogs.exerciseId))
-          .where(
-            inArray(
-              setLogs.sessionId,
-              inRange.map((s) => s.id),
-            ),
-          )
+  // In slices: 92 days of someone training twice a day is more than D1's 100 bound values.
+  const sets = await inChunks(
+    inRange.map((s) => s.id),
+    (slice) =>
+      db
+        .select({
+          sessionId: setLogs.sessionId,
+          category: exercises.category,
+          name: exercises.name,
+          isWarmup: setLogs.isWarmup,
+          durationSeconds: setLogs.durationSeconds,
+          distanceM: setLogs.distanceM,
+        })
+        .from(setLogs)
+        .innerJoin(exercises, eq(exercises.id, setLogs.exerciseId))
+        .where(inArray(setLogs.sessionId, slice)),
+  )
 
   const out = new Map<string, DayBurn>()
   const dayOf = (day: string) => {

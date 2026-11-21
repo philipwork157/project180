@@ -29,14 +29,21 @@ export async function loadProfile(db: Db, userId: number): Promise<ClientProfile
     daysPerWeek: row?.daysPerWeek ?? null,
     targetEvent: row?.targetEvent ?? null,
     targetEventDate: row?.targetEventDate ?? null,
+    raceKind: row?.raceKind ?? null,
+    goalTimeSeconds: row?.goalTimeSeconds ?? null,
+    bestTimeSeconds: row?.bestTimeSeconds ?? null,
+    maxHr: row?.maxHr ?? null,
+    restingHr: row?.restingHr ?? null,
+    thresholdPaceSeconds: row?.thresholdPaceSeconds ?? null,
+    ftpWatts: row?.ftpWatts ?? null,
     notes: row?.notes ?? null,
     latestWeightKg: weight?.weightKg ?? null,
   }
 }
 
 /**
- * Saves a profile. Goal weight and activity level left out (undefined) stay as they are: the
- * phone app never sends them, because only the coach sets them.
+ * Saves a profile. Goal weight, activity level, the race goal and endurance numbers left out
+ * (undefined) stay as they are: the phone app never sends them, because only the coach sets them.
  */
 export async function saveProfile(db: Db, userId: number, input: ProfileInput) {
   const values = {
@@ -55,12 +62,28 @@ export async function saveProfile(db: Db, userId: number, input: ProfileInput) {
     daysPerWeek: input.daysPerWeek ?? null,
     targetEvent: input.targetEvent ?? null,
     targetEventDate: input.targetEventDate ?? null,
+    ...keepIfLeftOut({
+      raceKind: input.raceKind,
+      goalTimeSeconds: input.goalTimeSeconds,
+      bestTimeSeconds: input.bestTimeSeconds,
+      maxHr: input.maxHr,
+      restingHr: input.restingHr,
+      thresholdPaceSeconds: input.thresholdPaceSeconds,
+      ftpWatts: input.ftpWatts,
+    }),
     notes: input.notes ?? null,
   }
   await db
     .insert(clientProfiles)
     .values({ userId, ...values })
     .onConflictDoUpdate({ target: clientProfiles.userId, set: values })
+}
+
+/** Only the values that were sent: undefined (left out) keeps what's saved, null clears it. */
+function keepIfLeftOut<T extends Record<string, unknown>>(values: T) {
+  return Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined)) as {
+    [K in keyof T]?: Exclude<T[K], undefined>
+  }
 }
 
 /** What the calorie calculator was set to, saved with the daily targets (coach only). */

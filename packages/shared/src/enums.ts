@@ -54,15 +54,27 @@ export const WORKOUT_SECTION_LABELS: Record<WorkoutSection, string> = {
   cool_down: 'Cool-down',
 }
 
-/** A client's goals (main goal plus any extra focus areas). */
+/**
+ * A client's training focus (main focus plus any extra focus areas): what kind of athlete they
+ * are, which decides the kind of program the coach builds. Stored as text, so the order here is
+ * only the order they're shown in.
+ */
 export const GOALS = [
   'lose_weight',
   'build_muscle',
+  'bodybuilding',
   'get_stronger',
+  'powerlifting',
   'get_fitter',
   'running',
+  'trail_running',
+  'cycling',
+  'swimming',
   'triathlon',
+  'hyrox',
   'hybrid',
+  'functional',
+  'sport',
   'mobility',
   'eat_better',
 ] as const
@@ -70,13 +82,85 @@ export type Goal = (typeof GOALS)[number]
 export const GOAL_LABELS: Record<Goal, string> = {
   lose_weight: 'Lose weight',
   build_muscle: 'Build muscle',
+  bodybuilding: 'Bodybuilding',
   get_stronger: 'Get stronger',
+  powerlifting: 'Powerlifting',
   get_fitter: 'Get fitter & healthier',
-  running: 'Running',
+  running: 'Road running',
+  trail_running: 'Trail running',
+  cycling: 'Cycling',
+  swimming: 'Swimming',
   triathlon: 'Triathlon',
+  hyrox: 'Hyrox',
   hybrid: 'Hybrid training',
+  functional: 'CrossFit & functional',
+  sport: 'Sport-specific',
   mobility: 'Mobility & flexibility',
   eat_better: 'Eat better',
+}
+
+/** Focus areas where heart rate, pace and power matter: the profile asks for those numbers. */
+export const ENDURANCE_GOALS: readonly Goal[] = [
+  'running',
+  'trail_running',
+  'cycling',
+  'swimming',
+  'triathlon',
+  'hyrox',
+  'hybrid',
+]
+
+/**
+ * The one race or competition a client is working towards. Timed ones also take a goal time
+ * and their current best (PB).
+ */
+export const RACE_KINDS = [
+  '5k',
+  '10k',
+  'half_marathon',
+  'marathon',
+  'ultra',
+  'trail_race',
+  'sprint_tri',
+  'olympic_tri',
+  'half_ironman',
+  'ironman',
+  'hyrox',
+  'cycling_race',
+  'swim_race',
+  'bodybuilding_show',
+  'powerlifting_meet',
+  'other',
+] as const
+export type RaceKind = (typeof RACE_KINDS)[number]
+export const RACE_KIND_LABELS: Record<RaceKind, string> = {
+  '5k': '5 km',
+  '10k': '10 km',
+  half_marathon: 'Half marathon',
+  marathon: 'Marathon',
+  ultra: 'Ultra marathon',
+  trail_race: 'Trail race',
+  sprint_tri: 'Sprint triathlon',
+  olympic_tri: 'Olympic triathlon',
+  half_ironman: 'Half Ironman (70.3)',
+  ironman: 'Ironman',
+  hyrox: 'Hyrox',
+  cycling_race: 'Cycling race',
+  swim_race: 'Swim race',
+  bodybuilding_show: 'Bodybuilding show',
+  powerlifting_meet: 'Powerlifting meet',
+  other: 'Something else',
+}
+/** Races judged on the clock (not on stage or on a total). */
+export const TIMED_RACES: readonly RaceKind[] = RACE_KINDS.filter(
+  (k) => k !== 'bodybuilding_show' && k !== 'powerlifting_meet',
+)
+/** Fixed race distances in metres, so a goal time can be shown as a pace per km. */
+export const RACE_DISTANCE_M: Partial<Record<RaceKind, number>> = {
+  '5k': 5000,
+  '10k': 10000,
+  half_marathon: 21097.5,
+  marathon: 42195,
 }
 
 /**

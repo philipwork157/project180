@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { EXERCISES, MOBILITY } from '../seed/exercises'
+import { ENDURANCE_EXERCISES } from '../seed/exercises-endurance'
 import { EXTRA_EXERCISES } from '../seed/exercises-extra'
 import { MORE_EXERCISES } from '../seed/exercises-more'
 import { PHILIP_PROGRAM, PHILIP_WORKOUTS } from '../seed/philip'
@@ -31,8 +32,8 @@ const hasAdmin = `EXISTS (SELECT 1 FROM users WHERE role IN ('owner', 'admin'))`
 
 // Catch typos before touching the database.
 const known = new Set(
-  [...EXERCISES, ...MORE_EXERCISES, ...EXTRA_EXERCISES, ...MOBILITY].map(([name]) =>
-    name.toLowerCase(),
+  [...EXERCISES, ...MORE_EXERCISES, ...EXTRA_EXERCISES, ...ENDURANCE_EXERCISES, ...MOBILITY].map(
+    ([name]) => name.toLowerCase(),
   ),
 )
 for (const w of PHILIP_WORKOUTS) {

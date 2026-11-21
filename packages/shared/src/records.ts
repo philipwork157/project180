@@ -38,6 +38,10 @@ export interface Invitation {
   status: InvitationStatus
   createdAt: string
   expiresAt: string
+  /** The account the coach already set up (Add client); null for a plain invitation. */
+  userId: number | null
+  /** When the link was last emailed; null = not sent yet (the coach sends it when ready). */
+  emailedAt: string | null
 }
 
 /** An invitation as the invited person sees it (the link's page, or a card in the app). */
@@ -49,6 +53,8 @@ export interface InvitationForMe {
   coachName: string
   /** The email already has an account: sign in and accept, instead of signing up. */
   existing: boolean
+  /** Their coach already set the account up: they only choose a password. */
+  prepared?: boolean
 }
 
 /** What the record lists. Each has a plain label on the Platform page. */

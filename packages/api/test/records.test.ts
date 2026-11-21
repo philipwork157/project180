@@ -1,7 +1,7 @@
 // Invitations, the record of who did what, errors, first steps for coaches, the business name
 // in the app and "download my data". Each checks nobody sees anyone else's.
 import { env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   ADMIN,
   call,
@@ -10,6 +10,7 @@ import {
   PLATFORM,
   setupHousehold,
   signIn,
+  signInAsIs,
   signInPlatform,
 } from './helpers'
 
@@ -168,6 +169,215 @@ describe('invitations', () => {
     })
     expect(declined.data.invitations).toEqual([])
     expect((await call<Json>('/me', { cookie: solo })).data.user.coachId).toBe(null)
+  })
+})
+
+describe('Add client: set up first, then a link to choose a password', () => {
+  const SET_UP = { name: 'Thandi Set-Up', email: 'thandi@example.com' }
+
+  it('sends nothing until the coach chooses to, by email or by copying the link', async () => {
+    await createAdmin()
+    const coach = await signIn(ADMIN.email, ADMIN.password)
+    const log = vi.spyOn(console, 'log')
+    const emailsTo = (to: string) =>
+      log.mock.calls.filter(
+        (args) => /^\[email\]/.test(String(args[0])) && String(args[0]).includes(to),
+      ).length
+    const added = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie: coach,
+      body: { ...SET_UP, role: 'member' },
+    })
+    expect(added.status).toBe(201)
+    expect(emailsTo(SET_UP.email)).toBe(0)
+    const id = added.data.invitationId
+    const waiting = await call<Json>('/admin/invitations', { cookie: coach })
+    expect(waiting.data.invitations).toEqual([
+      expect.objectContaining({ id, emailedAt: null, userId: added.data.user.id }),
+    ])
+
+    // Copying a fresh link (for WhatsApp) still sends nothing, and the first link stops working.
+    const copied = await call<Json>(`/admin/invitations/${id}/link`, {
+      method: 'POST',
+      cookie: coach,
+    })
+    expect(copied.status).toBe(200)
+    expect(copied.data.invitations[0].emailedAt).toBeNull()
+    expect(emailsTo(SET_UP.email)).toBe(0)
+    const first = await call('/account/invite/look', {
+      method: 'POST',
+      body: { token: tokenOf(added.data.link) },
+    })
+    expect(first.status).not.toBe(200)
+
+    // Emailing it marks it sent.
+    const emailed = await call<Json>(`/admin/invitations/${id}/resend`, {
+      method: 'POST',
+      cookie: coach,
+    })
+    expect(emailed.status).toBe(200)
+    expect(emailed.data.invitations[0].emailedAt).toEqual(expect.any(String))
+    expect(emailsTo(SET_UP.email)).toBe(1)
+    const look = await call<Json>('/account/invite/look', {
+      method: 'POST',
+      body: { token: tokenOf(emailed.data.link) },
+    })
+    expect(look.data.invitation).toMatchObject({ email: SET_UP.email, prepared: true })
+    log.mockRestore()
+  })
+
+  it('the client is ready when they open the link, and only chooses a password', async () => {
+    await createAdmin()
+    const coach = await signIn(ADMIN.email, ADMIN.password)
+    const program = await call<Json>('/programs', {
+      method: 'POST',
+      cookie: coach,
+      body: {
+        name: '4 Weeks',
+        durationWeeks: 4,
+        days: [{ weekNumber: 1, dayNumber: 1, workoutId: null, checkinRequired: true }],
+      },
+    })
+    const added = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie: coach,
+      body: {
+        ...SET_UP,
+        role: 'member',
+        currentWeightKg: 72,
+        program: { programId: program.data.program.id, startDate: '2026-11-23' },
+        checkIn: { dueDate: '2026-12-07', repeatWeeks: 2 },
+      },
+    })
+    expect(added.status).toBe(201)
+    expect(added.data.user).toMatchObject({ email: SET_UP.email, mustChangePassword: false })
+    expect(added.data.enrollment).toBeTruthy()
+    // The coach gets the link (to send on WhatsApp too) and sees them waiting to join.
+    const token = tokenOf(added.data.link)
+    const waiting = await call<Json>('/admin/invitations', { cookie: coach })
+    expect(waiting.data.invitations).toEqual([
+      expect.objectContaining({ email: SET_UP.email, userId: added.data.user.id }),
+    ])
+    // Nobody can sign in to it before they choose a password.
+    const early = await call('/auth/sign-in/email', {
+      method: 'POST',
+      body: { email: SET_UP.email, password: 'guessing-password-1' },
+    })
+    expect(early.status).not.toBe(200)
+
+    const look = await call<Json>('/account/invite/look', { method: 'POST', body: { token } })
+    expect(look.data.invitation).toMatchObject({
+      email: SET_UP.email,
+      prepared: true,
+      existing: false,
+    })
+    const accepted = await call<Json>('/account/invite/accept', {
+      method: 'POST',
+      body: { token, name: 'ignored', password: 'thandi-password-1', acceptTerms: true },
+    })
+    expect(accepted.status).toBe(201)
+
+    // In, with everything their coach set up, and no welcome wizard or forced password change.
+    const thandi = await signIn(SET_UP.email, 'thandi-password-1')
+    const me = (await call<Json>('/me', { cookie: thandi })).data.user
+    expect(me).toMatchObject({
+      name: SET_UP.name,
+      coachName: ADMIN.name,
+      needsOnboarding: false,
+      mustChangePassword: false,
+    })
+    const plan = await call<Json>('/me/plan', { cookie: thandi })
+    expect(plan.data.plan.enrollment.programName).toBe('4 Weeks')
+    const checkIn = await call<Json>('/me/check-in', { cookie: thandi })
+    expect(JSON.stringify(checkIn.data)).toContain('2026-12-07')
+    // The link works once, and they've left the waiting list.
+    expect((await call('/account/invite/look', { method: 'POST', body: { token } })).status).toBe(
+      400,
+    )
+    expect((await call<Json>('/admin/invitations', { cookie: coach })).data.invitations).toEqual([])
+    // Deleting them later still works (the link row goes with them).
+    const gone = await call(`/admin/users/${added.data.user.id}`, {
+      method: 'DELETE',
+      cookie: coach,
+    })
+    expect(gone.status).toBe(200)
+  })
+
+  it('a fresh link replaces the old one, and the link dies once they’ve signed in', async () => {
+    await createAdmin()
+    const coach = await signIn(ADMIN.email, ADMIN.password)
+    const added = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie: coach,
+      body: { ...SET_UP, role: 'member' },
+    })
+    const first = tokenOf(added.data.link)
+    const id = (await call<Json>('/admin/invitations', { cookie: coach })).data.invitations[0].id
+    const again = await call<Json>(`/admin/invitations/${id}/resend`, {
+      method: 'POST',
+      cookie: coach,
+    })
+    const second = tokenOf(again.data.link)
+    expect(
+      (await call('/account/invite/look', { method: 'POST', body: { token: first } })).status,
+    ).toBe(400)
+    // They get in another way (a temporary password from their coach) and sign in…
+    await call(`/admin/users/${added.data.user.id}/password`, {
+      method: 'POST',
+      cookie: coach,
+      body: { password: 'temporary-pass-1' },
+    })
+    const cookie = await signInAsIs(SET_UP.email, 'temporary-pass-1')
+    expect((await call('/me', { cookie })).status).toBe(200)
+    // …so the link can never set their password again, and they've left the waiting list.
+    expect(
+      (await call('/account/invite/look', { method: 'POST', body: { token: second } })).status,
+    ).toBe(400)
+    expect((await call<Json>('/admin/invitations', { cookie: coach })).data.invitations).toEqual([])
+  })
+
+  it('someone already on their own gets an invitation instead, and nothing else is made', async () => {
+    await createAdmin()
+    const coach = await signIn(ADMIN.email, ADMIN.password)
+    const solo = await soloUser()
+    const added = await call<Json>('/admin/users', {
+      method: 'POST',
+      cookie: coach,
+      body: { name: SOLO.name, email: SOLO.email, role: 'member' },
+    })
+    expect(added.status).toBe(201)
+    expect(added.data).toMatchObject({ invited: true })
+    expect(added.data.user).toBeUndefined()
+    const mine = await call<Json>('/me/invitations', { cookie: solo })
+    expect(mine.data.invitations).toEqual([expect.objectContaining({ coachName: ADMIN.name })])
+    // Someone else's client, or one of yours: refused as before.
+    const again = await call('/admin/users', {
+      method: 'POST',
+      cookie: coach,
+      body: { name: 'Pieter', email: ADMIN.email, role: 'member' },
+    })
+    expect(again.status).toBe(409)
+  })
+
+  it('a coach still needs a password; other businesses see none of it', async () => {
+    const { admin } = await setupHousehold()
+    expect(
+      (
+        await call('/admin/users', {
+          method: 'POST',
+          cookie: admin,
+          body: { name: 'Coach C', email: 'c@example.com', role: 'admin' },
+        })
+      ).status,
+    ).toBe(400)
+    await call('/admin/users', {
+      method: 'POST',
+      cookie: admin,
+      body: { ...SET_UP, role: 'member' },
+    })
+    await createAdmin(OTHER, 'owner', 'Other Gym')
+    const other = await signIn(OTHER.email, OTHER.password)
+    expect((await call<Json>('/admin/invitations', { cookie: other })).data.invitations).toEqual([])
   })
 })
 

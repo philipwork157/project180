@@ -71,7 +71,7 @@ import { z } from 'zod'
 import { coachedPerson, managedPerson, managedUsers } from '../access'
 import { audit } from '../audit'
 import { deletePersonForGood } from '../delete-person'
-import { newPasswordEmail, sendEmail, welcomeEmail } from '../email'
+import { isLocalSite, newPasswordEmail, sendEmail, welcomeEmail } from '../email'
 import type { AppEnv } from '../env'
 import { forbidden, notFound, parseBody, parseId } from '../errors'
 import { addFeedback, loadFeedback, removeFeedback } from '../feedback'
@@ -80,11 +80,14 @@ import { loadProfile, logWeight, saveProfile } from '../profiles'
 import { quickWorkoutsAccess } from '../quick'
 import { startDuePrograms } from '../schedule'
 import { cancelWorkout, sessionSummaries } from '../sessions'
+import { takeAttempt } from '../sign-in-limit'
 import { buildPersonStats } from '../stats'
+import { newToken } from '../tokens'
 import { createUserWithPassword, setPassword, signedInSql } from '../users'
 import { adminCheckInRoutes } from './check-ins'
 import { assignProgram } from './enrollments'
 import { adminFoodRoutes } from './food'
+import { createInvitation, onTheirOwn } from './invitations'
 import { buildPlan } from './me'
 import { deleteClientProgram, findVisibleProgram } from './programs'
 import { sessionDetail } from './sessions'
@@ -330,6 +333,20 @@ async function assertCoach(db: Db, me: Me, coachId: number) {
     notFound('Coach not found')
 }
 
+const HOUR = 60 * 60 * 1000
+/** New clients one coach may add by link an hour (each sends an email), like invitations. */
+const INVITES_PER_HOUR = 30
+
+/** A coach in the business, by id (already checked by assertCoach), for the email. */
+async function coachNamed(db: Db, id: number | null) {
+  const [row] = await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(eq(users.id, id ?? -1))
+  if (!row) notFound('Coach not found')
+  return row
+}
+
 export const adminUserRoutes = new Hono<AppEnv>()
   .use(requireUser, requireAdmin)
   /** Owners see everyone; a coach sees themselves and their own clients. */
@@ -495,8 +512,14 @@ export const adminUserRoutes = new Hono<AppEnv>()
     return c.json({ coaches: rows })
   })
   /**
-   * The new-client wizard, in one go: the account, their profile and goals, today's weight as
-   * the first weigh-in, optionally a program, and optionally a welcome email with how to sign in.
+   * Add someone, in one go: the account, their profile and goals, today's weight as the first
+   * weigh-in, optionally a program and their first check-in.
+   * - A client without a password (Add client): the account is ready but they can't sign in
+   *   yet; they get a link (email, and back to the coach to send on WhatsApp) to choose their
+   *   own password. If the email already belongs to someone training on their own, they get a
+   *   normal invitation instead (accepting keeps their history); nothing else is made.
+   * - With a password (staff, or a client the old way): it's temporary, they choose their own
+   *   on first sign-in, and the welcome email can carry it.
    * Coaches add clients (who become theirs). Owners can also add coaches, and pick anyone's coach.
    */
   .post('/', async (c) => {
@@ -504,34 +527,67 @@ export const adminUserRoutes = new Hono<AppEnv>()
     const env = c.env
     const input = await parseBody(c.req.raw, createUserInput)
     if (isStaff(input.role) && !isOwner(me.role)) forbidden('Only an owner can add coaches')
+    const viaLink = isClient(input.role) && !input.password
+    if (!viaLink && !input.password)
+      throw new HTTPException(400, { message: 'password: Choose a temporary password' })
     // A client is coached by whoever adds them, unless an owner picks another coach.
     const pickedCoach = isClient(input.role) && isOwner(me.role) ? (input.coachId ?? null) : null
     const coachId = isClient(input.role) ? (pickedCoach ?? me.id) : null
     // Programs stay between a client and their own coach: their coach assigns one later.
     if (input.program && coachId !== me.id)
       throw new HTTPException(400, { message: 'Only their coach can give them a program' })
+    // Each link is an email: limited like invitations.
+    if (viaLink && !(await takeAttempt(db, `invite:${me.id}`, INVITES_PER_HOUR, HOUR)))
+      throw new HTTPException(429, { message: 'That’s a lot of new clients. Try again later.' })
     // Check everything that can be refused before creating anything, so a mistake (a program
     // this coach can't use, an unknown coach, an email in use) never leaves a half-made account.
-    await Promise.all([
+    const [, , taken] = await Promise.all([
       pickedCoach ? assertCoach(db, me, pickedCoach) : null,
       input.program ? findVisibleProgram(db, me, input.program.programId, false) : null,
       db
-        .select({ id: users.id })
+        .select({ role: users.role, businessId: users.businessId, coachId: users.coachId })
         .from(users)
         .where(eq(users.email, input.email))
-        .then(([taken]) => {
-          if (taken) throw new HTTPException(409, { message: 'That email already has an account' })
-        }),
+        .then(([row]) => row ?? null),
     ])
+    if (taken) {
+      if (viaLink && taken.businessId === me.businessId)
+        throw new HTTPException(409, { message: 'They’re already one of your clients.' })
+      if (!viaLink || !onTheirOwn(taken))
+        throw new HTTPException(409, { message: 'That email already has an account' })
+      // Already training on their own: invite them; they accept in the app and keep everything.
+      const coach = coachId === me.id ? { id: me.id, name: me.name } : await coachNamed(db, coachId)
+      // Not emailed yet: they see it on their Today screen, and the coach can email it too.
+      const invitation = await createInvitation(env, db, me, {
+        name: input.name,
+        email: input.email,
+        coach,
+        existing: true,
+        sendEmail: false,
+      })
+      return c.json(
+        {
+          invited: true as const,
+          invitationId: invitation.id,
+          ...(isLocalSite(env) ? { link: invitation.link } : {}),
+        },
+        201,
+      )
+    }
     // Everyone they add joins their own business.
     const created = await createUserWithPassword(c.var.auth, {
       ...input,
+      // Via a link: a long random password nobody knows, and sign-in stays closed (email not
+      // confirmed) until they choose their own from the link.
+      password: input.password ?? `${newToken()}${newToken()}`,
+      emailVerified: !viaLink,
       coachId,
       businessId: me.businessId,
     })
-    // The password we set is temporary: they choose their own on first sign-in.
-    await db.update(users).set({ mustChangePassword: true }).where(eq(users.id, created.id))
-    const user = { ...created, mustChangePassword: true }
+    // A password we set is temporary: they choose their own on first sign-in.
+    if (!viaLink)
+      await db.update(users).set({ mustChangePassword: true }).where(eq(users.id, created.id))
+    const user = { ...created, mustChangePassword: !viaLink }
     if (input.profile) await saveProfile(db, user.id, input.profile)
     if (input.currentWeightKg)
       await logWeight(db, user.id, todayIn(user.timezone), input.currentWeightKg)
@@ -546,18 +602,6 @@ export const adminUserRoutes = new Hono<AppEnv>()
         dueDate: input.checkIn.dueDate,
         repeatWeeks: input.checkIn.repeatWeeks,
       })
-    const email = input.sendWelcome
-      ? await sendEmail(env, {
-          to: user.email,
-          ...welcomeEmail({
-            name: user.name,
-            email: user.email,
-            password: input.password,
-            appUrl: env.APP_URL ?? env.BETTER_AUTH_URL,
-            coachName: me.name,
-          }),
-        })
-      : null
     await audit(db, {
       action: 'user.created',
       actor: me,
@@ -565,6 +609,36 @@ export const adminUserRoutes = new Hono<AppEnv>()
       businessId: me.businessId,
       detail: ROLE_LABELS[user.role],
     })
+    if (viaLink) {
+      const coach = coachId === me.id ? { id: me.id, name: me.name } : await coachNamed(db, coachId)
+      // Nothing is sent yet: the coach sends the link when they're ready (email, WhatsApp or
+      // copy). It comes back to them now; they set the account up, so it's theirs to send.
+      const invitation = await createInvitation(env, db, me, {
+        name: user.name,
+        email: user.email,
+        coach,
+        existing: false,
+        userId: user.id,
+        sendEmail: false,
+      })
+      return c.json(
+        { user, enrollment, email: null, link: invitation.link, invitationId: invitation.id },
+        201,
+      )
+    }
+    const email =
+      input.sendWelcome && input.password
+        ? await sendEmail(env, {
+            to: user.email,
+            ...welcomeEmail({
+              name: user.name,
+              email: user.email,
+              password: input.password,
+              appUrl: env.APP_URL ?? env.BETTER_AUTH_URL,
+              coachName: me.name,
+            }),
+          })
+        : null
     return c.json({ user, enrollment, email }, 201)
   })
   /** Contact, body basics and goals. */
@@ -680,7 +754,12 @@ export const adminUserRoutes = new Hono<AppEnv>()
     await setPassword(c.var.auth, person.id, password)
     if (person.id !== me.id) {
       await db.batch([
-        db.update(users).set({ mustChangePassword: true }).where(eq(users.id, person.id)),
+        // Also opens an account set up by Add client whose link was never used (its email
+        // isn't confirmed yet): the coach set it up and now hands them a password instead.
+        db
+          .update(users)
+          .set({ mustChangePassword: true, emailVerified: true })
+          .where(eq(users.id, person.id)),
         db.delete(sessions).where(eq(sessions.userId, person.id)),
         // Signed out everywhere, so no phone keeps getting their notifications either.
         db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, person.id)),

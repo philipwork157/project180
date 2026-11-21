@@ -12,6 +12,7 @@ import {
   MUSCLE_GROUPS,
   type MuscleGroup,
   matchesExercise,
+  RPE_LABELS,
   type TrackingType,
   WORKOUT_SECTION_LABELS,
   WORKOUT_SECTIONS,
@@ -86,6 +87,11 @@ interface Row {
   targetDistanceKm: number | null
   targetPaceSeconds: number | null
   targetHrZone: number | null
+  /** Percent of FTP, cadence, effort 1–10, climb in metres. */
+  targetPowerPct: number | null
+  targetCadence: number | null
+  targetRpe: number | null
+  targetElevationM: number | null
 }
 
 const SECTION_ORDER: Record<WorkoutSection, number> = { warm_up: 0, main: 1, cool_down: 2 }
@@ -183,6 +189,10 @@ function newRow(
     targetDistanceKm: null,
     targetPaceSeconds: null,
     targetHrZone: null,
+    targetPowerPct: null,
+    targetCadence: null,
+    targetRpe: null,
+    targetElevationM: null,
   }
 }
 
@@ -211,6 +221,10 @@ function fromWorkout(w: WorkoutDetail): Draft {
       targetDistanceKm: e.targetDistanceM != null ? e.targetDistanceM / 1000 : null,
       targetPaceSeconds: e.targetPaceSeconds,
       targetHrZone: e.targetHrZone,
+      targetPowerPct: e.targetPowerPct ?? null,
+      targetCadence: e.targetCadence ?? null,
+      targetRpe: e.targetRpe ?? null,
+      targetElevationM: e.targetElevationM ?? null,
     })),
     groups: Object.fromEntries(
       w.groups.map((g) => [
@@ -280,6 +294,10 @@ function toInput(d: Draft): WorkoutInput {
         targetDistanceM: r.targetDistanceKm != null ? Math.round(r.targetDistanceKm * 1000) : null,
         targetPaceSeconds: r.targetPaceSeconds,
         targetHrZone: r.targetHrZone,
+        targetPowerPct: r.targetPowerPct,
+        targetCadence: r.targetCadence,
+        targetRpe: r.targetRpe,
+        targetElevationM: r.targetElevationM,
         notes: r.notes.trim() || null,
       }
     }),
@@ -981,7 +999,7 @@ function ExerciseRow({
                 <RowField label="Heart-rate zone">
                   <Select
                     compact
-                    className="w-40"
+                    className="w-48"
                     value={row.targetHrZone ?? ''}
                     disabled={disabled}
                     onChange={(e) =>
@@ -997,8 +1015,63 @@ function ExerciseRow({
                     ))}
                   </Select>
                 </RowField>
+                <RowField label="Power (% FTP)">
+                  <NumberBox
+                    value={row.targetPowerPct}
+                    min={30}
+                    max={200}
+                    placeholder="90"
+                    disabled={disabled}
+                    onChange={(targetPowerPct) => onChange({ targetPowerPct })}
+                    label="Target power as a percent of FTP"
+                  />
+                </RowField>
+                <RowField label="Cadence">
+                  <NumberBox
+                    value={row.targetCadence}
+                    min={20}
+                    max={220}
+                    placeholder="90"
+                    disabled={disabled}
+                    onChange={(targetCadence) => onChange({ targetCadence })}
+                    label="Target cadence, rpm or steps a minute"
+                  />
+                </RowField>
+                {row.trackingType === 'distance_time' && (
+                  <RowField label="Climb (m)">
+                    <NumberBox
+                      value={row.targetElevationM}
+                      min={0}
+                      max={10_000}
+                      placeholder="300"
+                      disabled={disabled}
+                      onChange={(targetElevationM) => onChange({ targetElevationM })}
+                      label="Target climb in metres"
+                    />
+                  </RowField>
+                )}
               </>
             )}
+
+          <RowField label="Effort">
+            <Select
+              compact
+              className="w-44"
+              value={row.targetRpe ?? ''}
+              disabled={disabled}
+              onChange={(e) =>
+                onChange({ targetRpe: e.target.value ? Number(e.target.value) : null })
+              }
+              aria-label="How hard it should feel (RPE)"
+            >
+              <option value="">Any</option>
+              {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => (
+                <option key={n} value={n}>
+                  RPE {n} · {RPE_LABELS[n]}
+                </option>
+              ))}
+            </Select>
+          </RowField>
 
           <RowField label="Part">
             <Select
@@ -1272,6 +1345,45 @@ function GroupHeader({
         </Button>
       )}
     </div>
+  )
+}
+
+/** A small whole-number box: saves on blur, empty or out of range clears it. */
+function NumberBox({
+  value,
+  min,
+  max,
+  placeholder,
+  disabled,
+  label,
+  onChange,
+}: {
+  value: number | null
+  min: number
+  max: number
+  placeholder: string
+  disabled?: boolean
+  label: string
+  onChange: (value: number | null) => void
+}) {
+  return (
+    <Input
+      compact
+      className="tabular w-20 text-center font-bold"
+      inputMode="numeric"
+      placeholder={placeholder}
+      disabled={disabled}
+      // A new value from outside (undo, AI builder) shows straight away.
+      key={value ?? 'empty'}
+      defaultValue={value ?? ''}
+      onBlur={(e) => {
+        const n = Number.parseInt(e.target.value, 10)
+        const next = Number.isFinite(n) && n >= min && n <= max ? n : null
+        if (next !== value) onChange(next)
+        else e.target.value = value?.toString() ?? ''
+      }}
+      aria-label={label}
+    />
   )
 }
 

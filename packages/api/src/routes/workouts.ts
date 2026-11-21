@@ -59,6 +59,10 @@ export async function loadWorkoutExercises(
         targetDistanceM: workoutExercises.targetDistanceM,
         targetPaceSeconds: workoutExercises.targetPaceSeconds,
         targetHrZone: workoutExercises.targetHrZone,
+        targetPowerPct: workoutExercises.targetPowerPct,
+        targetCadence: workoutExercises.targetCadence,
+        targetRpe: workoutExercises.targetRpe,
+        targetElevationM: workoutExercises.targetElevationM,
         supersetGroup: workoutExercises.supersetGroup,
         notes: workoutExercises.notes,
       })
@@ -186,6 +190,10 @@ export function exerciseRows(workoutId: number, input: { exercises?: WorkoutExer
     targetDistanceM: e.targetDistanceM ?? null,
     targetPaceSeconds: e.targetPaceSeconds ?? null,
     targetHrZone: e.targetHrZone ?? null,
+    targetPowerPct: e.targetPowerPct ?? null,
+    targetCadence: e.targetCadence ?? null,
+    targetRpe: e.targetRpe ?? null,
+    targetElevationM: e.targetElevationM ?? null,
     supersetGroup: e.supersetGroup ?? null,
     notes: e.notes ?? null,
   }))

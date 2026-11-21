@@ -31,10 +31,13 @@ const INSTRUCTIONS = `You are a strength and conditioning coach building one wor
 Rules:
 - Use only exercise ids from the library list. Never invent an id. If an exercise you would want is not in the list, pick the closest one that is, and name the one you wanted in "missing".
 - Respect the equipment, time, level and focus the coach asks for. If they give a duration, fit the workout to it (warm-up, main work and rest included) and set estimated_minutes.
-- Sections: warm_up (short, light), main, cool_down (stretching or mobility). Only add a warm-up or cool-down if it suits the request.
+- Always deliver a complete, ready-to-use workout, even from a short request: fill in what the coach leaves out with sensible defaults.
+- Sections: warm_up (mobility and light warm-up drills), main, cool_down (stretching after the session). A basic request gets a short warm-up, the main work and a short cool-down.
+- Full workout: when the coach asks for a "full", "fully fledged" or "complete" workout, or names parts such as mobility, pre-mobility, abs, core, cardio, conditioning, finisher, stretching or cool-down, include every part they name, in their order. Without an order use: mobility warm-up (warm_up, 3 to 4 drills), main strength work (main), abs/core (main, after the strength work, often a circuit), cardio or conditioning (main, last, timed), cool-down stretches (cool_down, 3 to 4).
+- List exercises in the exact order they are done. Pick each part from the right kind of exercise: mobility and stretches from mobility/stretch exercises, abs from core exercises, cardio from cardio exercises. If the library has nothing for a part, leave it out and name it in "missing".
 - Each exercise: sets (1–10), rest_seconds (0–300). For exercises tracked by reps give reps_min and reps_max (equal for a fixed number); for exercises tracked by time give seconds instead and leave reps null.
 - Supersets and circuits: give the exercises the same group number (1, 2, …) and describe each group once in "groups" (kind superset, circuit or interval, rounds, and for intervals work_seconds and rest_seconds). Exercises not in a group have group null.
-- 3 to 12 exercises is normal. Keep notes short and practical (a cue or a tempo), or null.
+- Up to 16 exercises (a basic workout usually needs 5 to 8; a full one with every part 12 to 16). estimated_minutes includes every part. Keep notes short and practical (a cue or a tempo), or null.
 - name: short and clear, like "Upper Body Dumbbells A" (max 60 characters). description: one sentence for the coach.
 - Pelvic floor, pregnancy and postnatal work: only include it if the coach asks for it.`
 
@@ -192,6 +195,11 @@ export interface ClaudeRequest<T> {
   system: string
   /** The user turn, as separate text blocks. */
   texts: string[]
+  /**
+   * How many of the first `texts` stay the same between builds (the library). They're cached with
+   * the instructions, so a second build within a few minutes pays about a tenth for them.
+   */
+  cachedTexts?: number
   /** The JSON shape Claude must answer in (structured outputs). */
   schema: object
   /** Checks (and tidies) the answer. */
@@ -239,8 +247,26 @@ export async function askClaude<T>(
       body: JSON.stringify({
         model,
         max_tokens: req.maxTokens,
-        system: req.system,
-        messages: [{ role: 'user', content: req.texts.map((text) => ({ type: 'text', text })) }],
+        system: [
+          {
+            type: 'text',
+            text: req.system,
+            ...(req.cachedTexts ? {} : { cache_control: { type: 'ephemeral' } }),
+          },
+        ],
+        messages: [
+          {
+            role: 'user',
+            content: req.texts.map((text, i) => ({
+              type: 'text',
+              text,
+              // The cache covers everything up to and including this block.
+              ...(req.cachedTexts && i === req.cachedTexts - 1
+                ? { cache_control: { type: 'ephemeral' } }
+                : {}),
+            })),
+          },
+        ],
         output_config: { format: { type: 'json_schema', schema: req.schema } },
       }),
       signal: AbortSignal.timeout(req.timeoutMs),
@@ -305,6 +331,7 @@ export function askClaudeForWorkout(
         `Exercise library (id | name | muscle group | equipment | tracked by):\n${libraryText(library)}`,
         `The coach asks for:\n${prompt}`,
       ],
+      cachedTexts: 1,
       schema: REPLY_SCHEMA,
       check: replySchema,
       maxTokens: 8000,

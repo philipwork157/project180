@@ -1,11 +1,15 @@
-import { IconButton } from '@project180/ui'
+import { cn, IconButton } from '@project180/ui'
 import { X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 /**
  * A bottom sheet that rises with a spring over a scrim. Closes with the round button in its
  * top-right corner, a tap outside, or Esc.
+ *
+ * The handle and close button sit in their own bar that never scrolls; only the content below it
+ * scrolls, so nothing ever slides under the close button. A hairline shows under the bar once
+ * the content has scrolled.
  */
 export function Sheet({
   open,
@@ -18,6 +22,10 @@ export function Sheet({
   label: string
   children: ReactNode
 }) {
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    if (!open) setScrolled(false)
+  }, [open])
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -46,26 +54,33 @@ export function Sheet({
             onClick={onClose}
           />
           <motion.div
-            className="relative max-h-[88dvh] w-full overflow-y-auto rounded-t-xl bg-surface px-5 pt-3 pb-safe shadow-float md:px-8 lg:px-12"
+            className="relative flex max-h-[88dvh] w-full flex-col overflow-hidden rounded-t-xl bg-surface shadow-float"
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 380, damping: 36 }}
           >
-            {/* Takes no room, and stays in the corner while the sheet's content scrolls. */}
-            <div className="sticky top-3 z-10 h-0">
-              <div className="absolute top-0 right-0">
-                <IconButton
-                  label="Close"
-                  icon={<X aria-hidden />}
-                  size="lg"
-                  className="rounded-full [&_svg]:size-5"
-                  onClick={onClose}
-                />
-              </div>
+            <div
+              className={cn(
+                'relative flex shrink-0 items-start justify-end border-b px-5 pt-2 pb-1 transition-colors md:px-8 lg:px-12',
+                scrolled ? 'border-border' : 'border-transparent',
+              )}
+            >
+              <div className="-translate-x-1/2 absolute top-2 left-1/2 h-1.5 w-10 rounded-full bg-border" />
+              <IconButton
+                label="Close"
+                icon={<X aria-hidden />}
+                size="lg"
+                className="rounded-full [&_svg]:size-5"
+                onClick={onClose}
+              />
             </div>
-            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-border" />
-            {children}
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-safe md:px-8 lg:px-12"
+              onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
+            >
+              {children}
+            </div>
           </motion.div>
         </div>
       )}

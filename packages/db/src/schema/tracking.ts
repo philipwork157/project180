@@ -116,6 +116,11 @@ export const sessionExercises = sqliteTable(
     targetDistanceM: real('target_distance_m'),
     targetPaceSeconds: integer('target_pace_seconds'),
     targetHrZone: integer('target_hr_zone'),
+    // Percent of the client's FTP, cadence (rpm or steps a minute), effort 1–10, climb in metres.
+    targetPowerPct: integer('target_power_pct'),
+    targetCadence: integer('target_cadence'),
+    targetRpe: integer('target_rpe'),
+    targetElevationM: integer('target_elevation_m'),
     supersetGroup: integer('superset_group'),
     groupKind: text('group_kind', { enum: GROUP_KINDS }),
     groupRounds: integer('group_rounds'),
@@ -152,6 +157,10 @@ export const setLogs = sqliteTable(
     durationSeconds: integer('duration_seconds'),
     distanceM: real('distance_m'),
     rpe: real('rpe'),
+    // From a watch or bike computer (cardio), all optional.
+    avgHr: integer('avg_hr'),
+    avgWatts: integer('avg_watts'),
+    elevationM: integer('elevation_m'),
     completedAt: timestamp('completed_at'),
     notes: text('notes'),
   },
